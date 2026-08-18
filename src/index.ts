@@ -55,6 +55,9 @@ const BASE_PATH = process.env.BASE_PATH || '/rtc-relay';
 /** 관리 대시보드 경로 (BASE_PATH 하위). manager 가 이 값으로 링크를 만든다. */
 const DASHBOARD_PATH = process.env.DASHBOARD_PATH || '/dashboard';
 
+/** 서비스 디렉토리 (src 의 상위). .env 의 상대 경로 기준점이다. */
+const SERVICE_DIR = path.resolve(__dirname, '..');
+
 /** 빌드된 대시보드 위치 — web/dist */
 const DASHBOARD_DIR = path.resolve(__dirname, '..', 'web', 'dist');
 
@@ -208,16 +211,20 @@ export class CallFusion {
          * @brief SSL/TLS certificate configuration with environment variable support
          * @details Loads certificate paths from environment variables with fallbacks
          */
-        const privateKey = process.env.SSL_PRIVATE_KEY_PATH || path.join(__dirname, 'certs', 'server.key');
-        const certificate = process.env.SSL_CERTIFICATE_PATH || path.join(__dirname, 'certs', 'renewed_server.crt');
-        const ca = process.env.SSL_CA_PATH || path.join(__dirname, 'certs', 'intermediate-ca.crt');
+        // 인증서는 이 서비스가 소유하지 않는다. 프로젝트의 nginx/cert/ 를 그대로 쓴다
+        // (nginx/README.md 의 규칙, 경로는 .env 가 정한다).
+        // 상대 경로는 서비스 디렉토리 기준으로 푼다 — cwd 에 기대지 않는다.
+        const resolveCert = (p: string) => (path.isAbsolute(p) ? p : path.resolve(SERVICE_DIR, p));
+        const privateKey = resolveCert(process.env.SSL_PRIVATE_KEY_PATH || '../../nginx/cert/server/server.key');
+        const certificate = resolveCert(process.env.SSL_CERTIFICATE_PATH || '../../nginx/cert/server/server.crt');
+        const ca = resolveCert(process.env.SSL_CA_PATH || '../../nginx/cert/ca/ca.crt');
 
         // Check if certificate files exist
         if (!fs.existsSync(privateKey) || !fs.existsSync(certificate) || !fs.existsSync(ca)) {
             logger.error('SSL/TLS certificate files not found.');
             logger.error(`Certificate paths: key=${privateKey}, cert=${certificate}, ca=${ca}`);
             logger.error(`Please ensure certificate files exist or update environment variables.`);
-            logger.error('Check Certificate.md for detailed information');
+            logger.error('인증서는 nginx/cert/ 가 소유합니다 — nginx/README.md 참고');
             process.exit(1); // Exit if certs are missing
         }
 

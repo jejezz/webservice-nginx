@@ -20,9 +20,17 @@ The CallFusion server provides both REST APIs and WebSocket connectivity for And
 - Room management and status monitoring
 
 ### Base URLs
-- **HTTPS REST API**: `https://your-server:28099`
-- **WebSocket RTC**: `wss://your-server:28099/ws`
-- **WebSocket IoT**: `wss://your-server:28099/iot`
+
+단말은 서비스 포트(28099)에 직접 붙습니다. 호스트 이름은 서버 인증서 SAN 에 있는
+것을 써야 합니다 — 기본값은 `jejezzhome.iptime.org` 입니다 (아래 인증서 절 참고).
+
+- **HTTPS REST API**: `https://jejezzhome.iptime.org:28099`
+- **WebSocket RTC**: `wss://jejezzhome.iptime.org:28099/ws`
+- **WebSocket IoT**: `wss://jejezzhome.iptime.org:28099/iot`
+
+관리 대시보드는 사람이 보는 화면이라 경로가 다릅니다 — Nginx 를 거쳐
+`https://jejezzhome.iptime.org/rtc-relay/dashboard` 이며 manager 로그인이 필요합니다.
+단말이 쓸 일은 없습니다.
 
 ## Group Communication Application Features
 
@@ -97,13 +105,47 @@ data class GeoLocation(
 
 ### Required Certificate Files
 
-For Android devices to connect securely to the CallFusion server, you need to handle the **Root CA certificate**:
+> **2026-08-18 변경 — 이전 인증서는 더 이상 쓰지 않습니다.**
+>
+> 서비스가 자체 PKI(`PTYPE Root CA`, 키가 `src/certs/` 에 있었음)를 쓰던 것을
+> **프로젝트 공용 인증서로 통합**했습니다. 서비스 디렉토리의 인증서는 삭제됐고,
+> 이제 `nginx/cert/` 가 소유합니다 (`nginx/README.md`).
+>
+> 이전 `root-ca.crt` 를 번들한 앱은 **접속되지 않습니다.** 아래 새 CA 로 교체한 뒤
+> 다시 배포하세요. 서버 인증서의 이름도 바뀌었으니 접속 호스트도 함께 확인해야 합니다.
 
-**Certificate File:** `src/certs/root/root-ca.crt`
-- **Issuer:** PTYPE Root CA  
-- **Subject:** `C=KR, ST=Seoul, L=Seoul, O=PTYPE Root CA, OU=software, CN=ptype.co.kr`
-- **Validity:** 10 years (Jun 28 2025 - Jun 26 2035)
-- **SHA-256 Fingerprint:** `B7:D3:61:D8:9D:27:9F:BC:9F:1E:9B:45:E7:82:D5:D8:98:8D:1B:8D:11:D2:29:F9:4E:B1:08:8E:6B:EC:80:A5`
+Android 단말이 서버에 안전하게 붙으려면 **Root CA 인증서** 하나를 앱에 넣습니다.
+
+**Certificate File:** `nginx/cert/ca/ca.crt`
+- **Issuer / Subject:** `C=KR, ST=Seoul, O=DevCA, CN=DevCA Root` (self-signed root)
+- **Validity:** 10 years (Aug 13 2026 - Aug 10 2036)
+- **SHA-256 Fingerprint:** `CD:D9:48:83:98:69:7A:57:B2:B4:6B:39:82:C3:5E:A3:7B:70:B9:DF:A6:D9:EA:A4:C1:21:B7:D4:7B:92:F9:31`
+
+이전과 달리 중간 CA 가 없습니다. 서버 인증서를 이 루트가 직접 서명합니다.
+
+**Server Certificate**
+- **Subject:** `C=KR, ST=Seoul, O=DevServer, CN=jejezzhome.iptime.org`
+- **Validity:** Aug 13 2026 - Aug 13 2027 (1년 — 갱신 주기에 주의)
+- **SAN:** `jejezzhome.iptime.org`, `*.jejezzhome.iptime.org`, `localhost`,
+  `127.0.0.1`, `::1`, `192.168.0.252`, `192.168.122.1`, `125.242.8.15`
+- **Public Key Pin (SHA-256/Base64):** `5nSijbuz83FqgmWIuU71rLJ66Y/qEVFg09U07sEpBOU=`
+
+#### 접속 호스트 이름을 맞출 것
+
+**SAN 에 `jejezzhome.iptime.org` 이 없습니다.** 예전 인증서에만 있던 이름입니다.
+그 이름으로 붙으면 인증서는 유효해도 호스트명 검증에서 실패합니다.
+`jejezzhome.iptime.org` (또는 SAN 에 있는 IP)로 접속하세요.
+
+그 도메인을 계속 써야 한다면 서버 인증서를 다시 만들어야 합니다.
+
+```bash
+# 주의: 이 스크립트는 CA 도 새로 만듭니다. 실행하면 기존 CA 로 발급된
+# 클라이언트 인증서(android/electron/ios)와 브라우저 신뢰가 모두 무효가 되므로,
+# 모든 클라이언트를 함께 갱신할 수 있을 때만 실행하세요.
+cd nginx && ./generate_certs.sh --auto --dns jejezzhome.iptime.org jejezzhome.iptime.org
+```
+
+인증서를 새로 만들었다면 이 문서의 지문·핀 값도 함께 갱신해야 합니다.
 
 ### Android Certificate Integration Methods
 
@@ -112,7 +154,7 @@ For Android devices to connect securely to the CallFusion server, you need to ha
 Include the Root CA certificate in your app's assets and create a custom trust manager:
 
 ```kotlin
-// 1. Place root-ca.crt in app/src/main/assets/certificates/
+// 1. Place ca.crt in app/src/main/assets/certificates/
 // 2. Create custom SSL context
 
 import java.security.cert.CertificateFactory
@@ -129,7 +171,7 @@ class CallFusionSSLConfig {
             try {
                 // Load the Root CA certificate from assets
                 val certificateFactory = CertificateFactory.getInstance("X.509")
-                val caInput = context.assets.open("certificates/root-ca.crt")
+                val caInput = context.assets.open("certificates/ca.crt")
                 val ca = certificateFactory.generateCertificate(caInput) as X509Certificate
                 caInput.close()
                 
@@ -173,8 +215,8 @@ class CallFusionWebSocketClient {
             .sslSocketFactory(sslContext.socketFactory, trustManager)
             .hostnameVerifier { hostname, session ->
                 // Verify hostname matches certificate
-                hostname == "callfusion.ptype.co.kr" || 
-                hostname == "dev.ptype.co.kr"
+                hostname == "jejezzhome.iptime.org" || 
+                hostname == "*.jejezzhome.iptime.org"
             }
             .build()
     }
@@ -192,20 +234,20 @@ class CallFusionCertificatePinning {
     
     companion object {
         // SHA-256 fingerprint of the Root CA certificate
-        private const val ROOT_CA_FINGERPRINT = "sha256/t9Nh2J0nn7yfHptF54LV2JiNG40R0in5TrEIjmvsgKU="
+        private const val ROOT_CA_FINGERPRINT = "sha256/KsyDADVe29SnmMw5e4Jo0d/VFoyegKpVSfCJDzP5lDA="
         
         // You can also pin the server certificate for additional security
         // Get server cert fingerprint: openssl x509 -in renewed_server.crt -pubkey -noout | 
         // openssl pkey -pubin -outform der | openssl dgst -sha256 -binary | base64
-        private const val SERVER_CERT_FINGERPRINT = "sha256/YOUR_SERVER_CERT_FINGERPRINT_HERE"
+        private const val SERVER_CERT_FINGERPRINT = "sha256/5nSijbuz83FqgmWIuU71rLJ66Y/qEVFg09U07sEpBOU="
         
         fun createPinnedClient(): OkHttpClient {
             val certificatePinner = CertificatePinner.Builder()
-                .add("callfusion.ptype.co.kr", ROOT_CA_FINGERPRINT)
-                .add("dev.ptype.co.kr", ROOT_CA_FINGERPRINT)
-                .add("10.10.0.225", ROOT_CA_FINGERPRINT) // If using IP address
+                .add("jejezzhome.iptime.org", ROOT_CA_FINGERPRINT)
+                .add("*.jejezzhome.iptime.org", ROOT_CA_FINGERPRINT)
+                .add("192.168.0.252", ROOT_CA_FINGERPRINT) // If using IP address
                 // Optionally pin server certificate as well
-                .add("callfusion.ptype.co.kr", SERVER_CERT_FINGERPRINT)
+                .add("jejezzhome.iptime.org", SERVER_CERT_FINGERPRINT)
                 .build()
             
             return OkHttpClient.Builder()
@@ -218,7 +260,7 @@ class CallFusionCertificatePinning {
 // Usage
 val secureClient = CallFusionCertificatePinning.createPinnedClient()
 val request = Request.Builder()
-    .url("wss://callfusion.ptype.co.kr:28099/ws")
+    .url("wss://jejezzhome.iptime.org:28099/ws")
     .build()
 val webSocket = secureClient.newWebSocket(request, webSocketListener)
 ```
@@ -232,17 +274,17 @@ For development or enterprise deployment, users can install the Root CA certific
 fun guideUserToCertificateInstallation() {
     val intent = Intent().apply {
         action = "com.android.credentials.INSTALL"
-        data = Uri.parse("content://path/to/root-ca.crt")
+        data = Uri.parse("content://path/to/ca.crt")
     }
     
     // Or provide instructions:
     val instructions = """
     To install the CallFusion certificate:
     
-    1. Download root-ca.crt to your device
+    1. Download ca.crt to your device
     2. Go to Settings > Security > Install certificates
     3. Select "CA certificate"
-    4. Choose the root-ca.crt file
+    4. Choose the ca.crt file
     5. Enter a name like "CallFusion Root CA"
     6. Restart the CallFusion app
     """.trimIndent()
@@ -279,8 +321,8 @@ class SecureCallFusionClient(private val context: Context) {
             .hostnameVerifier { hostname, session ->
                 // Validate hostname against certificate SAN
                 val validHostnames = listOf(
-                    "callfusion.ptype.co.kr",
-                    "dev.ptype.co.kr"
+                    "jejezzhome.iptime.org",
+                    "*.jejezzhome.iptime.org"
                 )
                 validHostnames.contains(hostname)
             }
@@ -416,12 +458,15 @@ For additional security configuration, create `res/xml/network_security_config.x
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
     <domain-config cleartextTrafficPermitted="false">
-        <domain includeSubdomains="true">callfusion.ptype.co.kr</domain>
-        <domain includeSubdomains="true">dev.ptype.co.kr</domain>
-        
-        <!-- Certificate pinning configuration -->
+        <!-- includeSubdomains 를 쓰므로 와일드카드 항목은 따로 적지 않는다 -->
+        <domain includeSubdomains="true">jejezzhome.iptime.org</domain>
+
+        <!-- Certificate pinning configuration.
+             첫 줄은 CA 공개키 핀, 둘째 줄은 서버 공개키 핀이다.
+             서버 인증서는 1년마다 갱신되므로 CA 핀을 함께 두어야 갱신 때 끊기지 않는다. -->
         <pin-set>
-            <pin digest="SHA-256">t9Nh2J0nn7yfHptF54LV2JiNG40R0in5TrEIjmvsgKU=</pin>
+            <pin digest="SHA-256">KsyDADVe29SnmMw5e4Jo0d/VFoyegKpVSfCJDzP5lDA=</pin>
+            <pin digest="SHA-256">5nSijbuz83FqgmWIuU71rLJ66Y/qEVFg09U07sEpBOU=</pin>
         </pin-set>
     </domain-config>
 </network-security-config>
@@ -448,13 +493,13 @@ class CallFusionConnectionTest {
                 client.initialize()
                 
                 // Test HTTPS connection first
-                val isValid = CertificateValidator.validateServerCertificate("callfusion.ptype.co.kr")
+                val isValid = CertificateValidator.validateServerCertificate("jejezzhome.iptime.org")
                 
                 if (isValid) {
                     Log.d("ConnectionTest", "Certificate validation passed")
                     
                     // Proceed with WebSocket connection
-                    client.connectSecure("wss://callfusion.ptype.co.kr:28099/ws", webSocketListener)
+                    client.connectSecure("wss://jejezzhome.iptime.org:28099/ws", webSocketListener)
                 } else {
                     Log.e("ConnectionTest", "Certificate validation failed")
                 }
@@ -570,7 +615,7 @@ class GroupWebSocketClient(private val context: Context) {
             .build()
             
         val request = Request.Builder()
-            .url("wss://callfusion.ptype.co.kr:28099/ws")
+            .url("wss://jejezzhome.iptime.org:28099/ws")
             .build()
             
         webSocket = client.newWebSocket(request, object : okhttp3.WebSocketListener() {
@@ -960,7 +1005,7 @@ class GroupPhotoManager(
                     .build()
                 
                 val request = Request.Builder()
-                    .url("https://callfusion.ptype.co.kr:28099/group/$groupId/upload")
+                    .url("https://jejezzhome.iptime.org:28099/group/$groupId/upload")
                     .post(requestBody)
                     .build()
                 
