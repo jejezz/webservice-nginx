@@ -6,7 +6,6 @@
 //////////////////////////////////////////
 
 import express, { Request, Response, NextFunction } from 'express';
-import { MysqlError } from 'mysql';
 import { CallFusion } from '../index';
 import { DbConn } from '../libs/dbConnection';
 import logger from '../libs/logger'; // Import your configured logger
@@ -29,40 +28,32 @@ Route2Unregister.get('/about', function (req: Request, res: Response) {
 
 
 async function responseToPostMobile(req: Request, res: Response) {
-    const d = new Date();
-    let datestring = d.getFullYear() + "-" + (d.getMonth() + 1)
-        + "-" + d.getDate() + " " + d.getHours() + ":" + d.getMinutes() + ":" + d.getSeconds();
+    const uuid = req.body?.uuid;
+    if (!uuid) {
+        res.status(400).json({ error: 'uuid 는 필수입니다.' });
+        return;
+    }
 
-    const findQry = `SELECT COUNT(*) AS cnt FROM ${CallFusion.getTableForMobile()} WHERE uuid="${req.body.uuid}"`;
-    let db = await DbConn.createSqlConnection();
-    DbConn.sqlSelect(db, findQry, function (error:any, rows:any, fields:any) {
-        if (error) {
-            logger.error(error);
-            res.status(401).send(error);
+    try {
+        // 조회 없이 바로 지운다. 없으면 affectedRows 가 0 이다.
+        const result = await DbConn.execute(
+            `DELETE FROM ${CallFusion.getTableForMobile()} WHERE uuid = ?`, [uuid]);
+
+        if (result.affectedRows === 0) {
+            logger.info(`unregister: 대상 없음 (${uuid})`);
+            res.status(404).json({ error: 'not registered' });
             return;
         }
-        if (!rows) {
-            logger.error("table not found");
-            res.status(200).send("table not found");
-            return;
-        }
-        logger.info("mobile devices - results = ", rows[0].cnt);
-        if (rows[0].cnt > 0) {
-            const deleteQry = `DELETE FROM ${CallFusion.getTableForMobile()} WHERE uuid="${req.body.uuid}"`;
-            DbConn.sqlQuery(db, deleteQry, function (error:any, results:any, fields:any) {
-                if (error) {
-                    logger.error(error);
-                    res.status(401).send(error);
-                    return;
-                }
-                res.status(200).send(`{ 
-                    title: "CallFusion2RTC",
-                    result: "success",
-                    message: "Your token has been updated successfully." 
-                }`);
-            });
-        }
-    });
+        logger.info(`unregister: ${uuid}`);
+        res.status(200).json({
+            title: 'rtc-relay-server',
+            result: 'success',
+            message: 'Your registration has been removed successfully.',
+        });
+    } catch (err: any) {
+        logger.error('unregister 실패:', err.message);
+        res.status(500).json({ error: 'unregister failed' });
+    }
 }
 
 

@@ -21,7 +21,6 @@
  */
 
 import express, { Request, Response, NextFunction } from 'express';
-import mysql, { MysqlError } from 'mysql';
 import { CallFusion } from '../index';
 import { Utils } from '../libs/utils';
 import { DbConn } from '../libs/dbConnection';
@@ -133,14 +132,20 @@ async function handlePostInvite(req: Request, res: Response) {
     }
 
     let roomId = generateRandomRoom(8);
-    let db = await DbConn.createSqlConnection();
-    let sql = `SELECT token FROM ${CallFusion.getTableForMobile()} WHERE address="${req.body.target}"`
-    DbConn.sqlSelect(db, sql, (error:MysqlError, rows:any) => {
-        if (error) {
-            logger.error(error);
-            res.status(401).send(error);
-            return;
-        }
+
+    let rows: any[];
+    try {
+        // active 인 단말만 부른다. 해제된 단말에 푸시를 보내면 FCM 이 무효 토큰으로 응답한다.
+        rows = await DbConn.select(
+            `SELECT token FROM ${CallFusion.getTableForMobile()} WHERE address = ? AND active = 1`,
+            [req.body.target]);
+    } catch (err: any) {
+        logger.error('초대 대상 조회 실패:', err.message);
+        res.status(500).json({ error: 'query failed' });
+        return;
+    }
+
+    {
 
         /**
          * @brief Korean address localization
@@ -212,17 +217,23 @@ async function handlePostInvite(req: Request, res: Response) {
          * @details Delivers the invitation notification to all registered devices
          * and logs the success/failure results. Uses Firebase Admin SDK for delivery.
          */
-        Firebase.getMessaging().sendEachForMulticast(multicastPayload)
-            .then((response: any) => {
-                logger.info(`${response.successCount} messages were sent successfully`);
-            })
-            .catch(function (error: string) {
-                logger.error("error sending message:", error);
-                // do not stop!!
-            });
+        // 키가 없으면 푸시만 건너뛴다. 방 생성과 응답은 그대로 진행된다.
+        const messaging = Firebase.getMessaging();
+        if (!messaging) {
+            logger.warn('FCM 미설정 — 착신 푸시를 보내지 않습니다.');
+        } else {
+            messaging.sendEachForMulticast(multicastPayload)
+                .then((response: any) => {
+                    logger.info(`${response.successCount} messages were sent successfully`);
+                })
+                .catch(function (error: string) {
+                    logger.error("error sending message:", error);
+                    // do not stop!!
+                });
+        }
 
         res.sendStatus(200);
-    });
+    }
 }
 
 /** @brief Export the room management router for use in main application */

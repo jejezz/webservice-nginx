@@ -35,3 +35,10 @@ dist/**/*
 
 # ignore yarn.lock
 yarn.lock
+
+# 대시보드 빌드 산출물
+web/dist
+web/node_modules
+
+# 서비스 계정 키 등 비밀값 (database/secrets 와 같은 규약)
+secrets/

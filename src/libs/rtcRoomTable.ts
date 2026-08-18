@@ -209,23 +209,6 @@ export class RtcRoomTable {
         }
         return client;
     }
-
-    /**
-     * This is for IoT operation
-     * find IP address by the address of the device.
-     * @param {String} address
-     * @returns IP address or null if not found
-     */
-    public getIPByAddress(address: string): string | null {
-        for (let r of this.roomTable.values()) {
-            let ip = r.getIpByAddress(address);
-            if (ip) {
-                return ip;
-            }
-        }
-        logger.warn("cannot find address ", address);
-        return null;
-    }
 }
 
 export default RtcRoomTable;

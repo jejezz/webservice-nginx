@@ -23,17 +23,6 @@ import WebSocket from 'ws';
 const maxQueuedMsgCount = 1024;
 
 /**
- * @enum CommunicationMode
- * @brief Defines client communication preferences and capabilities
- */
-export enum CommunicationMode {
-    FULL = 'full',              // Can send/receive messages and location
-    LOCATION_ONLY = 'location', // Only location data, no messages
-    DND = 'dnd',               // Do Not Disturb - no communication
-    NOTIFICATION_ONLY = 'notification' // Offline but can receive Firebase notifications
-}
-
-/**
  * @class RtcClient
  * @brief Represents a WebRTC client connection with message handling capabilities
  * 
@@ -93,21 +82,6 @@ export class RtcClient {
     /** @brief Flag indicating if client connection is alive */
     public alive: boolean = true;
 
-    /** @brief Current communication mode preference */
-    public communicationMode: CommunicationMode = CommunicationMode.FULL;
-    
-    /** @brief Firebase token for push notifications when offline */
-    public firebaseToken: string = "";
-    
-    /** @brief Timestamp of last activity */
-    public lastActivity: Date = new Date();
-    
-    /** @brief Flag indicating if client wants to receive location updates */
-    public locationEnabled: boolean = true;
-    
-    /** @brief Flag indicating if client wants to receive messages */
-    public messagesEnabled: boolean = true;
-
     /**
      * @brief Constructs a new RtcClient instance
      * @param rid Room ID that this client will belong to
@@ -131,10 +105,6 @@ export class RtcClient {
         this.device = device;
         this.ipaddress = ipaddress;
         this.timeout = timeout;
-        
-        // Initialize communication mode defaults
-        this.communicationMode = CommunicationMode.FULL;
-        this.lastActivity = new Date();
     }
 
     /**
@@ -301,134 +271,6 @@ export class RtcClient {
     }
 
     /**
-     * @brief Sets the client's communication mode
-     * @param mode New communication mode
-     * 
-     * @details
-     * Updates the client's communication preferences and automatically
-     * adjusts message and location capability flags based on the mode.
-     */
-    public setCommunicationMode(mode: CommunicationMode): void {
-        this.communicationMode = mode;
-        this.updateLastActivity();
-        
-        // Update individual flags based on mode
-        switch (mode) {
-            case CommunicationMode.FULL:
-                this.messagesEnabled = true;
-                this.locationEnabled = true;
-                break;
-            case CommunicationMode.LOCATION_ONLY:
-                this.messagesEnabled = false;
-                this.locationEnabled = true;
-                break;
-            case CommunicationMode.DND:
-                this.messagesEnabled = false;
-                this.locationEnabled = false;
-                break;
-            case CommunicationMode.NOTIFICATION_ONLY:
-                this.messagesEnabled = true; // Can receive via Firebase
-                this.locationEnabled = false;
-                break;
-        }
-        
-        logger.info(`Client ${this.cid} communication mode set to ${mode}`);
-    }
-
-    /**
-     * @brief Gets the current communication mode
-     * @return CommunicationMode Current mode setting
-     */
-    public getCommunicationMode(): CommunicationMode {
-        return this.communicationMode;
-    }
-
-    /**
-     * @brief Sets the Firebase token for push notifications
-     * @param token Firebase FCM token
-     */
-    public setFirebaseToken(token: string): void {
-        this.firebaseToken = token;
-        logger.info(`Firebase token set for client ${this.cid}`);
-    }
-
-    /**
-     * @brief Gets the Firebase token
-     * @return string Firebase token or empty string if not set
-     */
-    public getFirebaseToken(): string {
-        return this.firebaseToken;
-    }
-
-    /**
-     * @brief Updates last activity timestamp
-     */
-    public updateLastActivity(): void {
-        this.lastActivity = new Date();
-    }
-
-    /**
-     * @brief Checks if client can receive messages via WebSocket
-     * @return boolean True if client can receive messages
-     */
-    public canReceiveMessages(): boolean {
-        return this.alive && 
-               this.messagesEnabled &&
-               this.communicationMode !== CommunicationMode.DND;
-    }
-
-    /**
-     * @brief Checks if client can receive location updates
-     * @return boolean True if client can receive location data
-     */
-    public canReceiveLocation(): boolean {
-        return this.alive && 
-               this.locationEnabled &&
-               (this.communicationMode === CommunicationMode.FULL || 
-                this.communicationMode === CommunicationMode.LOCATION_ONLY);
-    }
-
-    /**
-     * @brief Checks if client can receive Firebase notifications
-     * @return boolean True if client can receive push notifications
-     */
-    public canReceiveNotifications(): boolean {
-        return this.firebaseToken !== "" && 
-               (!this.alive || this.communicationMode === CommunicationMode.DND);
-    }
-
-    /**
-     * @brief Checks if client is available for any communication
-     * @return boolean True if client is available
-     */
-    public isAvailable(): boolean {
-        return this.alive && this.communicationMode !== CommunicationMode.DND;
-    }
-
-    /**
-     * @brief Gets comprehensive status information
-     * @return Object containing all status information
-     */
-    public getStatusInfo(): any {
-        return {
-            alive: this.alive,
-            communicationMode: this.communicationMode,
-            lastActivity: this.lastActivity,
-            capabilities: {
-                canReceiveMessages: this.canReceiveMessages(),
-                canReceiveLocation: this.canReceiveLocation(),
-                canReceiveNotifications: this.canReceiveNotifications(),
-                isAvailable: this.isAvailable()
-            },
-            settings: {
-                messagesEnabled: this.messagesEnabled,
-                locationEnabled: this.locationEnabled,
-                hasFirebaseToken: this.firebaseToken !== ""
-            }
-        };
-    }
-
-    /**
      * @brief Binds a WebSocket connection to this client
      * @param websocket The WebSocket instance to bind to this client
      * 
@@ -449,12 +291,6 @@ export class RtcClient {
         this.removeTimeout();
         this.alive = true;
         this.websocket = websocket;
-        
-        // Update activity and restore normal communication if coming from notification-only mode
-        this.updateLastActivity();
-        if (this.communicationMode === CommunicationMode.NOTIFICATION_ONLY) {
-            this.setCommunicationMode(CommunicationMode.FULL);
-        }
     }
 
     /**
@@ -471,11 +307,6 @@ export class RtcClient {
         this.alive = false;
         if (this.websocket) {
             this.websocket.close();
-        }
-        
-        // Set to notification-only mode if Firebase token is available
-        if (this.firebaseToken && this.communicationMode !== CommunicationMode.DND) {
-            this.setCommunicationMode(CommunicationMode.NOTIFICATION_ONLY);
         }
     }
 
@@ -584,79 +415,6 @@ export class RtcClient {
     }
 
     /**
-     * @brief Sends a message to another client with communication mode validation
-     * @param peer The target RtcClient to receive the message
-     * @param message The message object to send
-     * @param messageType Type of message ('message', 'location', etc.)
-     * 
-     * @details
-     * Validates if the target peer can receive the specified message type
-     * based on their communication mode before sending. Supports queuing
-     * for offline clients and Firebase notifications when appropriate.
-     */
-    public sendToValidated(peer: RtcClient, message: any, messageType: string = 'message'): boolean {
-        if (this.cid === peer.cid) {
-            logger.error("Cannot send message to self");
-            return false;
-        }
-
-        // Check if peer can receive this type of message
-        if (messageType === 'message' && !peer.canReceiveMessages()) {
-            logger.debug(`Client ${peer.cid} cannot receive messages (mode: ${peer.communicationMode})`);
-            return false;
-        }
-
-        if (messageType === 'location' && !peer.canReceiveLocation()) {
-            logger.debug(`Client ${peer.cid} cannot receive location (mode: ${peer.communicationMode})`);
-            return false;
-        }
-
-        // Send if peer is online and can receive
-        if (peer.websocket && peer.alive) {
-            peer.websocket.send(JSON.stringify(message));
-            return true;
-        }
-
-        // Queue for later if peer is offline but can receive when online
-        if (messageType === 'message' && peer.messagesEnabled) {
-            this.enqueue(message);
-            logger.debug(`Message queued for offline client ${peer.cid}`);
-            return true;
-        }
-
-        return false;
-    }
-
-    /**
-     * @brief Sends a message directly to this client with validation
-     * @param message The message object to send
-     * @param messageType Type of message ('message', 'location', etc.)
-     * 
-     * @details
-     * Validates communication mode before sending message directly to this client.
-     */
-    public sendValidated(message: any, messageType: string = 'message'): boolean {
-        if (!this.websocket) {
-            return false;
-        }
-
-        // Check if client can receive this type of message
-        if (messageType === 'message' && !this.canReceiveMessages()) {
-            logger.debug(`Client ${this.cid} cannot receive messages (mode: ${this.communicationMode})`);
-            return false;
-        }
-
-        if (messageType === 'location' && !this.canReceiveLocation()) {
-            logger.debug(`Client ${this.cid} cannot receive location (mode: ${this.communicationMode})`);
-            return false;
-        }
-
-        // Send the message
-        this.websocket.send(JSON.stringify(message));
-        return true;
-    }
-
-    /**
      * @brief Checks if this client is the call initiator
      * @return boolean True if this client initiated the call, false otherwise
      * 
@@ -666,18 +424,6 @@ export class RtcClient {
      */
     public isInitiator(): boolean {
         return this.initiator;
-    }
-
-    /**
-     * @brief Checks if this client is the controller (alias for isInitiator)
-     * @return boolean True if this client is the controller, false otherwise
-     * 
-     * @details
-     * Provides an alternative name for the initiator check. Controller
-     * and initiator refer to the same concept in this implementation.
-     */
-    public isController(): boolean {
-        return this.isInitiator();
     }
 
     /**

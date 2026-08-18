@@ -19,7 +19,6 @@
  */
 
 import express, { Request, Response, NextFunction } from 'express';
-import { MysqlError } from 'mysql';
 import { CallFusion } from '../index';
 import { DbConn } from '../libs/dbConnection';
 import logger from '../libs/logger'; // Import your configured logger
@@ -100,58 +99,39 @@ Route2Register.get('/findip', function (req: Request, res: Response) {
  * @return JSON response with success/error status
  */
 async function handlePostMobile(req: Request, res: Response) {
-    const d = new Date();
-    let datestring = d.getFullYear() + "-" + (d.getMonth() + 1)
-        + "-" + d.getDate() + " " + d.getHours() + ":" + d.getMinutes() + ":" + d.getSeconds();
+    const { uuid, email, complex, address, token } = req.body ?? {};
+    if (!uuid || !email || !complex || !address || !token) {
+        res.status(400).json({ error: 'uuid, email, complex, address, token 은 필수입니다.' });
+        return;
+    }
 
-    const findQry = `SELECT COUNT(*) AS cnt FROM ${CallFusion.getTableForMobile()} WHERE uuid="${req.body.uuid}"`;
-    let db = await DbConn.createSqlConnection();
-    DbConn.sqlSelect(db, findQry, function (error:any, rows:any, fields:any) {
-        if (error) {
-            console.log(error);
-            res.status(401).send(error);
-            return;
-        }
-        if (!rows) {
-            console.log("table not found");
-            res.status(401).send("table not found");
-            return;
-        }
-        console.log("mobile devices - results = ", rows[0].cnt);
-        //console.log("firebase token = ", req.body.token);
-        if (rows[0].cnt == 0) {
-            const insertQry = `INSERT INTO ${CallFusion.getTableForMobile()}(uuid, email, complex, address, token, phone, image, created) 
-                values("${req.body.uuid}", "${req.body.email}", "${req.body.complex}" , "${req.body.address}", "${req.body.token}", "${req.body.phone || ''}", "${req.body.image || ''}", "${datestring}")`;
-            DbConn.sqlQuery(db, insertQry, function (error:any, results:any, fields:any) {
-                if (error) {
-                    console.log(error);
-                    res.status(401).send(error);
-                    return;
-                }
-                res.status(200).send(`{ 
-                    title: "CallFusion2RTC",
-                    result: "success",
-                    message: "Your token has been saved successfully." 
-                }`);
-            });
-        }
-        else {
-            const updateQry = `UPDATE ${CallFusion.getTableForMobile()} SET email="${req.body.email}", address="${req.body.address}", complex="${req.body.complex}",
-                token="${req.body.token}", phone="${req.body.phone || ''}", image="${req.body.image || ''}", created="${datestring}" WHERE uuid="${req.body.uuid}"`;
-            DbConn.sqlQuery(db, updateQry, function (error:any, results:any, fields:any) {
-                if (error) {
-                    console.log(error);
-                    res.status(401).send(error);
-                    return;
-                }
-                res.status(200).send(`{ 
-                    title: "CallFusion2RTC",
-                    result: "success",
-                    message: "Your token has been updated successfully." 
-                }`);
-            });
-        }
-    });
+    // uuid 에 UNIQUE 가 걸려 있어 조회 없이 한 번으로 끝난다.
+    // (이관 전에는 SELECT COUNT → INSERT 또는 UPDATE 3단계였다)
+    const sql = `INSERT INTO ${CallFusion.getTableForMobile()}
+                    (uuid, email, complex, address, token, phone, image)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)
+                 ON DUPLICATE KEY UPDATE
+                    email = VALUES(email), complex = VALUES(complex), address = VALUES(address),
+                    token = VALUES(token), phone = VALUES(phone), image = VALUES(image)`;
+
+    try {
+        const result = await DbConn.execute(sql, [
+            uuid, email, complex, address, token,
+            req.body.phone ?? null, req.body.image ?? null,
+        ]);
+        // affectedRows: 1 = 새로 넣음, 2 = 갱신함
+        const created = result.affectedRows === 1;
+        logger.info(`mobile ${created ? 'registered' : 'updated'}: ${uuid}`);
+        res.status(200).json({
+            title: 'rtc-relay-server',
+            result: 'success',
+            message: created ? 'Your token has been saved successfully.'
+                             : 'Your token has been updated successfully.',
+        });
+    } catch (err: any) {
+        logger.error('mobile 등록 실패:', err.message);
+        res.status(500).json({ error: 'registration failed' });
+    }
 }
 
 /**
@@ -176,52 +156,34 @@ async function handlePostMobile(req: Request, res: Response) {
  * @return JSON response with success/error status
  */
 async function handlePostComplexAgents(req: Request, res: Response) {
-    
-    const d = new Date();
-    let datestring = d.getFullYear() + "-" + (d.getMonth() + 1)
-        + "-" + d.getDate() + " " + d.getHours() + ":" + d.getMinutes() + ":" + d.getSeconds();
+    const { complex, type, building, unit, ipaddress } = req.body ?? {};
+    if (!complex || !type || !building || !unit || !ipaddress) {
+        res.status(400).json({ error: 'complex, type, building, unit, ipaddress 는 필수입니다.' });
+        return;
+    }
 
-    const findQry = `SELECT COUNT(*) AS cnt FROM ${CallFusion.getTableForHomenet()} WHERE complex="${req.body.complex}" AND building="${req.body.building}" AND unit="${req.body.unit}"`;
-    let db = await DbConn.createSqlConnection();
-    DbConn.sqlSelect(db, findQry, function (error:MysqlError, rows:any, fields:any) {
-        if (error) throw error;
-        if (!rows) return;
-        console.log("select results = ", rows[0].cnt);
-        if (rows[0].cnt == 0) {
-            const insertQry = `INSERT INTO ${CallFusion.getTableForHomenet()}(complex, type, building, unit, ipaddress, created) 
-                values("${req.body.complex}", "${req.body.type}", "${req.body.building}", "${req.body.unit}", "${req.body.ipaddress}", "${datestring}")`;
-            DbConn.sqlQuery(db, insertQry, function (error:any, results:any, fields:any) {
-                if (error) {
-                    console.log(error);
-                    res.status(401).send(error);
-                    return;
-                }
-                res.status(200).send(`{ 
-                    title: "CallFusion2RTC",
-                    result: "success",
-                    message: "Your registration has been saved successfully." 
-                }`);
-            });
-        }
-        else {
-            const updateQry = `UPDATE ${CallFusion.getTableForHomenet()} SET type="${req.body.type}", ipaddress="${req.body.ipaddress}",
-                modified="${datestring}" WHERE complex="${req.body.complex}" AND building="${req.body.building}" AND unit="${req.body.unit}"`;
-            DbConn.sqlQuery(db, updateQry, function (error:any, results:any, fields:any) {
-                if (error) {
-                    console.log(error);
-                    res.status(401).send(error);
-                    return;
-                }
-                res.status(200).send(`{ 
-                    title: "CallFusion2RTC",
-                    result: "success",
-                    message: "Your registration has been updated successfully." 
-                }`);
-            });
-        }
-    });
+    // (complex, building, unit) 에 UNIQUE 가 걸려 있다.
+    const sql = `INSERT INTO ${CallFusion.getTableForHomenet()}
+                    (complex, type, building, unit, ipaddress)
+                 VALUES (?, ?, ?, ?, ?)
+                 ON DUPLICATE KEY UPDATE
+                    type = VALUES(type), ipaddress = VALUES(ipaddress)`;
+
+    try {
+        const result = await DbConn.execute(sql, [complex, type, building, unit, ipaddress]);
+        const created = result.affectedRows === 1;
+        logger.info(`homenet ${created ? 'registered' : 'updated'}: ${complex}/${building}/${unit}`);
+        res.status(200).json({
+            title: 'rtc-relay-server',
+            result: 'success',
+            message: created ? 'Your registration has been saved successfully.'
+                             : 'Your registration has been updated successfully.',
+        });
+    } catch (err: any) {
+        logger.error('homenet 등록 실패:', err.message);
+        res.status(500).json({ error: 'registration failed' });
+    }
 }
-
 
 /**
  * @brief Finds IP address of a device by its address identifier

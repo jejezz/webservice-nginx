@@ -1,367 +1,197 @@
+/**
+ * @file mobile.ts
+ * @brief 등록된 모바일 단말의 CRUD. 내부망에서만 접근한다 (index.ts 의 미들웨어).
+ *
+ * 이관 전에는 sqlite3 를 직접 열고 요청마다 파일을 여닫았다. 지금은 프로젝트 규약대로
+ * MariaDB(rtc_relay) 풀을 쓴다 — database/README.md 참고.
+ * 쿼리는 원래도 ? 플레이스홀더를 쓰고 있어 그 방식을 그대로 유지한다.
+ */
 import { Router, Request, Response } from 'express';
-import sqlite3 from 'sqlite3';
+import { DbConn } from '../libs/dbConnection';
 import logger from '../libs/logger.js';
 import { CallFusion } from '../index.js';
 
 const router = Router();
-const db = sqlite3.verbose();
 
-// Helper function to get database connection
-function getDbConnection() {
-    return new db.Database('./cf2rtc-sqlite-db.db', (err: any) => {
-        if (err) {
-            logger.error('Failed to connect to the database:', err.message);
-        }
-    });
+/** 목록·상세에서 내보낼 컬럼. token 은 FCM 자격이라 싣지 않는다. */
+const PUBLIC_COLUMNS = 'id, uuid, email, complex, address, phone, active, created, modified';
+
+/** MariaDB 의 TINYINT(1) 을 boolean 으로 바꿔 내보낸다. */
+function toRecord(row: any) {
+    return { ...row, active: row.active === 1 };
 }
 
-// Interface for Mobile record
-interface MobileRecord {
-    id?: number;
-    uuid: string;
-    email: string;
-    complex: string;
-    address: string;
-    token: string;
-    active?: boolean;
-    created?: string;
+/** 라우트 공통 오류 처리. DB 미설정과 질의 실패를 구분한다. */
+function fail(res: Response, err: any, what: string) {
+    logger.error(`${what}:`, err.message);
+    if (!DbConn.isConfigured()) {
+        return res.status(503).json({ error: 'database is not configured' });
+    }
+    res.status(500).json({ error: what });
 }
 
-// CREATE - Add new mobile record
-router.post('/', (req: Request, res: Response) => {
-    const { uuid, email, complex, address, token, active = true } = req.body;
+// CREATE
+router.post('/', async (req: Request, res: Response) => {
+    const { uuid, email, complex, address, token, phone, image, active = true } = req.body ?? {};
 
     if (!uuid || !email || !complex || !address || !token) {
         return res.status(400).json({
-            error: 'Missing required fields: uuid, email, complex, address, token'
+            error: 'Missing required fields: uuid, email, complex, address, token',
         });
     }
 
-    const sqliteDb = getDbConnection();
-    const created = new Date().toISOString();
-    const activeInt = active ? 1 : 0;
-
-    const query = `INSERT INTO ${CallFusion.getTableForMobile()} 
-                   (uuid, email, complex, address, token, active, created) 
-                   VALUES (?, ?, ?, ?, ?, ?, ?)`;
-
-    sqliteDb.run(query, [uuid, email, complex, address, token, activeInt, created], function(err: any) {
-        if (err) {
-            logger.error('Error creating mobile record:', err.message);
-            sqliteDb.close();
-            return res.status(500).json({ error: 'Failed to create mobile record' });
-        }
-
-        logger.info(`Mobile record created with ID: ${this.lastID}`);
-        sqliteDb.close();
-        
+    try {
+        const result = await DbConn.execute(
+            `INSERT INTO ${CallFusion.getTableForMobile()}
+                (uuid, email, complex, address, token, phone, image, active)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            [uuid, email, complex, address, token, phone ?? null, image ?? null, active ? 1 : 0]
+        );
+        logger.info(`Mobile record created with ID: ${result.insertId}`);
         res.status(201).json({
-            id: this.lastID,
-            uuid,
-            email,
-            complex,
-            address,
-            token,
-            active,
-            created,
-            message: 'Mobile record created successfully'
+            id: result.insertId, uuid, email, complex, address, phone: phone ?? null,
+            active: Boolean(active),
+            message: 'Mobile record created successfully',
         });
-    });
+    } catch (err: any) {
+        if (err.code === 'ER_DUP_ENTRY') {
+            return res.status(409).json({ error: 'uuid already registered' });
+        }
+        fail(res, err, 'Failed to create mobile record');
+    }
 });
 
-// READ - Get all mobile records
-router.get('/', (req: Request, res: Response) => {
-    const sqliteDb = getDbConnection();
-    const { active, limit = 100, offset = 0 } = req.query;
+// READ - 목록
+router.get('/', async (req: Request, res: Response) => {
+    const { active } = req.query;
+    // LIMIT/OFFSET 은 프리페어드 문에서 문자열로 바인딩되면 문법 오류가 나므로 정수로 고정한다.
+    const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '100'), 10) || 100, 1), 1000);
+    const offset = Math.max(parseInt(String(req.query.offset ?? '0'), 10) || 0, 0);
 
-    let query = `SELECT * FROM ${CallFusion.getTableForMobile()}`;
-    let params: any[] = [];
+    const where = active !== undefined ? 'WHERE active = ?' : '';
+    const params = active !== undefined ? [active === 'true' ? 1 : 0] : [];
 
-    // Filter by active status if provided
-    if (active !== undefined) {
-        const activeInt = active === 'true' ? 1 : 0;
-        query += ' WHERE active = ?';
-        params.push(activeInt);
+    try {
+        const rows = await DbConn.select(
+            `SELECT ${PUBLIC_COLUMNS} FROM ${CallFusion.getTableForMobile()}
+             ${where} ORDER BY created DESC LIMIT ${limit} OFFSET ${offset}`,
+            params
+        );
+        res.json({ records: rows.map(toRecord), total: rows.length, limit, offset });
+    } catch (err: any) {
+        fail(res, err, 'Failed to fetch mobile records');
     }
+});
 
-    query += ' ORDER BY created DESC LIMIT ? OFFSET ?';
-    params.push(parseInt(limit as string), parseInt(offset as string));
-
-    sqliteDb.all(query, params, (err: any, rows: any[]) => {
-        if (err) {
-            logger.error('Error fetching mobile records:', err.message);
-            sqliteDb.close();
-            return res.status(500).json({ error: 'Failed to fetch mobile records' });
-        }
-
-        // Convert active field from integer to boolean
-        const records = rows.map(row => ({
-            ...row,
-            active: row.active === 1
-        }));
-
-        sqliteDb.close();
+// READ - 통계. 목록보다 먼저 선언해야 '/:id' 에 먹히지 않는다.
+router.get('/stats/summary', async (req: Request, res: Response) => {
+    try {
+        const [row] = await DbConn.select(
+            `SELECT COUNT(*) AS total,
+                    SUM(active = 1) AS active,
+                    SUM(active = 0) AS inactive,
+                    SUM(created > NOW() - INTERVAL 7 DAY) AS recent
+               FROM ${CallFusion.getTableForMobile()}`
+        );
         res.json({
-            records,
-            total: records.length,
-            limit: parseInt(limit as string),
-            offset: parseInt(offset as string)
+            total: Number(row.total) || 0,
+            active: Number(row.active) || 0,
+            inactive: Number(row.inactive) || 0,
+            recentlyAdded: Number(row.recent) || 0,
+            timestamp: new Date().toISOString(),
         });
-    });
+    } catch (err: any) {
+        fail(res, err, 'Failed to get stats');
+    }
 });
 
-// READ - Get mobile record by ID
-router.get('/:id', (req: Request, res: Response) => {
-    const { id } = req.params;
-    const sqliteDb = getDbConnection();
-
-    const query = `SELECT * FROM ${CallFusion.getTableForMobile()} WHERE id = ?`;
-
-    sqliteDb.get(query, [id], (err: any, row: any) => {
-        if (err) {
-            logger.error('Error fetching mobile record:', err.message);
-            sqliteDb.close();
-            return res.status(500).json({ error: 'Failed to fetch mobile record' });
-        }
-
-        if (!row) {
-            sqliteDb.close();
-            return res.status(404).json({ error: 'Mobile record not found' });
-        }
-
-        // Convert active field from integer to boolean
-        const record = {
-            ...row,
-            active: row.active === 1
-        };
-
-        sqliteDb.close();
-        res.json(record);
-    });
+// READ - uuid 로 조회. '/:id' 보다 먼저 선언한다.
+router.get('/uuid/:uuid', async (req: Request, res: Response) => {
+    try {
+        const rows = await DbConn.select(
+            `SELECT ${PUBLIC_COLUMNS} FROM ${CallFusion.getTableForMobile()} WHERE uuid = ?`,
+            [req.params.uuid]
+        );
+        if (rows.length === 0) return res.status(404).json({ error: 'Mobile record not found' });
+        res.json(toRecord(rows[0]));
+    } catch (err: any) {
+        fail(res, err, 'Failed to fetch mobile record');
+    }
 });
 
-// READ - Get mobile record by UUID
-router.get('/uuid/:uuid', (req: Request, res: Response) => {
-    const { uuid } = req.params;
-    const sqliteDb = getDbConnection();
-
-    const query = `SELECT * FROM ${CallFusion.getTableForMobile()} WHERE uuid = ?`;
-
-    sqliteDb.get(query, [uuid], (err: any, row: any) => {
-        if (err) {
-            logger.error('Error fetching mobile record by UUID:', err.message);
-            sqliteDb.close();
-            return res.status(500).json({ error: 'Failed to fetch mobile record' });
-        }
-
-        if (!row) {
-            sqliteDb.close();
-            return res.status(404).json({ error: 'Mobile record not found' });
-        }
-
-        // Convert active field from integer to boolean
-        const record = {
-            ...row,
-            active: row.active === 1
-        };
-
-        sqliteDb.close();
-        res.json(record);
-    });
+// READ - id 로 조회
+router.get('/:id', async (req: Request, res: Response) => {
+    try {
+        const rows = await DbConn.select(
+            `SELECT ${PUBLIC_COLUMNS} FROM ${CallFusion.getTableForMobile()} WHERE id = ?`,
+            [req.params.id]
+        );
+        if (rows.length === 0) return res.status(404).json({ error: 'Mobile record not found' });
+        res.json(toRecord(rows[0]));
+    } catch (err: any) {
+        fail(res, err, 'Failed to fetch mobile record');
+    }
 });
 
-// UPDATE - Update mobile record
-router.put('/:id', (req: Request, res: Response) => {
-    const { id } = req.params;
-    const { uuid, email, complex, address, token, active } = req.body;
-    const sqliteDb = getDbConnection();
+// UPDATE - 부분 갱신
+router.put('/:id', async (req: Request, res: Response) => {
+    // 갱신 가능한 컬럼을 화이트리스트로 고정한다. req.body 의 키를 그대로 쓰면
+    // 컬럼 이름이 요청에서 오게 되므로 SQL 에 사용자 입력이 섞인다.
+    const ALLOWED = ['uuid', 'email', 'complex', 'address', 'token', 'phone', 'image', 'active'];
 
-    // Build dynamic update query
-    const updateFields: string[] = [];
+    const sets: string[] = [];
     const params: any[] = [];
-
-    if (uuid !== undefined) {
-        updateFields.push('uuid = ?');
-        params.push(uuid);
-    }
-    if (email !== undefined) {
-        updateFields.push('email = ?');
-        params.push(email);
-    }
-    if (complex !== undefined) {
-        updateFields.push('complex = ?');
-        params.push(complex);
-    }
-    if (address !== undefined) {
-        updateFields.push('address = ?');
-        params.push(address);
-    }
-    if (token !== undefined) {
-        updateFields.push('token = ?');
-        params.push(token);
-    }
-    if (active !== undefined) {
-        updateFields.push('active = ?');
-        params.push(active ? 1 : 0);
+    for (const col of ALLOWED) {
+        const v = req.body?.[col];
+        if (v === undefined) continue;
+        sets.push(`${col} = ?`);
+        params.push(col === 'active' ? (v ? 1 : 0) : v);
     }
 
-    if (updateFields.length === 0) {
-        sqliteDb.close();
-        return res.status(400).json({ error: 'No fields to update' });
-    }
+    if (sets.length === 0) return res.status(400).json({ error: 'No fields to update' });
+    params.push(req.params.id);
 
-    params.push(id); // Add ID for WHERE clause
-
-    const query = `UPDATE ${CallFusion.getTableForMobile()} 
-                   SET ${updateFields.join(', ')} 
-                   WHERE id = ?`;
-
-    sqliteDb.run(query, params, function(err: any) {
-        if (err) {
-            logger.error('Error updating mobile record:', err.message);
-            sqliteDb.close();
-            return res.status(500).json({ error: 'Failed to update mobile record' });
-        }
-
-        if (this.changes === 0) {
-            sqliteDb.close();
-            return res.status(404).json({ error: 'Mobile record not found' });
-        }
-
-        logger.info(`Mobile record updated: ID ${id}`);
-        sqliteDb.close();
-        res.json({ message: 'Mobile record updated successfully', id: parseInt(id) });
-    });
-});
-
-// UPDATE - Toggle active status
-router.patch('/:id/toggle-active', (req: Request, res: Response) => {
-    const { id } = req.params;
-    const sqliteDb = getDbConnection();
-
-    // First get current active status
-    const selectQuery = `SELECT active FROM ${CallFusion.getTableForMobile()} WHERE id = ?`;
-    
-    sqliteDb.get(selectQuery, [id], (err: any, row: any) => {
-        if (err) {
-            logger.error('Error fetching mobile record for toggle:', err.message);
-            sqliteDb.close();
-            return res.status(500).json({ error: 'Failed to fetch mobile record' });
-        }
-
-        if (!row) {
-            sqliteDb.close();
-            return res.status(404).json({ error: 'Mobile record not found' });
-        }
-
-        const newActiveStatus = row.active === 1 ? 0 : 1;
-        const updateQuery = `UPDATE ${CallFusion.getTableForMobile()} SET active = ? WHERE id = ?`;
-
-        sqliteDb.run(updateQuery, [newActiveStatus, id], function(err: any) {
-            if (err) {
-                logger.error('Error toggling mobile record active status:', err.message);
-                sqliteDb.close();
-                return res.status(500).json({ error: 'Failed to toggle active status' });
-            }
-
-            logger.info(`Mobile record active status toggled: ID ${id}, new status: ${newActiveStatus === 1}`);
-            sqliteDb.close();
-            res.json({ 
-                message: 'Active status toggled successfully',
-                id: parseInt(id),
-                active: newActiveStatus === 1
-            });
-        });
-    });
-});
-
-// DELETE - Delete mobile record (soft delete - set active to false)
-router.delete('/:id', (req: Request, res: Response) => {
-    const { id } = req.params;
-    const { hard = false } = req.query;
-    const sqliteDb = getDbConnection();
-
-    if (hard === 'true') {
-        // Hard delete - permanently remove from database
-        const query = `DELETE FROM ${CallFusion.getTableForMobile()} WHERE id = ?`;
-        
-        sqliteDb.run(query, [id], function(err: any) {
-            if (err) {
-                logger.error('Error deleting mobile record:', err.message);
-                sqliteDb.close();
-                return res.status(500).json({ error: 'Failed to delete mobile record' });
-            }
-
-            if (this.changes === 0) {
-                sqliteDb.close();
-                return res.status(404).json({ error: 'Mobile record not found' });
-            }
-
-            logger.info(`Mobile record permanently deleted: ID ${id}`);
-            sqliteDb.close();
-            res.json({ message: 'Mobile record permanently deleted', id: parseInt(id) });
-        });
-    } else {
-        // Soft delete - set active to false
-        const query = `UPDATE ${CallFusion.getTableForMobile()} SET active = 0 WHERE id = ?`;
-        
-        sqliteDb.run(query, [id], function(err: any) {
-            if (err) {
-                logger.error('Error soft deleting mobile record:', err.message);
-                sqliteDb.close();
-                return res.status(500).json({ error: 'Failed to delete mobile record' });
-            }
-
-            if (this.changes === 0) {
-                sqliteDb.close();
-                return res.status(404).json({ error: 'Mobile record not found' });
-            }
-
-            logger.info(`Mobile record soft deleted: ID ${id}`);
-            sqliteDb.close();
-            res.json({ message: 'Mobile record deactivated', id: parseInt(id) });
-        });
+    try {
+        const result = await DbConn.execute(
+            `UPDATE ${CallFusion.getTableForMobile()} SET ${sets.join(', ')} WHERE id = ?`, params);
+        if (result.affectedRows === 0) return res.status(404).json({ error: 'Mobile record not found' });
+        logger.info(`Mobile record updated: ID ${req.params.id}`);
+        res.json({ message: 'Mobile record updated successfully', id: Number(req.params.id) });
+    } catch (err: any) {
+        if (err.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: 'uuid already registered' });
+        fail(res, err, 'Failed to update mobile record');
     }
 });
 
-// GET - Statistics
-router.get('/stats/summary', (req: Request, res: Response) => {
-    const sqliteDb = getDbConnection();
-    
-    const queries = {
-        total: `SELECT COUNT(*) as count FROM ${CallFusion.getTableForMobile()}`,
-        active: `SELECT COUNT(*) as count FROM ${CallFusion.getTableForMobile()} WHERE active = 1`,
-        inactive: `SELECT COUNT(*) as count FROM ${CallFusion.getTableForMobile()} WHERE active = 0`,
-        recent: `SELECT COUNT(*) as count FROM ${CallFusion.getTableForMobile()} 
-                 WHERE created > datetime('now', '-7 days')`
-    };
+// UPDATE - active 뒤집기. 조회 없이 한 번으로 끝낸다.
+router.patch('/:id/toggle-active', async (req: Request, res: Response) => {
+    try {
+        const result = await DbConn.execute(
+            `UPDATE ${CallFusion.getTableForMobile()} SET active = 1 - active WHERE id = ?`,
+            [req.params.id]);
+        if (result.affectedRows === 0) return res.status(404).json({ error: 'Mobile record not found' });
 
-    const stats: any = {};
-    let completedQueries = 0;
-    const totalQueries = Object.keys(queries).length;
+        const rows = await DbConn.select(
+            `SELECT active FROM ${CallFusion.getTableForMobile()} WHERE id = ?`, [req.params.id]);
+        const active = rows[0]?.active === 1;
+        logger.info(`Mobile record ${req.params.id} active → ${active}`);
+        res.json({ message: 'Active status toggled successfully', id: Number(req.params.id), active });
+    } catch (err: any) {
+        fail(res, err, 'Failed to toggle active status');
+    }
+});
 
-    Object.entries(queries).forEach(([key, query]) => {
-        sqliteDb.get(query, [], (err: any, row: any) => {
-            if (err) {
-                logger.error(`Error getting ${key} stats:`, err.message);
-                stats[key] = 0;
-            } else {
-                stats[key] = row.count;
-            }
-
-            completedQueries++;
-            if (completedQueries === totalQueries) {
-                sqliteDb.close();
-                res.json({
-                    total: stats.total || 0,
-                    active: stats.active || 0,
-                    inactive: stats.inactive || 0,
-                    recentlyAdded: stats.recent || 0,
-                    timestamp: new Date().toISOString()
-                });
-            }
-        });
-    });
+// DELETE
+router.delete('/:id', async (req: Request, res: Response) => {
+    try {
+        const result = await DbConn.execute(
+            `DELETE FROM ${CallFusion.getTableForMobile()} WHERE id = ?`, [req.params.id]);
+        if (result.affectedRows === 0) return res.status(404).json({ error: 'Mobile record not found' });
+        logger.info(`Mobile record deleted: ID ${req.params.id}`);
+        res.json({ message: 'Mobile record deleted successfully', id: Number(req.params.id) });
+    } catch (err: any) {
+        fail(res, err, 'Failed to delete mobile record');
+    }
 });
 
 export default router;

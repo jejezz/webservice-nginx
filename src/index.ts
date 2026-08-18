@@ -17,7 +17,6 @@
  * with comprehensive room-based client management and message routing.
  */
 
-console.log(`type script src/index.ts to start the callfusion2rtc server.`);
 import dotenv from 'dotenv';
 dotenv.config(); // Load environment variables from .env file
 
@@ -35,15 +34,29 @@ import Route2Unregister from './routes/unregister.js';
 import Route2User from './routes/user.js';
 import Route2Status from './routes/status.js';
 import Route2Mobile from './routes/mobile.js';
-import sqlite3 from 'sqlite3';
 import logger from './libs/logger.js'; // Import your configured logger
+import { DbConn, DATABASE } from './libs/dbConnection.js';
+import { requirePage } from './auth/session.js';
+import { createDashboardApi } from './http/dashboardApi.js';
 
 // ES module compatible __filename and __dirname
 import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-process.title = "callfusion2rtc";
+process.title = "rtc-relay-server";
+
+/**
+ * Nginx 가 이 서비스를 프록시할 때 쓰는 경로 접두사.
+ * 단말은 포트(28099)로 직접 붙으므로 루트 경로도 함께 받는다.
+ */
+const BASE_PATH = process.env.BASE_PATH || '/rtc-relay';
+
+/** 관리 대시보드 경로 (BASE_PATH 하위). manager 가 이 값으로 링크를 만든다. */
+const DASHBOARD_PATH = process.env.DASHBOARD_PATH || '/dashboard';
+
+/** 빌드된 대시보드 위치 — web/dist */
+const DASHBOARD_DIR = path.resolve(__dirname, '..', 'web', 'dist');
 
 /**
  * @brief Validates essential environment variables and provides warnings for missing optional ones
@@ -53,7 +66,8 @@ function validateEnvironmentVariables(): void {
     const requiredVars = ['HTTPS_PORT'];
     const optionalVars = [
         'SSL_PRIVATE_KEY_PATH', 'SSL_CERTIFICATE_PATH', 'SSL_CA_PATH',
-        'SQLITE_DB_PATH', 'MOBILE_TABLE_NAME', 'FIREBASE_SERVICE_ACCOUNT_PATH'
+        'MOBILE_TABLE_NAME', 'HOMENET_TABLE_NAME', 'FIREBASE_SERVICE_ACCOUNT_PATH',
+        'DB_HOST', 'DB_PORT', 'DB_NAME', 'DB_USER', 'DB_PASSWORD_FILE'
     ];
 
     // Check required variables
@@ -73,7 +87,7 @@ function validateEnvironmentVariables(): void {
     logger.info('Environment Configuration:');
     logger.info(`- HTTPS Port: ${process.env.HTTPS_PORT || '28090 (default)'}`);
     logger.info(`- Node Environment: ${process.env.NODE_ENV || 'development (default)'}`);
-    logger.info(`- Database Path: ${process.env.SQLITE_DB_PATH || './cf2rtc-sqlite-db.db (default)'}`);
+    logger.info(`- Database: ${DbConn.isConfigured() ? `${DATABASE.USER}@${DATABASE.HOST}:${DATABASE.PORT}/${DATABASE.NAME}` : '미설정 — 단말 등록 비활성'}`);
     logger.info(`- Mobile Table: ${process.env.MOBILE_TABLE_NAME || 'rtc_mobiles (default)'}`);
 }
 
@@ -136,17 +150,14 @@ export class CallFusion {
     /** @brief HTTPS server instance with SSL/TLS encryption */
     public httpsServer: https.Server;
     
-    /** @brief Express application for certificate download service */
-    public downloadExpressApp: express.Application;
-    
-    /** @brief HTTPS server for certificate download (optional service) */
-    public downloadServer: https.Server | undefined;
-    
     /** @brief Room table managing all WebRTC rooms and client connections */
     public roomTable: RtcRoomTable; // timeout in milliseconds
     
     /** @brief Secret room number for private server access - not exposed publicly */
-    private secretRoomNumber: number;
+    private secretRoomNumber: number = 0;
+
+    /** @brief 대시보드 빌드가 있는지. 기동 로그에 표시한다. */
+    private hasDashboardBuild: boolean = false;
     
     // //public wsRtcServer: WebSocketServer;
     // //public wsRtcServer: WebSocketServer;
@@ -192,7 +203,6 @@ export class CallFusion {
      */
     private constructor() {
         this.expressApp = express();
-        this.downloadExpressApp = express();
         
           /**
          * @brief SSL/TLS certificate configuration with environment variable support
@@ -228,9 +238,13 @@ export class CallFusion {
          * @details 관리 대시보드(nginx/manager)가 서비스 상태를 판정하는 데 사용한다.
          * 프로젝트의 모든 서비스가 동일한 형태로 응답해야 한다.
          */
-        this.expressApp.get('/health', (req: Request, res: Response) => {
+        this.expressApp.get('/health', async (req: Request, res: Response) => {
+            // DB 는 단말 등록에만 필요하고 시그널링 본연의 기능과는 무관하다.
+            // 끊겨도 status 는 ok 로 두되, details 로 상태를 드러내 대시보드에서 확인할 수 있게 한다.
+            const database = await DbConn.ping();
+
             res.status(200).json({
-                service: 'callfusion2rtc',
+                service: 'rtc-relay-server',
                 status: 'ok',
                 uptimeSec: Math.floor(process.uptime()),
                 pid: process.pid,
@@ -238,63 +252,41 @@ export class CallFusion {
                 details: {
                     memoryMb: Math.round(process.memoryUsage().rss / 1024 / 1024),
                     nodeEnv: process.env.NODE_ENV ?? 'unknown',
+                    rooms: this.roomTable.roomTable.size,
+                    database,
                 },
             });
         });
 
-        // basic response
-        this.expressApp.get('/tests', (req: Request, res: Response) => {
-            const HTML_FILE_PATH = path.join(__dirname, 'public', 'echo_client.html');
-            // Serve the index.html file
-            fs.readFile(HTML_FILE_PATH, (err, data) => {
-                if (err) {
-                    res.writeHead(500, { 'Content-Type': 'text/plain' });
-                    res.end('Internal Server Error: Could not load echo_client.html');
-                    logger.error(`Error reading ${HTML_FILE_PATH}:`, err);
-                    return;
-                }
-                res.writeHead(200, { 'Content-Type': 'text/html' });
-                res.end(data);
-            });
-        });
-        
-        // Room status page
-        this.expressApp.get('/', (req: Request, res: Response) => {
-            const HTML_FILE_PATH = path.join(__dirname, 'public', 'room_status.html');
-            fs.readFile(HTML_FILE_PATH, (err, data) => {
-                if (err) {
-                    res.writeHead(500, { 'Content-Type': 'text/plain' });
-                    res.end('Internal Server Error: Could not load room_status.html');
-                    logger.error(`Error reading ${HTML_FILE_PATH}:`, err);
-                    return;
-                }
-                res.writeHead(200, { 'Content-Type': 'text/html' });
-                res.end(data);
-            });
-        });
-        
-        // Mobile management page
-        this.expressApp.get('/mobiles', (req: Request, res: Response) => {
-            const HTML_FILE_PATH = path.join(__dirname, 'public', 'mobile_management.html');
-            fs.readFile(HTML_FILE_PATH, (err, data) => {
-                if (err) {
-                    res.writeHead(500, { 'Content-Type': 'text/plain' });
-                    res.end('Internal Server Error: Could not load mobile_management.html');
-                    logger.error(`Error reading ${HTML_FILE_PATH}:`, err);
-                    return;
-                }
-                res.writeHead(200, { 'Content-Type': 'text/html' });
-                res.end(data);
-            });
-        });
-        
         this.expressApp.use(express.json());
         this.expressApp.use(express.urlencoded({ extended: true }));
-        this.expressApp.use('/register', Route2Register);
-        this.expressApp.use('/unregister', Route2Unregister);
-        this.expressApp.use('/user', Route2User);
-        this.expressApp.use('/room', Route2Room);
-        this.expressApp.use('/status', Route2Status); // Room table status API
+
+        // 라우트를 Router 하나에 모아 두 곳에 붙인다 — 루트('/')와 Nginx 접두사(BASE_PATH).
+        // Nginx 의 proxy_pass 에 URI 가 없어 원본 경로(/rtc-relay/...)가 그대로 오기 때문이다.
+        // 단말은 포트로 직접(루트 경로), 사람은 Nginx 를 거쳐(접두사) 같은 앱에 닿는다.
+        const router = express.Router();
+
+        // 서비스 소개. 이전에는 여기서 무인증 관리 페이지(room_status.html)를 내보냈다.
+        router.get('/', (req: Request, res: Response) => {
+            res.json({
+                service: 'rtc-relay-server',
+                status: 'ok',
+                rooms: this.roomTable.roomTable.size,
+                dashboard: `${BASE_PATH}${DASHBOARD_PATH}`,
+            });
+        });
+
+        // WS 에코 시험 도구. 개발용이라 로그인 상태에서만 연다.
+        // (이전에는 /tests 로 무인증 공개돼 있었다)
+        router.get('/tests', requirePage, (req: Request, res: Response) => {
+            res.sendFile(path.join(__dirname, 'public', 'echo_client.html'));
+        });
+
+        router.use('/register', Route2Register);
+        router.use('/unregister', Route2Unregister);
+        router.use('/user', Route2User);
+        router.use('/room', Route2Room);
+        router.use('/status', Route2Status); // Room table status API (Android 클라이언트가 쓴다)
         
         /**
          * @brief Mobile CRUD operations middleware - Internal access only
@@ -304,12 +296,21 @@ export class CallFusion {
          * - Private networks (10.x.x.x, 192.168.x.x, 172.16-31.x.x)
          */
         // Mobile CRUD operations - Internal access only
+        // 이 경로만 router 가 아니라 앱에 직접 붙인다.
+        //
+        // router 는 BASE_PATH('/rtc-relay')에도 마운트되는데, Nginx 를 거쳐 들어온 요청은
+        // 소켓 주소가 항상 127.0.0.1(Nginx)이라 아래 내부망 검사를 무조건 통과해 버린다.
+        // 즉 프록시 경로로 노출하는 순간 IP 제한이 무의미해진다. 그래서 포트로 직접
+        // 들어온 요청(루트 경로)에만 존재하게 한다.
+        // 사람이 쓰는 관리 화면은 세션을 요구하는 /dashboard 쪽에 있다.
         this.expressApp.use('/mobile-crud-operation', (req: Request, res: Response, next) => {
-            const clientIP = req.ip || req.connection.remoteAddress || req.socket.remoteAddress;
-            const forwardedIPs = req.headers['x-forwarded-for'] as string;
-            
-            // Get the actual client IP (handle proxy forwarding)
-            const actualIP = forwardedIPs ? forwardedIPs.split(',')[0].trim() : clientIP;
+            // 소켓의 실제 원격 주소만 본다.
+            //
+            // 이전에는 X-Forwarded-For 가 있으면 그 값을 그대로 신뢰했다. 이 서비스는
+            // 0.0.0.0:28099 로 직접 노출돼 있어, 외부에서 'X-Forwarded-For: 127.0.0.1' 을
+            // 붙이면 내부망 제한을 그냥 통과했다. 헤더는 보낸 쪽이 정하는 값이라
+            // 신뢰할 수 있는 프록시를 거친 경우에만 의미가 있는데, 여기는 그렇지 않다.
+            const actualIP = req.socket.remoteAddress;
             
             // Allow localhost, 127.0.0.1, and internal network ranges
             const allowedIPs = [
@@ -339,7 +340,7 @@ export class CallFusion {
                        /^172\.(1[6-9]|2\d|3[01])\./.test(cleanIP); // 172.16.0.0/12
             };
             
-            if ((actualIP && allowedIPs.includes(actualIP)) || (actualIP && isInternalNetwork(actualIP)) || actualIP === undefined) {
+            if (actualIP && (allowedIPs.includes(actualIP) || isInternalNetwork(actualIP))) {
                 logger.info(`Mobile CRUD access granted for IP: ${actualIP || 'localhost'}`);
                 next();
             } else {
@@ -350,54 +351,48 @@ export class CallFusion {
                 });
             }
         }, Route2Mobile);
+
+        // --- 관리 대시보드 ---
+        //
+        // manager 로그인 세션 하나로 들어온다. 이 서비스는 계정을 따로 두지 않고 검증만 한다.
+        // 이전에는 같은 정보를 무인증 HTML 페이지(room_status.html, mobile_management.html)로
+        // 0.0.0.0:28099 에 그대로 내보내고 있었다.
+        const indexHtml = path.join(DASHBOARD_DIR, 'index.html');
+        const hasBuild = fs.existsSync(indexHtml);
+
+        router.use(`${DASHBOARD_PATH}/api`, createDashboardApi(this));
+
+        if (hasBuild) {
+            // 정적 에셋은 인증 없이 준다. (데이터가 없는 JS/CSS)
+            router.use(`${DASHBOARD_PATH}/assets`, express.static(path.join(DASHBOARD_DIR, 'assets'), {
+                immutable: true,
+                maxAge: '1y',
+            }));
+
+            // 페이지는 로그인 상태에서만 열리며, 아니면 manager 로그인으로 보낸다.
+            router.get(`${DASHBOARD_PATH}`, requirePage, (req: Request, res: Response) => res.sendFile(indexHtml));
+            router.get(`${DASHBOARD_PATH}/*`, requirePage, (req: Request, res: Response) => res.sendFile(indexHtml));
+        } else {
+            logger.warn(`대시보드 빌드를 찾을 수 없습니다: ${DASHBOARD_DIR} — "cd web && npm install && npm run build"`);
+            router.get(`${DASHBOARD_PATH}*`, (req: Request, res: Response) => {
+                res.status(503).type('text/plain')
+                   .send('Dashboard build not found. Run: cd services/rtc-relay-server/web && npm install && npm run build');
+            });
+        }
+
+        // 루트와 Nginx 접두사 양쪽에 같은 라우터를 붙인다.
+        this.expressApp.use('/', router);
+        this.expressApp.use(BASE_PATH, router);
+        this.hasDashboardBuild = hasBuild;
+
         // General https server with the short-term certificate
         this.httpsServer = https.createServer(httpsOptions, this.expressApp); // Changed to HTTPS server
 
 
-        /**
-         * @brief SQLite database initialization
-         * @details Creates or connects to the SQLite database file and initializes
-         * the mobile device registration table with the following schema:
-         * - id: Primary key (auto-increment)
-         * - uuid: Device unique identifier
-         * - email: User email address
-         * - complex: Building/complex information
-         * - address: Device address
-         * - token: Push notification token
-         * - active: Device activation status (default: 1)
-         * - created: Registration timestamp
-         */
-        const db = sqlite3.verbose().Database;
-        // SQLite database file creation or connection with environment variable support
-        const dbPath = process.env.SQLITE_DB_PATH || './cf2rtc-sqlite-db.db';
-        let sqliteDb = new db(dbPath, (err: any) => {
-            if (err) {
-                logger.error('Failed to connect to the database:', err.message);
-                return;
-            }
-            logger.info('Connected to the SQLite database.');
-        });
-
-        // Create mobile device registration table
-        sqliteDb.run(`CREATE TABLE IF NOT EXISTS ${CallFusion.tableForMobile} (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            uuid TEXT NOT NULL,
-            email TEXT NOT NULL,
-            complex TEXT NOT NULL,
-            address TEXT NOT NULL,
-            token TEXT NOT NULL,
-            phone TEXT,
-            image BLOB,
-            active INTEGER DEFAULT 1,
-            created TEXT NOT NULL
-        )`, (err: any) => {
-            if (err) {
-                logger.error('Failed to create table:', err.message);
-                return;
-            }
-            logger.info('SQLite DB Table created successfully.');
-        });        
-        logger.info(`callfusion RTC server created`);
+        // 스키마는 이 서비스가 소유한다 — schema/001-initial.sql.
+        // database/database.ini 의 [database:rtc_relay] 가 그 디렉토리를 가리키고,
+        // sudo database/setup_mariadb.sh 가 적용한다. 런타임에 테이블을 만들지 않는다.
+        logger.info(`rtc-relay-server created`);
     }
 
     /**
@@ -466,15 +461,6 @@ export class CallFusion {
     }
 
     /**
-     * @brief Gets the secret room number (for internal use only)
-     * @return number The secret room number
-     * @note This method should only be used internally and never expose the number publicly
-     */
-    public getSecretRoomNumber(): number {
-        return this.secretRoomNumber;
-    }
-
-    /**
      * @brief Starts the main CallFusion WebRTC server service
      * @details Initiates the HTTPS server on the configured port and starts
      * the WebSocket service for real-time communication. The server handles:
@@ -486,10 +472,11 @@ export class CallFusion {
      */
     public startService() : void {
         const HTTPS_PORT = process.env.HTTPS_PORT ? parseInt(process.env.HTTPS_PORT) : 28090;
-        logger.info(`callfusion RTC server is listening on https://xxxxxxxxxx:${HTTPS_PORT}`);
+        logger.info(`rtc-relay-server is listening on https://0.0.0.0:${HTTPS_PORT}`);
         this.httpsServer.listen(HTTPS_PORT, () => {
             //let endpoints = new WebSocketRouter().express.get('websocket endpoints');
             //console.log(`endpoints to the websocke routes are: ${endpoints}`);
+            logger.info(`Dashboard: ${BASE_PATH}${DASHBOARD_PATH}${this.hasDashboardBuild ? '' : ' (빌드 없음)'}`);
             if(this.httpsServer && this.httpsServer.address()) {
                 console.log("websocket service is starting..." + JSON.stringify(this.httpsServer.address()));
                 
@@ -502,56 +489,14 @@ export class CallFusion {
     }
 
     /**
-     * @brief Starts the certificate download service (optional)
-     * @details Provides a separate HTTPS server for downloading SSL certificates.
-     * Uses long-term certificates and serves files from the 'certs' directory
-     * under the '/download' path. Runs on main port + 1.
-     * 
-     * @note This service is optional and typically used for certificate distribution
-     * @throws Error if long-term certificate files are missing
-     */
-    public startDownloadService() : void {
-        
-        // Serve files from the 'certs' directory under the '/download' path
-        this.downloadExpressApp.use('/download', express.static(path.join(__dirname, 'certs')));
-              // Paths for SSL/TLS certificates with environment variable support
-        const privateKeyPath1 = process.env.SSL_LONGLIVE_PRIVATE_KEY_PATH || path.join(__dirname, 'certs-longlive', 'key.pem');
-        const certificatePath1 = process.env.SSL_LONGLIVE_CERTIFICATE_PATH || path.join(__dirname, 'certs-longlive', 'cert.pem');
-
-        // Check if certificate files exist
-        if (!fs.existsSync(privateKeyPath1) || !fs.existsSync(certificatePath1)) {
-            logger.error('SSL/TLS certificate files not found.');
-            logger.error(`Please ensure 'key.pem' and 'cert.pem' are in the '${path.join(__dirname, 'certs')}' directory.`);
-            logger.error('You can generate self-signed certificates for testing using:');
-            logger.error('openssl req -x509 -newkey rsa:2048 -nodes -keyout key.pem -out cert.pem -days 365');
-            process.exit(1); // Exit if certs are missing
-        }
-
-        const httpsOptions1 = {
-            key: fs.readFileSync(privateKeyPath1),
-            cert: fs.readFileSync(certificatePath1),
-        };
-        // certificate download server with long-term certificate
-        this.downloadServer = https.createServer(httpsOptions1, this.downloadExpressApp); // Changed to HTTPS server
-
-        const HTTPS_PORT = (process.env.HTTPS_PORT ? parseInt(process.env.HTTPS_PORT) : 28090) + 1;
-        //logger.info(`callfusion RTC server is listening on https://callfusion.ptype.co.kr:${HTTPS_PORT}`);
-        this.downloadServer.listen(HTTPS_PORT, () => {
-            logger.info(`Certificate download server is listening on ${HTTPS_PORT}`);
-        });
-
-    }
-
-    /**
      * @brief Stops all server services gracefully
-     * @details Closes both the main HTTPS server and the certificate download
-     * server (if running). This method should be called during application
-     * shutdown to properly release resources and close connections.
+     * @details Closes the HTTPS server and resolves once all connections are
+     * released. pm2 가 재시작할 때 SIGTERM 을 보내므로 아래에서 이 메서드를
+     * 신호 처리기에 연결한다. (watch = src 라 소스 수정 시마다 재시작한다)
      */
-    public stopService() : void {
-        this.httpsServer.close();
-        if(this.downloadServer)
-            this.downloadServer.close();
+    public async stopService(): Promise<void> {
+        await new Promise<void>((resolve) => this.httpsServer.close(() => resolve()));
+        await DbConn.close().catch(() => {});
     }
 }
 
@@ -562,6 +507,15 @@ export class CallFusion {
  */
 const callFusion = CallFusion.getInstance();
 callFusion.startService();
-//callFusion.startDownloadService();
+
+// pm2 restart/stop 은 SIGTERM 을, Ctrl-C 는 SIGINT 를 보낸다.
+// 처리기가 없으면 연결이 정리되지 않은 채 프로세스가 끊긴다.
+for (const signal of ['SIGTERM', 'SIGINT'] as const) {
+    process.on(signal, () => {
+        logger.info(`${signal} received, shutting down...`);
+        callFusion.stopService().then(() => process.exit(0));
+        setTimeout(() => process.exit(1), 5000).unref();
+    });
+}
 
 export default callFusion;

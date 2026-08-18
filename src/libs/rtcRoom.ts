@@ -494,24 +494,4 @@ export class RtcRoom {
         logger.info(`client ${cid} created room ${this.id}`);
         return newbee;
     }
-
-    /**
-     * @brief Gets the IP address of an IoT device by its address identifier
-     * @param address Device address identifier to search for
-     * @return string|null The IP address of the device, or null if not found
-     * 
-     * @details
-     * Searches through all clients in the room to find an IoT device with
-     * the specified address and returns its IP address. Used for IoT device
-     * discovery and network routing within the room. Returns null if no
-     * device with the given address is found in the room.
-     */
-    public getIpByAddress(address: string): string | null {
-        for (let c of this.clients.values()) {
-            if (c.getAddress() === address) {
-                return c.ipaddress;
-            }
-        }
-        return null;
-    }
 }

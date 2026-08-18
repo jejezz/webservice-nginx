@@ -6,7 +6,6 @@
 //////////////////////////////////////////
 
 import express, { Request, Response, NextFunction } from 'express';
-import mysql, { MysqlError } from 'mysql';
 import { CallFusion } from '../index';
 import { DbConn } from '../libs/dbConnection';
 import logger from '../libs/logger'; // Import your configured logger
@@ -23,18 +22,17 @@ Route2User.get('/all', function (req: Request, res: Response) {
 });
 
 async function responseToGetAll(req: Request, res: Response) {
-    const findQry = `SELECT * FROM ${CallFusion.getTableForMobile()}`;
-    let db = await DbConn.createSqlConnection();
-    DbConn.sqlSelect(db, findQry, function (error: any, rows:any, fields:any) {
-        if (error) {
-            logger.error(error);
-            res.status(401).send(error);
-            return;
-        }
-        if (!rows) return;
-        logger.info("User infos are ", rows);
-        res.status(200).send(rows);
-    });
+    try {
+        // token 은 FCM 자격이라 목록에 싣지 않는다.
+        const rows = await DbConn.select(
+            `SELECT id, uuid, email, complex, address, phone, active, created, modified
+               FROM ${CallFusion.getTableForMobile()}
+              ORDER BY created DESC`);
+        res.status(200).json(rows);
+    } catch (err: any) {
+        logger.error('사용자 목록 조회 실패:', err.message);
+        res.status(500).json({ error: 'query failed' });
+    }
 }
 
 export default Route2User;

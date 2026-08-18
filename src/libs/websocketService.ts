@@ -1040,18 +1040,13 @@ async function findAndSendNotificationAsync(address: string, msg: any): Promise<
         timeToLive: 60 * 60 * 24
     };
     
-    let db = await DbConn.createSqlConnection();
-    let sql = `SELECT token, email FROM ${CallFusion.getTableForMobile()} WHERE address="${address}" AND active = 1`;
-    
-    // Check if extendParam contains targetAgent with email address
+    // extendParam 의 targetAgent 가 있으면 그 이메일의 단말에만 보낸다.
     let targetEmail: string | null = null;
     if (msg.extendParam && msg.extendParam.trim() !== '') {
         try {
             const extendData = JSON.parse(msg.extendParam);
             if (extendData.targetAgent && typeof extendData.targetAgent === 'string') {
                 targetEmail = extendData.targetAgent;
-                // If targetEmail is specified, add email filter to SQL query
-                sql += ` AND email="${targetEmail}"`;
                 logger.info(`Targeting specific email: ${targetEmail}`);
             }
         } catch (error) {
@@ -1059,8 +1054,22 @@ async function findAndSendNotificationAsync(address: string, msg: any): Promise<
             // If JSON parsing fails, proceed without email filtering
         }
     }
-    DbConn.sqlSelect(db, sql, (error: any, rows: any) => {
-        if (!error && rows && rows.length > 0) {
+
+    // address 와 email 은 WS 메시지에서 온 값이므로 반드시 바인딩한다.
+    const sql = `SELECT token, email FROM ${CallFusion.getTableForMobile()}
+                  WHERE address = ? AND active = 1` + (targetEmail ? ` AND email = ?` : ``);
+    const params = targetEmail ? [address, targetEmail] : [address];
+
+    let rows: any[];
+    try {
+        rows = await DbConn.select(sql, params);
+    } catch (err: any) {
+        logger.error('푸시 대상 조회 실패:', err.message);
+        return;
+    }
+
+    {
+        if (rows.length > 0) {
             // Korean
             let koreanAddress = address
             koreanAddress = koreanAddress.replace('B', '동');
@@ -1101,7 +1110,12 @@ async function findAndSendNotificationAsync(address: string, msg: any): Promise<
                 tokens: registerationTokens
             };
             //console.log(i + ". send token: ", rows[i].token);
-            Firebase.getMessaging().sendEachForMulticast(multicastPayload)
+            // 키가 없으면 푸시만 건너뛴다. 시그널링은 그대로 진행된다.
+            const messaging = Firebase.getMessaging();
+            if (!messaging) {
+                logger.warn('FCM 미설정 — 착신 푸시를 보내지 않습니다.');
+            } else {
+            messaging.sendEachForMulticast(multicastPayload)
             .then((response: any) => {
                 logger.info(`${response.successCount} messages were sent successfully`);
             })
@@ -1109,8 +1123,9 @@ async function findAndSendNotificationAsync(address: string, msg: any): Promise<
                 logger.error("error sending message:", error);
                 // do not stop!!
             });
+            }
         }
-    });
+    }
 }
 
 /**
@@ -1120,7 +1135,6 @@ async function findAndSendNotificationAsync(address: string, msg: any): Promise<
  */
 export function startWebsocketService(callFusion : CallFusion) : WebSocketServer {
     const service = WebSocketService.createInstance(callFusion);
-    // @ts-expect-error: We know the instance is not null after creation
     return service ? (service as any).rtcServer : null;
 }
 
