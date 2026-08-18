@@ -121,6 +121,25 @@ function generateRandomRoom(len: number): string {
  * 
  * @return HTTP status 200 on success, 400/401 on validation errors
  */
+/**
+ * @brief 주소를 WebSocket 규약의 rtc:<주소>@<호스트> 형식으로 만든다.
+ *
+ * @details
+ * 서버의 getAddressFrom() 은 'rtc:' 와 '@' 사이만 잘라 쓴다. '@' 가 없으면
+ * substring(4, -1) 이 되어 빈 문자열이 나오므로 호스트 부분이 반드시 있어야 한다.
+ * 호스트 값 자체는 서버가 버리지만, 단말이 되돌려 보낼 때 그대로 실려 오므로
+ * 요청이 들어온 호스트를 쓴다.
+ *
+ * 이미 rtc:...@... 형식으로 온 값은 그대로 둔다.
+ */
+function rtcAddress(address: string, req: Request): string {
+    const value = String(address ?? '').trim();
+    if (value.startsWith('rtc:') && value.includes('@')) return value;
+
+    const host = req.headers.host || req.hostname || 'localhost';
+    return `rtc:${value.replace(/^rtc:/, '')}@${host}`;
+}
+
 async function handlePostInvite(req: Request, res: Response) {
     if (req.body.target === undefined) {
         res.sendStatus(400);
@@ -175,8 +194,10 @@ async function handlePostInvite(req: Request, res: Response) {
             },
             data: {
                 method: "invite",
-                sender: "rtc:101B405U@192.168.0.157",
-                receiver: "rtc:101B203U@192.168.0.167:8088",
+                // 요청에서 온 실제 주소를 싣는다. 이전에는 고정 문자열이 박혀 있어
+                // 누가 걸든 같은 두 주소가 전달됐다.
+                sender: rtcAddress(req.body.source, req),
+                receiver: rtcAddress(req.body.target, req),
                 code: "100",
                 device: "interphone",
                 roomId: `${roomId}`

@@ -107,9 +107,9 @@ implementation 'org.json:json:20240303'   // Android 에 기본 포함(org.json)
 
 `create` `modify` `join` `subscribe` `iot-control` `iot-status` `unsubscribe` `error`.
 
-> **알려진 문제** — 성공 응답이 `sendOk()` 를 거치면서 `I don't know what to do with:`
-> 접두사가 붙어 나갑니다 (`websocketService.ts` 의 `sendOk`). 예제는 접두사가 있든
-> 없든 파싱하도록 만들어 두었습니다. 서버가 고쳐지면 예제는 그대로 둬도 됩니다.
+> 2026-08-18 에 고쳤습니다 — 이전에는 성공 응답이 `sendOk()` 를 거치며
+> `I don't know what to do with:` 접두사를 달고 나갔습니다. 지금은 순수 JSON 입니다.
+> 예제는 접두사가 있든 없든 파싱하므로 옛 서버에도 그대로 붙습니다.
 
 ## REST
 
@@ -129,9 +129,16 @@ implementation 'org.json:json:20240303'   // Android 에 기본 포함(org.json)
 `/room/invite` 가 보내는 FCM `data` 는 이렇습니다.
 
 ```json
-{ "method":"invite", "sender":"rtc:...", "receiver":"rtc:...",
+{ "method":"invite",
+  "sender":"rtc:101B405U@jejezzhome.iptime.org:28099",
+  "receiver":"rtc:101B203U@jejezzhome.iptime.org:28099",
   "code":"100", "device":"interphone", "roomId":"12345678" }
 ```
+
+`sender` 는 `/room/invite` 의 `source`, `receiver` 는 `target` 에서 옵니다.
+`rtc:<주소>@<호스트>` 형태로 보내면 그대로 실리고, 주소만 보내면 요청이 들어온
+호스트를 붙여 만듭니다. (2026-08-18 이전에는 고정 문자열이 박혀 있어 누가 걸든
+같은 두 주소가 전달됐습니다.)
 
 **`roomId` 의 대문자 I 에 주의하세요.** WebSocket 규약의 `roomid` 와 철자가 다릅니다.
 예제의 `RtcMessage.fromPushData()` 가 이 차이를 흡수합니다.

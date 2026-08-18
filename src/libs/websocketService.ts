@@ -281,20 +281,13 @@ export class WebSocketService {
     }
     
     /**
-     * @brief Sends generic message acknowledgment to WebSocket client
-     * @param ws WebSocket connection to send message to
-     * @param message Message content to acknowledge
-     * 
-     * @details
-     * Legacy method for handling unrecognized message types:
-     * - Logs the message for debugging purposes
-     * - Sends back a default "don't know what to do" response
-     * - Used as fallback for unsupported message formats
-     */
-    private sendOk(ws: WebSocket, message: string) : void {
+     * @brief 파싱하지 못한 입력에 대한 응답.
+     * @details 보낸 쪽 형식이 틀렸다는 뜻이며, 정상 응답과 섞이면 안 된다.
+     * 이전에는 sendOk 하나가 이 문구를 붙여 IoT 성공 응답에도 따라붙었다. */
+    private sendNotUnderstood(ws: WebSocket, raw: string) : void {
         if(ws != null) {
-            console.log(message);
-            ws.send("I don't know what to do with:" + message);
+            logger.warn(`파싱할 수 없는 입력: ${raw.slice(0, 200)}`);
+            ws.send("I don't know what to do with:" + raw);
         }
     } 
 
@@ -396,7 +389,7 @@ export class WebSocketService {
                 json = JSON.parse(data.toLocaleString());
             }
             catch (e) {
-                return this.sendOk(ws, data.toString());
+                return this.sendNotUnderstood(ws, data.toString());
             }
 
             if (json.method === undefined) {
@@ -591,7 +584,7 @@ export class WebSocketService {
                 json = JSON.parse(data.toLocaleString());
             }
             catch (e) {
-                return this.sendOk(ws, data.toString());
+                return this.sendNotUnderstood(ws, data.toString());
             }
 
             if (json.method === undefined) {
@@ -656,7 +649,8 @@ export class WebSocketService {
                                         msg.clientid, 
                                         '200', 
                                         ''/*client.getIoTPayload()*/);
-                this.sendOk(ws, JSON.stringify(response));
+                // 아래 신규 생성 경로와 같은 방식으로 보낸다.
+                client.send(response);
            }
            return;
         }
