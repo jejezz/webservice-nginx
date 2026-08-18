@@ -39,10 +39,10 @@ import { DbConn, DATABASE } from './libs/dbConnection.js';
 import { requirePage } from './auth/session.js';
 import { createDashboardApi } from './http/dashboardApi.js';
 
-// ES module compatible __filename and __dirname
-import { fileURLToPath } from 'url';
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+// __dirname 은 CommonJS 기본 제공이다.
+// tsconfig 의 module=nodenext + package.json 의 type=commonjs 조합이라 이 파일은
+// CommonJS 로 해석된다. 이전에는 ESM 을 가정해 import.meta.url 로 __dirname 을
+// 만들었는데, 그 때문에 tsc 가 TS1470 으로 실패해 빌드에서 타입 검사를 돌릴 수 없었다.
 
 process.title = "rtc-relay-server";
 

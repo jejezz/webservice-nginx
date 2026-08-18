@@ -65,7 +65,7 @@ npx tsc --init
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node dist/index.js",
-    "build": "tsc -p .",
+    "typecheck": "tsc --noEmit",
     "dev": "nodemon --watch \"src/**/*.ts\" --exec \"ts-node\" src/index.ts"
   },
   ...
@@ -79,6 +79,21 @@ npm run dev
 
 
 
+
+## 타입 검사
+
+실행은 tsx 가 `src/index.ts` 를 직접 하므로 빌드 단계가 없습니다 (`pm2-conf/app.ini`
+의 `script` 참고). 산출물을 만들지 않고 검사만 합니다.
+
+```bash
+npm run typecheck
+```
+
+tsx 는 타입을 확인하지 않으므로 이 명령이 유일한 타입 안전망입니다. 실제로
+파라미터 바인딩 작업 때 `websocketService.ts` 에 남아 있던 인젝션 경로를
+이 검사가 찾아냈습니다.
+
+`emit` 하지 않는 이유는 아무도 쓰지 않는 `dist/` 가 남아 소스와 어긋나기 때문입니다.
 
 ## 관리 대시보드
 

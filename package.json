@@ -26,8 +26,8 @@
   },
   "scripts": {
     "start": "pm2 start ../../pm2/ecosystem.config.js --only rtc-relay-server",
-    "build": "tsc -p .",
     "dev": "nodemon --watch \"src/**/*.ts\" --exec \"tsx\" src/index.ts",
+    "typecheck": "tsc --noEmit",
     "stop": "pm2 stop rtc-relay-server; pm2 delete rtc-relay-server",
     "validate-env": "tsx validate-env.ts",
     "prestart": "npm run validate-env"
