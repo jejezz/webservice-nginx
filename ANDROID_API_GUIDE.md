@@ -1927,12 +1927,18 @@ class CallFusionMessagingService : FirebaseMessagingService() {
     override fun onMessageReceived(remoteMessage: RemoteMessage) {
         super.onMessageReceived(remoteMessage)
         
-        // Handle CallFusion room invitation
-        remoteMessage.data["room_id"]?.let { roomId ->
+        // 착신 초대 처리.
+        //
+        // data 의 키는 WebSocket 규약과 같은 철자를 쓴다 — roomid (소문자).
+        // 2026-08-18 이전 서버는 roomId 를 보냈고, 이 문서의 예전 판은 보낸 적 없는
+        // room_id 를 읽고 있었다. 옛 서버와도 붙어야 한다면 둘 다 받으면 된다.
+        val data = remoteMessage.data
+        (data["roomid"] ?: data["roomId"])?.let { roomId ->
             val title = remoteMessage.notification?.title ?: "CallFusion Invitation"
             val body = remoteMessage.notification?.body ?: "You have a new call"
-            
-            handleRoomInvitation(roomId, title, body)
+
+            // sender 를 함께 넘겨야 invite-ack 의 receiver 를 채울 수 있다.
+            handleRoomInvitation(roomId, data["sender"].orEmpty(), title, body)
         }
     }
     
@@ -1943,7 +1949,7 @@ class CallFusionMessagingService : FirebaseMessagingService() {
         registerTokenWithServer(token)
     }
     
-    private fun handleRoomInvitation(roomId: String, title: String, body: String) {
+    private fun handleRoomInvitation(roomId: String, sender: String, title: String, body: String) {
         // Create notification
         val notification = NotificationCompat.Builder(this, "callfusion_channel")
             .setContentTitle(title)

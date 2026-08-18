@@ -200,7 +200,9 @@ async function handlePostInvite(req: Request, res: Response) {
                 receiver: rtcAddress(req.body.target, req),
                 code: "100",
                 device: "interphone",
-                roomId: `${roomId}`
+                // WebSocket 규약과 같은 철자를 쓴다. 이전에는 여기만 roomId 였고
+                // 단말이 두 철자를 모두 다뤄야 했다.
+                roomid: `${roomId}`
             },
             android: {
                 priority: "high",

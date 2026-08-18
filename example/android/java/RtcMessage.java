@@ -68,12 +68,12 @@ public final class RtcMessage {
     /**
      * FCM data 페이로드를 메시지로 옮긴다.
      *
-     * 푸시는 roomId(대문자 I), WebSocket 규약은 roomid(소문자)를 쓴다.
-     * 서버 쪽 철자가 갈려 있어 여기서 둘 다 받는다.
+     * 지금 서버는 WebSocket 규약과 같은 roomid 를 보낸다.
+     * 2026-08-18 이전 서버는 이 자리만 roomId(대문자 I)였으므로 둘 다 받는다.
      */
     public static RtcMessage fromPushData(@NonNull Map<String, String> data) {
-        String room = data.get("roomId");
-        if (room == null) room = data.get("roomid");
+        String room = data.get("roomid");
+        if (room == null) room = data.get("roomId");
         return new RtcMessage(
                 or(data.get("method"), "invite"),
                 or(room, ""),

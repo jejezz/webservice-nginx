@@ -1081,7 +1081,8 @@ async function findAndSendNotificationAsync(address: string, msg: any): Promise<
                     receiver: `${msg.receiver}`, /* any anonymous receiver */
                     code: "100",
                     device: "interphone",
-                    roomId: `${msg.roomid}`
+                    // WebSocket 규약과 같은 철자를 쓴다 (room.ts 의 푸시도 같다).
+                    roomid: `${msg.roomid}`
                 },
                 android: {
                     priority: "high",

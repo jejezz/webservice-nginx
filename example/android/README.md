@@ -132,7 +132,7 @@ implementation 'org.json:json:20240303'   // Android 에 기본 포함(org.json)
 { "method":"invite",
   "sender":"rtc:101B405U@jejezzhome.iptime.org:28099",
   "receiver":"rtc:101B203U@jejezzhome.iptime.org:28099",
-  "code":"100", "device":"interphone", "roomId":"12345678" }
+  "code":"100", "device":"interphone", "roomid":"12345678" }
 ```
 
 `sender` 는 `/room/invite` 의 `source`, `receiver` 는 `target` 에서 옵니다.
@@ -140,7 +140,12 @@ implementation 'org.json:json:20240303'   // Android 에 기본 포함(org.json)
 호스트를 붙여 만듭니다. (2026-08-18 이전에는 고정 문자열이 박혀 있어 누가 걸든
 같은 두 주소가 전달됐습니다.)
 
-**`roomId` 의 대문자 I 에 주의하세요.** WebSocket 규약의 `roomid` 와 철자가 다릅니다.
-예제의 `RtcMessage.fromPushData()` 가 이 차이를 흡수합니다.
+철자는 WebSocket 규약과 같은 `roomid` 입니다. 2026-08-18 이전 서버는 여기만
+`roomId`(대문자 I)를 보냈습니다. 예제의 `RtcMessage.fromPushData()` 가 둘 다 받으므로
+옛 서버에도 그대로 붙습니다.
+
+`/status/rooms` 와 대시보드 API 의 JSON 목록은 `roomId`·`clientId`·`ipAddress` 처럼
+camelCase 를 씁니다. 그쪽은 메시지가 아니라 목록 응답이고 자기들끼리 일관돼 있어
+철자가 다릅니다.
 
 푸시를 받으면 `roomId` 로 `/ws` 에 붙어 `invite-ack` 을 보내면 됩니다.
