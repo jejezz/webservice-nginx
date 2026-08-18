@@ -80,6 +80,14 @@ npm run dev
 
 
 
+## 앞으로 할 일
+
+위치 공유와 메시지 기능은 **아직 없습니다.** `ANDROID_API_GUIDE.md` 의 그룹 API
+절(`/group/*`)은 구현되지 않은 계획이며 실제로는 404 입니다.
+
+방향과 제약은 [LOCATION_MESSAGING_PLAN.md](LOCATION_MESSAGING_PLAN.md) 에 정리해
+두었습니다. 착수 전에 그 문서의 "만들 때 정해야 할 것" 여섯 가지에 답이 필요합니다.
+
 ## 타입 검사
 
 실행은 tsx 가 `src/index.ts` 를 직접 하므로 빌드 단계가 없습니다 (`pm2-conf/app.ini`
