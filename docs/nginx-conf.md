@@ -13,6 +13,10 @@ manager 대시보드도 **같은 파일**을 읽어 서비스 목록을 만듭�
 라우팅의 단일 진실 공급원이 서비스 쪽으로 내려온 셈입니다.
 
 > 폴더 안에 `.ini` 파일이 여러 개여도 됩니다. 파일 이름순으로 모두 합쳐집니다.
+> 한 디렉토리가 서비스 둘을 담을 때 씁니다 — `apartment-mgmt-server/nginx-conf/`
+> 에 `service.ini`(/complex/*)와 `cassini.ini`(/cassini/)가 함께 있습니다.
+> 스캔은 `services/*/nginx-conf/` **한 단계만** 하므로, 하위 디렉토리에 둔
+> 선언은 발견되지 않습니다.
 > `pm2/` 는 스캔 대상이 아닙니다 — 프로세스 정의와 라우팅 선언은 분리합니다.
 
 ## `[service]`
@@ -97,7 +101,7 @@ SSE 처럼 더 일반적인 라우트보다 먼저 걸려야 하는 것은 `orde
 ```
 ERROR: duplicate location '/cassini/'
   services/apartment-mgmt-server/nginx-conf/service.ini
-  services/web-cassini/nginx-conf/service.ini
+  services/apartment-mgmt-server/nginx-conf/cassini.ini
 ```
 
 ## 서비스를 새로 붙일 때

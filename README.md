@@ -11,8 +11,7 @@ WebServices/
 └── services/    # 서비스 코드. 하나의 서비스 = 하나의 디렉토리
     ├── manager/                  # 서비스 관리 대시보드 (루트 '/' 에서 응답)
     ├── face-recognition-server/  # /face/
-    ├── apartment-mgmt-server/    # /complex/*
-    ├── web-cassini/              # /cassini/
+    ├── apartment-mgmt-server/    # /complex/*  (web-cassini, electron-cassini 포함)
     ├── websocket-relay/          # /relay/   (WebSocket 릴레이)
     └── logd-server/              # 아직 미등록 — zip 파일만 있고 라우팅·프로세스 없음
 ```

@@ -105,9 +105,9 @@ module.exports = {
       //
       // 서버 코드에 의존성이 없어 실행 전 npm install 이 필요 없다.
       // 다만 dist 는 있어야 한다 — 없으면 /health 가 degraded 로 응답한다.
-      //   cd services/web-cassini && npm install && npm run build
+      //   cd services/apartment-mgmt-server/web-cassini && npm install && npm run build
       name: 'web-cassini',
-      cwd: service('web-cassini'),
+      cwd: service('apartment-mgmt-server', 'web-cassini'),
       script: 'server/index.js',
       env: {
         // services/web-cassini/nginx-conf/service.ini 의 ports 와 같아야 한다.

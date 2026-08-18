@@ -16,7 +16,7 @@
 |---|---|---|
 | `face-recognition-server` | ✅ pm2로 관리 | `../services/face-recognition-server` |
 | `Huygens-Server` | ✅ pm2로 관리 | `../services/apartment-mgmt-server/app`. nginx가 `/complex/*`를 이 서비스(28092)로 보냅니다. 앱 디렉토리의 `ecosystem.config.js`는 개발용(watch + tsx)으로 남아 있으니 운영에서는 쓰지 마세요 |
-| `web-cassini` | ✅ pm2로 관리 | `../services/web-cassini`. nginx가 `/cassini/`를 이 서비스(28093)로 보냅니다. 예전에는 `Huygens-Server`가 복사본을 서빙했습니다 |
+| `web-cassini` | ✅ pm2로 관리 | `../services/apartment-mgmt-server/web-cassini`. nginx가 `/cassini/`를 이 서비스(28093)로 보냅니다. 예전에는 `Huygens-Server`가 복사본을 서빙했습니다 |
 | `nginx-manager` | ✅ pm2로 관리 | `../services/manager/server`. 루트(`/`)의 서비스 관리 대시보드 |
 | `websocket-relay` | ✅ pm2로 관리 | `../services/websocket-relay`. nginx가 `/relay/*`를 이 서비스(28090)로 보냅니다. WebRTC/IoT 시그널링 릴레이 |
 | `nginx` | ❌ systemd로 유지 | 80/443 바인딩에 root 권한이 필요해서 systemd가 더 적합. [nginx는 왜 pm2로 안 옮겼나](#nginx는-왜-pm2로-관리하지-않나) 참고 |
@@ -27,7 +27,7 @@
 >
 > `web-cassini`도 빌드 결과(`dist/`)가 있어야 합니다.
 > 서버 코드 자체는 의존성이 없지만 빌드에는 devDependencies 가 필요합니다:
-> `cd ../services/web-cassini && npm install && npm run build`.
+> `cd services/apartment-mgmt-server/web-cassini && npm install && npm run build`.
 > `dist` 가 없으면 프로세스는 뜨지만 `/health` 가 `degraded` 로 응답합니다.
 
 ---
@@ -72,7 +72,7 @@ cd pm2 && pm2 start ecosystem.config.js --only face-recognition-server && pm2 sa
 빌드에만 devDependencies가 필요하고, 실행에는 node만 있으면 됩니다.
 
 ```bash
-cd services/web-cassini && npm install && npm run build
+cd services/apartment-mgmt-server/web-cassini && npm install && npm run build
 ```
 
 ```bash
