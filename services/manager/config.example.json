@@ -1,0 +1,30 @@
+{
+  "port": 28084,
+  "host": "127.0.0.1",
+  "basePath": "",
+  "sessionSecret": "",
+  "sessionTtlMinutes": 120,
+  "cookieSecure": true,
+  "servicesDir": "..",
+  "nginxStackPath": "../../nginx/nginx-stack.conf",
+  "ecosystemPath": "../../pm2/ecosystem.config.js",
+  "healthTimeoutMs": 3000,
+  "pm2Enabled": true,
+  "auth": {
+    "provider": "db",
+    "users": []
+  },
+  "superAdmin": {
+    "username": "zoomon",
+    "passwordHash": "",
+    "sessionTtlMinutes": 30
+  },
+  "database": {
+    "host": "127.0.0.1",
+    "port": 3306,
+    "user": "jyahn",
+    "passwordFile": "./secrets/manager-db.pw",
+    "name": "manager",
+    "connectionLimit": 5
+  }
+}

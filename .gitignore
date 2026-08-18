@@ -1,0 +1,73 @@
+# ─────────────────────────────────────────────────────────────
+# 이 저장소가 담는 범위
+#
+#   docs/            서비스 사이의 규약
+#   nginx/           리버스 프록시 설정과 스크립트
+#   pm2/             프로세스 오케스트레이션
+#   services/manager 관리 대시보드
+#
+# 나머지 서비스(face-recognition-server, apartment-mgmt-server,
+# websocket-relay, web-cassini)는 각자 자기 git 저장소를 가집니다.
+# 여기서 같이 추적하면 같은 파일이 두 저장소에 들어갑니다.
+# ─────────────────────────────────────────────────────────────
+services/*
+!services/manager/
+
+# services/ 바로 아래의 공유 세션 시크릿. 위 규칙에 이미 걸리지만
+# 실수로 예외를 추가할 때를 대비해 한 번 더 막습니다.
+services/.session-secret
+
+
+# ── 자격 증명 · 인증서 ────────────────────────────────────────
+# nginx/certs 에는 CA 개인키(ca_key.pem)와 서버 개인키(key.pem)가 있습니다.
+# 공개 인증서까지 한 디렉토리에 섞여 있어 통째로 제외합니다.
+# 필요하면 nginx/generate_all_certificates.sh 로 다시 만듭니다.
+nginx/certs/
+
+# 관리자 비밀번호 해시가 들어 있습니다. config.example.json 만 커밋합니다.
+services/manager/config.json
+# DB 비밀번호 파일.
+services/manager/secrets/
+
+# 어느 디렉토리든 이런 것은 커밋하지 않습니다.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.srl
+secrets/
+
+
+# ── 빌드 산출물 · 의존성 ──────────────────────────────────────
+node_modules/
+dist/
+# manager 프론트엔드 빌드 결과. web/ 에서 npm run build 로 만듭니다.
+services/manager/server/public/
+
+
+# ── 로그 · 런타임 ────────────────────────────────────────────
+*.log
+logs/
+*.pid
+data/
+*.sqlite
+*.db
+
+
+# ── 도구 · 편집기 ────────────────────────────────────────────
+# Claude Code 의 장비별 설정과 작업 트리(저장소 전체 사본).
+.claude/settings.local.json
+.claude/worktrees/
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+
+# ── 기타 ─────────────────────────────────────────────────────
+# 문서에서 참조하지 않는 스크린샷 잔재 (1.4MB).
+nginx/pass2.png
