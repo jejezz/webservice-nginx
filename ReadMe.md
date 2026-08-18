@@ -10,13 +10,19 @@ HTTP TCP port - 28090
 
 ## > Pre-requisite 2 - Database 설정
 
-```
- - mysql client
- - user id: jejezz
- - password: __REDACTED__
- - database: callfusion2rtc
+DB 는 프로젝트가 관리합니다 — `database/README.md` 를 따릅니다.
 
- OR change the contents of src/config/database.ts file 
+- 스키마: `rtc_relay` (이 서비스의 `schema/*.sql` 이 정의하고 `database/database.ini`
+  의 `[database:rtc_relay]` 가 가리킵니다)
+- 계정: 공용 `jyahn` 하나
+- **비밀번호는 소스나 문서에 쓰지 않습니다.** `database/secrets/jyahn.pw` 에 있고
+  서비스가 그 파일을 읽습니다 (`.env` 의 `DB_PASSWORD_FILE`).
+
+스키마를 만들거나 바꾸려면:
+
+```bash
+sudo ../../database/setup_mariadb.sh --dry-run   # 무엇이 바뀌는지 확인
+sudo ../../database/setup_mariadb.sh             # 적용
 ```
 
 ## > Node 개발환경 설정
