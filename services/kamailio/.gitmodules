@@ -1,3 +1,0 @@
-[submodule "example/android/android-pjsip-phone"]
-	path = example/android/android-pjsip-phone
-	url = https://github.com/jejezz/android-pjsip-phone.git
