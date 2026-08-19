@@ -1,0 +1,13 @@
+{
+  "name": "kamailio-dashboard",
+  "version": "1.0.0",
+  "description": "Kamailio 관찰용 대시보드 — JSON-RPC(FIFO)로 상태를 읽어 보여준다",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "mysql2": "^3.23.3"
+  }
+}
