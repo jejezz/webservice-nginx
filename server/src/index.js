@@ -108,7 +108,7 @@ app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
 const server = app.listen(config.port, config.host, () => {
   log.info(`Manager listening on ${config.host}:${config.port} (basePath: ${config.basePath || '/'})`);
   log.info(`Config: ${config.configPath}`);
-  log.info(`nginx.ini: ${config.nginxIniPath}`);
+  log.info(`nginx-stack.conf: ${config.nginxStackPath}`);
 });
 
 function shutdown(signal) {

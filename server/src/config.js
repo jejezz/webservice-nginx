@@ -17,8 +17,10 @@ const DEFAULTS = {
   sessionTtlMinutes: 120,
   cookieSecure: true,
   // MANAGER_DIR(services/manager) 기준 상대 경로
-  nginxIniPath: '../../nginx.ini',
-  ecosystemPath: '../ecosystem.config.js',
+  // 라우팅 선언은 services/*/nginx-conf/*.ini 에 있고, 그 위치는
+  // nginx-stack.conf 의 services_dir 이 정한다.
+  nginxStackPath: '../../nginx/nginx-stack.conf',
+  ecosystemPath: '../../pm2/ecosystem.config.js',
   healthTimeoutMs: 3000,
   pm2Enabled: true,
   auth: {
@@ -145,7 +147,7 @@ module.exports = Object.freeze({
   cookieSecure: merged.cookieSecure !== false,
   cookieName: 'manager_session',
 
-  nginxIniPath: path.resolve(MANAGER_DIR, merged.nginxIniPath),
+  nginxStackPath: path.resolve(MANAGER_DIR, merged.nginxStackPath),
   ecosystemPath: path.resolve(MANAGER_DIR, merged.ecosystemPath),
   healthTimeoutMs: parseInt(merged.healthTimeoutMs, 10) || 3000,
   pm2Enabled: merged.pm2Enabled !== false,

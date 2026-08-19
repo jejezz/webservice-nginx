@@ -9,7 +9,7 @@ const MAX_BODY_BYTES = 64 * 1024;
 
 /**
  * 헬스 체크 요청. fetch 대신 node:http(s)를 쓰는 이유는
- * 자체 서명 인증서로 HTTPS를 제공하는 서비스(callfusion2rtc 등)를 위해
+ * 자체 서명 인증서로 HTTPS를 제공하는 서비스(rtc-relay-server 등)를 위해
  * TLS 검증을 서비스 단위로 끌 수 있어야 하기 때문이다.
  */
 function request(url, { timeoutMs, insecureTls }) {

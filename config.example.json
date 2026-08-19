@@ -5,8 +5,8 @@
   "sessionSecret": "",
   "sessionTtlMinutes": 120,
   "cookieSecure": true,
-  "nginxIniPath": "../../nginx.ini",
-  "ecosystemPath": "../ecosystem.config.js",
+  "nginxStackPath": "../../nginx/nginx-stack.conf",
+  "ecosystemPath": "../../pm2/ecosystem.config.js",
   "healthTimeoutMs": 3000,
   "pm2Enabled": true,
   "auth": {

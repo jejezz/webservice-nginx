@@ -1,10 +1,11 @@
 const fs = require('fs');
 const config = require('../config');
 const log = require('../logger');
-const { loadRoutes } = require('../nginx-ini');
+const { loadRoutes } = require('../nginx-conf');
 
 /**
- * PM2 ecosystem.config.js에서 서비스 목록을 읽는다.
+ * PM2 앱 목록을 읽는다. pm2/ecosystem.config.js 가 각 서비스의 pm2-conf 선언을
+ * 스캔해 만든 배열이다.
  * Nginx 라우트가 없는 서비스(포트로 직접 접근하는 서비스)도 대시보드에 표시하기 위함이다.
  *
  * 각 앱의 env에서 다음 값을 사용한다.
@@ -75,11 +76,11 @@ function loadEcosystem(ecosystemPath) {
 }
 
 /**
- * nginx.ini 라우트와 PM2 앱 목록을 이름 기준으로 합친다.
+ * nginx-conf 라우트와 PM2 앱 목록을 이름 기준으로 합친다.
  * 각 서비스의 sources에 'nginx' / 'pm2'가 표시된다.
  */
 function loadServices() {
-  const { server, routes, source } = loadRoutes(config.nginxIniPath);
+  const { server, routes, source } = loadRoutes(config.nginxStackPath);
   const apps = loadEcosystem(config.ecosystemPath);
 
   const byName = new Map();
@@ -105,7 +106,7 @@ function loadServices() {
         existing.healthUrl = app.explicitHealthUrl;
         existing.insecureTls = app.insecureTls;
       }
-      existing.dashboardUrl = dashboardUrl(existing, app.dashboardPath);
+      existing.dashboardUrl = dashboardUrl(existing, app.dashboardPath || existing.dashboardPath);
       continue;
     }
 
