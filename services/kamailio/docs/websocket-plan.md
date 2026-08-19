@@ -5,6 +5,8 @@
 
 > **운영 중이 아닙니다.** 지금은 변경에 제약이 없습니다.
 
+관련: [incoming-call.md](incoming-call.md) · [alternatives.md](alternatives.md)
+
 ## 무엇을 만들려는가
 
 | 요구 | 내용 |
@@ -546,7 +548,7 @@ CONNECT 를 지원하지 않으므로 h2 로 WS 를 시도하는 클라이언트
 | | 단계 | 비고 |
 |---|---|---|
 | 2-0 | **인터폰 SDP 확인** (`sngrep`) — H.264 `fmtp` | sudo 만 있으면 지금 가능. 아래 결과에 따라 설계가 갈림 |
-| 2-1 | rtpengine 조달 (sipwise 저장소 또는 소스 빌드) | 가장 큰 조달 항목 |
+| 2-1 | rtpengine 조달 (sipwise 저장소 또는 소스 빌드) | 가장 큰 조달 항목. **여기가 [alternatives.md](alternatives.md) 를 다시 볼 지점** |
 | 2-2 | `interface = 192.168.0.252!<공인IP>`, 포트 범위 지정 | 빠뜨리면 무음 |
 | 2-3 | 공유기에 `30000-30500/udp` 포워딩 | |
 | 2-4 | Kamailio 설정에 `WITH_RTPENGINE` + 내부↔내부 예외 | |

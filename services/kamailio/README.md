@@ -15,7 +15,8 @@ services/kamailio/
 ├── kamailio-websocket.cfg  /etc/kamailio/ 오버라이드 — WS 전송 (setup-websocket.sh 가 설치)
 ├── docs/
 │   ├── websocket-plan.md   SIP over WSS 로 가기 위한 작업과 결정 사항
-│   └── incoming-call.md    인터폰 → 모바일 착신 (FCM 으로 단말 깨우기)
+│   ├── incoming-call.md    인터폰 → 모바일 착신 (FCM 으로 단말 깨우기)
+│   └── alternatives.md     Asterisk 를 다시 검토하게 될 때 (판단 보류 기록)
 ├── rtpengine.conf          미디어 릴레이 데몬 설정 원본 (아직 도입 전)
 ├── server/                 관찰용 대시보드 — Node
 │   └── src/rpc.js            Kamailio JSON-RPC 클라이언트 (FIFO)
@@ -171,17 +172,17 @@ Kamailio 는 이 프로젝트가 만든 프로그램이 아니라 배포판 패�
 > ws-bridge 의 부속이 아니라 독립 서비스이고, 앞으로 rtc-relay-server 도
 > (착신 푸시 때문에) 붙게 되므로 한 서비스 밑에 두는 것이 맞지 않습니다.
 
-## 현황 (2026-08-15 확인)
+## 현황 (2026-08-19 확인)
 
 | 항목 | 값 |
 |---|---|
 | 구동 중인 바이너리 | `/usr/sbin/kamailio` **5.5.4** (배포판 패키지) |
-| 설정 | `/etc/kamailio/kamailio.cfg` (스톡 그대로) |
+| 설정 | `/etc/kamailio/kamailio.cfg` — **배포판 설정의 포크** (`install.sh --apply`). `kamailio-local.cfg` · `kamailio-websocket.cfg` 오버라이드 |
 | systemd | `kamailio.service` → `ExecStart=/usr/sbin/kamailio ... -f /etc/kamailio/kamailio.cfg` |
 | 또 하나의 설치 | `/usr/local/sbin/kamailio` **5.7.7** (소스빌드, 2026-03-05) — **구동되지 않음** |
-| SIP 소켓 | `192.168.0.252:5060`, `192.168.122.1:5060`, `127.0.0.1:5060` |
-| SIP 도메인 | `192.168.0.252` |
-| 인증 | **없음** — 누구나 임의 내선으로 REGISTER 할 수 있는 상태 |
+| SIP 소켓 | `192.168.0.252:5060`, `192.168.122.1:5060`, `127.0.0.1:5060` (udp/tcp) + WS `127.0.0.1:5080` |
+| SIP 도메인 | `pluto.org` (`alias=`) |
+| 인증 | digest — `subscriber` 테이블 (`use_domain=0`) |
 
 ### ⚠️ 두 벌 설치 — 도구는 반드시 절대경로로
 
