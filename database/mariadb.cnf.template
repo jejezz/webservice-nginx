@@ -1,0 +1,9 @@
+# 이 파일은 setup_mariadb.sh가 database.ini로부터 생성합니다.
+# 직접 수정하지 마세요 — 다시 실행하면 덮어써집니다.
+# 바꿀 내용은 database/database.ini 에 작성한 뒤 sudo ./setup_mariadb.sh 를 실행하세요.
+#
+# 생성 시각: {{GENERATED_AT}}
+# 원본 파일: {{SOURCE_INI}}
+
+[mysqld]
+{{SERVER_OPTIONS}}

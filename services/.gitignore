@@ -1,0 +1,8 @@
+node_modules/
+logs/
+
+# 대시보드 공통 세션 서명 키 — 유출되면 로그인 세션을 위조할 수 있다
+.session-secret
+
+# 편입 전 pm2 목록 / 설정 백업
+.migration-backup/

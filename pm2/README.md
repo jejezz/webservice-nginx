@@ -1,0 +1,158 @@
+# pm2 운영 가이드
+
+이 디렉토리는 pm2 앱 목록을 **만드는** `ecosystem.config.js` 와 부팅 스크립트를
+담습니다. 앱 정의 자체는 각 서비스의 `pm2-conf/app.ini` 에 있습니다
+(스키마: [../docs/pm2-conf.md](../docs/pm2-conf.md)).
+
+> 이 문서의 경로와 명령은 `webservices/` 루트 기준입니다.
+
+## 관리 대상
+
+| 앱 | 포트 | 위치 | 비고 |
+|---|---|---|---|
+| `manager` | 28084 | `services/manager` | 관리 대시보드. nginx `/manager` |
+| `ws-bridge` | 28083 | `services/ws-bridge` | nginx `/ws-bridge/`, 자체 대시보드 `/dashboard` |
+| `stock-analyzer` | 28085 | `services/stock-analyzer` | nginx `/stock-analyzer`. tsx 로 TS 직접 실행 |
+| `route-a` `route-b` `route-c` | 28080·28081·28082 | `services/route-*` | 예제 서비스. nginx 라우트는 꺼 둠(`enabled = false`) |
+| `rtc-relay-server` | 28099 (자체 HTTPS) | `services/rtc-relay-server` | `/rtc-relay/` — 단말은 포트로 직접, 대시보드는 nginx 경유 |
+| `callfusion-v2` | 28091 | `services/callfusion-v2-server` | nginx 라우트 없음 — 포트 직결 |
+| `nginx` | 80/443 | — | ❌ pm2 아님. systemd 가 유지 |
+| `webrtc-signal-server` | — | `services/webrtc-signal-server` | ⏳ 미등록 (선언 없음) |
+
+## 1. 설치
+
+pm2 는 npm 전역 패키지로 `/usr/local/bin/pm2` 에 설치돼 있습니다.
+
+```bash
+./install_pm2.sh install     # 설치 (sudo 사용)
+./install_pm2.sh update      # 업데이트
+```
+
+pm2 데몬은 처음 `pm2` 명령을 실행하는 순간 백그라운드에 떠서 상주합니다.
+
+## 2. 앱 목록은 스캔해서 만든다
+
+`ecosystem.config.js` 는 앱을 적어 두는 파일이 아니라 `services/*/pm2-conf/*.ini`
+를 훑어 `apps` 배열을 만드는 파일입니다. pm2 는 설정이 `.js` 면 실행 결과를 쓰기
+때문에 그대로 등록됩니다. **서비스를 추가할 때 이 파일을 고칠 일은 없습니다.**
+
+```bash
+cd pm2
+pm2 start ecosystem.config.js                  # 선언된 것 전부
+pm2 start ecosystem.config.js --only manager   # 하나만
+pm2 save                                       # 재부팅 복원용 스냅샷 갱신
+```
+
+해석 결과를 보고 `nginx-conf` 와 포트가 맞는지 검사합니다 (sudo 불필요).
+
+```bash
+node ecosystem.config.js --check
+node ecosystem.config.js --check --json   # 실제로 pm2 에 넘어가는 객체까지
+```
+
+경로는 실행 시점에 이 파일 위치에서 계산합니다. 절대 경로를 적어 두면 저장소를
+옮길 때마다 여러 줄을 고쳐야 하고, 실제로 그걸 놓쳐 재부팅 복원이 끊기기 쉽습니다.
+
+### 새 앱 등록
+
+1. `services/<이름>/pm2-conf/app.ini` 를 씁니다. 최소한 이것뿐입니다.
+
+   ```ini
+   [app]
+   name   = my-service
+   script = src/index.js
+
+   [env]
+   NODE_ENV = production
+   PORT     = 29000
+   ```
+
+2. 그 프로세스는 **포그라운드에서 종료 없이 떠 있어야** 합니다.
+   `nohup ... &` 후 즉시 리턴하는 스크립트면 pm2 가 계속 재시작을 시도합니다.
+3. 반영:
+
+   ```bash
+   cd pm2 && pm2 start ecosystem.config.js --only my-service && pm2 save
+   ```
+
+nginx 경로도 필요하면 `services/<이름>/nginx-conf/service.ini` 를 함께 씁니다
+([../docs/nginx-conf.md](../docs/nginx-conf.md)).
+
+### 편집 / 삭제
+
+```bash
+pm2 restart ecosystem.config.js --only my-service   # 확실한 재시작
+pm2 save
+```
+
+`env` 를 바꿨다면 `--update-env` 를 붙이거나 `pm2 delete` 후 다시 `start` 해야
+반영됩니다 (환경변수는 최초 fork 시점에 캐시됩니다).
+
+삭제는 pm2 에서 지우고 선언도 지웁니다 — 선언이 남아 있으면 다음
+`pm2 start ecosystem.config.js` 에서 되살아납니다. 잠시만 내릴 거라면 선언의
+`enabled = false` 를 쓰세요.
+
+```bash
+pm2 delete my-service && pm2 save
+```
+
+## 3. 부팅 시 자동 시작
+
+사용자 crontab 의 `@reboot` 한 줄이 `pm2-boot.sh` 를 부릅니다 (sudo 불필요).
+2026-08-18 에 등록했습니다.
+
+```bash
+crontab -l
+```
+
+```
+# Added by webservices/pm2 — pm2 resurrect on boot
+@reboot sleep 20 && /bin/bash /home/jejezz/Public/webservices/pm2/pm2-boot.sh >> …/pm2-boot.log 2>&1
+```
+
+경로를 다시 만들려면 **루트에서** 다음을 실행해 나온 줄을 넣습니다.
+
+```bash
+echo "@reboot sleep 20 && /bin/bash $PWD/pm2/pm2-boot.sh >> $PWD/pm2/pm2-boot.log 2>&1"
+```
+
+cron 은 `PATH=/usr/bin:/bin` 으로 돌아서 `/usr/local/bin/pm2` 를 못 찾습니다.
+`pm2-boot.sh` 가 PATH 를 먼저 넓히는 이유입니다 (nvm 이 있는 서버면 함께 로드).
+
+**`pm2 resurrect` 가 복원하는 것은 마지막 `pm2 save` 시점의 목록입니다.**
+선언을 고쳤어도 `pm2 start` + `pm2 save` 를 하지 않으면 옛 목록이 돌아옵니다.
+
+### (대안) systemd
+
+```bash
+pm2 startup systemd    # 안내되는 sudo 명령을 실행
+pm2 save
+```
+
+데몬 자체가 죽어도 systemd 가 살려 주지만 유닛 파일을 쓰는 데 sudo 가 필요합니다.
+지금은 crontab 방식을 씁니다.
+
+## 4. 자주 쓰는 명령
+
+```bash
+pm2 list                      # 상태 (pid, uptime, 재시작 횟수, cpu/mem)
+pm2 describe manager          # 상세 (로그 경로, env)
+pm2 logs manager              # 실시간 로그
+pm2 logs manager --lines 100 --nostream
+pm2 monit
+pm2 flush                     # 로그 비우기
+pm2 save
+```
+
+로그는 서비스마다 흩어지지 않게 **`pm2/logs/<앱>-{out,error}.log`** 로 모읍니다.
+`pm2-conf` 에서 `out_file` / `error_file` 을 지정하면 그쪽이 우선합니다.
+
+## 5. 문제 해결
+
+- **재시작(↺)이 계속 늘어남** — 대부분 프로세스가 바로 종료되는 경우입니다.
+  `pm2 logs <앱> --lines 50` 으로 마지막 로그를 보세요.
+- **경로가 502** — nginx 선언은 있는데 프로세스가 없다는 뜻입니다.
+  `pm2 list` 와 `node ecosystem.config.js --check` 를 함께 보세요.
+- **재부팅 후 앱이 안 뜸** — `pm2-boot.log` 를 확인합니다. PATH 문제이거나
+  `pm2 save` 를 안 해 `~/.pm2/dump.pm2` 가 낡은 경우입니다.
+- **포트 충돌** — `ss -ltnp 'sport = :28084'` 로 누가 점유 중인지 확인합니다.

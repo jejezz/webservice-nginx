@@ -1,0 +1,440 @@
+#!/usr/bin/env python3
+"""services/*/nginx-conf/*.ini 를 읽어 nginx 설정을 만든다.
+
+각 서비스가 자기에게 필요한 포트와 라우트를 선언하고, 이 스크립트가 합친다.
+라우트를 바꾸려면 템플릿이 아니라 해당 서비스의 nginx-conf/ 를 고친다.
+서버 수준 값(listen 포트, TLS, mTLS, 포트 포워딩, default_route)은
+nginx-stack.conf 가 가진다.
+
+스키마: docs/nginx-conf.md
+
+사용법:
+    generate_nginx_conf.py --check              # 파싱과 충돌 검사만 (sudo 불필요)
+    generate_nginx_conf.py                      # 생성 결과를 표준 출력으로
+    generate_nginx_conf.py --output /etc/nginx/conf.d/path-routing.conf
+"""
+
+import argparse
+import configparser
+import glob
+import os
+import re
+import sys
+
+# 설정 파일과 주석에 한글이 들어가므로 출력 스트림을 UTF-8 로 고정한다.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8")
+    except (AttributeError, ValueError):
+        pass
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+DEFAULT_HOST = "127.0.0.1"
+DEFAULT_PROTOCOL = "http"
+DEFAULT_HEALTH_PATH = "/health"
+DEFAULT_TIMEOUT = 120
+DEFAULT_ORDER = 100
+
+
+class ConfigError(Exception):
+    """설정이 잘못됐을 때. 조용히 넘어가지 않고 여기서 멈춘다."""
+
+
+def die(message):
+    print(f"ERROR: {message}", file=sys.stderr)
+    sys.exit(1)
+
+
+def reader(path):
+    parser = configparser.ConfigParser(interpolation=None)
+    parser.optionxform = str.lower
+    try:
+        with open(path, encoding="utf-8") as handle:
+            parser.read_file(handle)
+    except OSError as err:
+        die(f"읽을 수 없습니다: {err}")
+    except configparser.Error as err:
+        die(f"{path}: INI 파싱 실패\n  {err}")
+    return parser
+
+
+def as_bool(value, default=False):
+    if value is None or str(value).strip() == "":
+        return default
+    return str(value).strip().lower() in ("1", "true", "yes", "on")
+
+
+def parse_ports(value):
+    ports = []
+    for token in str(value or "").split():
+        try:
+            port = int(token)
+        except ValueError:
+            raise ConfigError(f"포트가 숫자가 아닙니다: {token!r}")
+        if not (1 <= port <= 65535):
+            raise ConfigError(f"포트 범위를 벗어났습니다: {port}")
+        ports.append(port)
+    return ports
+
+
+def upstream_name(service_name):
+    """nginx 식별자로 쓸 수 있게 다듬는다. ws-bridge -> ws_bridge_backend"""
+    slug = re.sub(r"[^a-zA-Z0-9]+", "_", service_name).strip("_").lower()
+    return f"{slug}_backend"
+
+
+class Route:
+    def __init__(self, service, section_name, cfg):
+        self.service = service
+        self.key = section_name.split(":", 1)[1] if ":" in section_name else section_name
+
+        location = (cfg.get("location") or "").strip()
+        if not location:
+            raise ConfigError(f"[{section_name}] 에 location 이 없습니다")
+        self.location = location
+
+        self.proxy_path = (cfg.get("proxy_path") or "").strip()
+        self.websocket = as_bool(cfg.get("websocket"))
+        self.buffering = (cfg.get("buffering") or "on").strip().lower() != "off"
+        self.max_body = (cfg.get("max_body") or "").strip()
+
+        try:
+            self.timeout = int(cfg.get("timeout") or DEFAULT_TIMEOUT)
+            self.order = int(cfg.get("order") or DEFAULT_ORDER)
+        except ValueError as err:
+            raise ConfigError(f"[{section_name}] timeout/order 는 숫자여야 합니다: {err}")
+
+    @property
+    def match_key(self):
+        """충돌 검사용 정규화 키. 'location  =  /a/' 와 'location = /a/' 를 같게 본다."""
+        return re.sub(r"\s+", " ", self.location).strip()
+
+    def render(self):
+        proto = "https" if self.service.protocol == "https" else "http"
+        target = f"{proto}://{self.service.upstream}{self.proxy_path}"
+
+        lines = [f"    location {self.location} {{"]
+        lines.append(f"        # {self.service.name} ({self.key})")
+        lines.append(f"        proxy_pass {target};")
+        lines.append("        proxy_http_version 1.1;")
+        lines.append("        proxy_set_header Host $host;")
+        lines.append("        proxy_set_header X-Real-IP $remote_addr;")
+        lines.append("        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;")
+        lines.append("        proxy_set_header X-Forwarded-Proto $scheme;")
+
+        if self.websocket:
+            lines.append("        proxy_set_header Upgrade $http_upgrade;")
+            lines.append("        proxy_set_header Connection $connection_upgrade;")
+
+        if self.max_body:
+            lines.append(f"        client_max_body_size {self.max_body};")
+
+        lines.append("")
+        lines.append("        proxy_connect_timeout 5s;")
+        lines.append(f"        proxy_send_timeout {self.timeout}s;")
+        lines.append(f"        proxy_read_timeout {self.timeout}s;")
+
+        if not self.buffering:
+            lines.append("")
+            lines.append("        # SSE — 버퍼링을 끄지 않으면 이벤트가 모였다가 한꺼번에 나간다.")
+            lines.append("        proxy_buffering off;")
+            lines.append("        proxy_cache off;")
+            lines.append("        chunked_transfer_encoding on;")
+
+        if self.service.protocol == "https":
+            lines.append("")
+            lines.append("        # 백엔드가 자체 서명 인증서를 쓰는 경우가 많아 검증하지 않는다.")
+            lines.append("        proxy_ssl_verify off;")
+
+        lines.append("    }")
+        return "\n".join(lines)
+
+
+class Service:
+    def __init__(self, path, directory_name, parser):
+        self.path = path
+
+        if not parser.has_section("service"):
+            raise ConfigError("[service] 섹션이 없습니다")
+
+        section = parser["service"]
+        self.name = (section.get("name") or directory_name).strip()
+        self.host = (section.get("host") or DEFAULT_HOST).strip()
+        self.protocol = (section.get("protocol") or DEFAULT_PROTOCOL).strip().lower()
+        self.health_path = (section.get("health_path") or DEFAULT_HEALTH_PATH).strip()
+        self.dashboard_path = (section.get("dashboard_path") or "").strip()
+        self.enabled = as_bool(section.get("enabled"), default=True)
+
+        if self.protocol not in ("http", "https"):
+            raise ConfigError(f"protocol 은 http 또는 https 여야 합니다: {self.protocol!r}")
+
+        self.ports = parse_ports(section.get("ports"))
+        if not self.ports:
+            raise ConfigError("[service] 에 ports 가 없습니다")
+
+        self.upstream = upstream_name(self.name)
+
+        self.routes = []
+        for section_name in parser.sections():
+            if section_name == "service":
+                continue
+            if not section_name.startswith("route:") and section_name != "route":
+                raise ConfigError(f"알 수 없는 섹션입니다: [{section_name}]")
+            self.routes.append(Route(self, section_name, parser[section_name]))
+
+    def render_upstream(self):
+        lines = [f"upstream {self.upstream} {{"]
+        if len(self.ports) > 1:
+            lines.append("    least_conn;")
+        for port in self.ports:
+            lines.append(f"    server {self.host}:{port} max_fails=3 fail_timeout=10s;")
+        lines.append("}")
+        return "\n".join(lines)
+
+
+def load_services(services_dir):
+    services = []
+    pattern = os.path.join(services_dir, "*", "nginx-conf", "*.ini")
+
+    for ini_path in sorted(glob.glob(pattern)):
+        directory_name = os.path.basename(os.path.dirname(os.path.dirname(ini_path)))
+        parser = reader(ini_path)
+
+        try:
+            service = Service(ini_path, directory_name, parser)
+        except ConfigError as err:
+            die(f"{ini_path}: {err}")
+
+        if not service.enabled:
+            print(f"  skip    {service.name:18} (enabled = false)", file=sys.stderr)
+            continue
+
+        services.append(service)
+
+    return services
+
+
+def check_conflicts(services):
+    """서로 다른 서비스가 같은 location 을 선언하면 멈춘다.
+
+    조용히 덮어쓰면 한쪽 서비스가 이유 없이 죽는다.
+    설정을 만드는 시점에 터지는 편이 낫다.
+    """
+    seen = {}
+    duplicates = []
+
+    for service in services:
+        for route in service.routes:
+            key = route.match_key
+            if key in seen:
+                duplicates.append((key, seen[key], route.service.path))
+            else:
+                seen[key] = route.service.path
+
+    if duplicates:
+        lines = []
+        for key, first, second in duplicates:
+            lines.append(f"duplicate location {key!r}")
+            lines.append(f"  {first}")
+            lines.append(f"  {second}")
+        die("\n".join(lines))
+
+    names = {}
+    for service in services:
+        if service.name in names:
+            die(f"duplicate service name {service.name!r}\n  {names[service.name]}\n  {service.path}")
+        names[service.name] = service.path
+
+    upstreams = {}
+    for service in services:
+        if service.upstream in upstreams:
+            die(
+                f"upstream 이름이 겹칩니다: {service.upstream!r}\n"
+                f"  {upstreams[service.upstream]}\n  {service.path}\n"
+                "  서비스 이름을 다르게 지으세요."
+            )
+        upstreams[service.upstream] = service.path
+
+    ports = {}
+    for service in services:
+        for port in service.ports:
+            target = f"{service.host}:{port}"
+            if target in ports and ports[target] != service.name:
+                die(
+                    f"서로 다른 서비스가 같은 백엔드를 가리킵니다: {target}\n"
+                    f"  {ports[target]}\n  {service.name}"
+                )
+            ports[target] = service.name
+
+
+class Stack:
+    """nginx-stack.conf — 서버 수준 값."""
+
+    def __init__(self, path):
+        parser = reader(path)
+        base = os.path.dirname(os.path.abspath(path))
+        general = parser["general"] if parser.has_section("general") else {}
+        tls = parser["tls"] if parser.has_section("tls") else {}
+
+        def g(key, default=""):
+            return (general.get(key) or default).strip()
+
+        def t(key, default=""):
+            return (tls.get(key) or default).strip()
+
+        self.server_name = g("server_name", "localhost")
+        self.listen_port = g("listen_port", "80")
+        self.ssl_port = g("ssl_port", "443")
+        self.max_body = g("max_body")
+        self.default_route = g("default_route")
+        self.public_http_port = g("public_http_port")
+        self.public_https_port = g("public_https_port")
+        self.services_dir = os.path.abspath(os.path.join(base, g("services_dir", "../services")))
+
+        cert_dir = os.path.abspath(os.path.join(base, t("cert_dir", "./cert")))
+        self.cert = os.path.join(cert_dir, t("cert_file", "server/server.crt"))
+        self.key = os.path.join(cert_dir, t("key_file", "server/server.key"))
+        client_ca = t("client_ca")
+        self.client_ca = os.path.join(cert_dir, client_ca) if client_ca else ""
+        self.verify_client = t("verify_client")
+
+    def check_files(self):
+        missing = [p for p in (self.cert, self.key) if not os.path.isfile(p)]
+        if self.client_ca and self.verify_client and not os.path.isfile(self.client_ca):
+            missing.append(self.client_ca)
+        if missing:
+            die("인증서 파일이 없습니다:\n  " + "\n  ".join(missing))
+
+    def redirect_map(self):
+        """공유기 포트 포워딩 대응.
+
+        외부 HTTP 포트로 들어온 요청을 HTTPS 로 보낼 때 목적지는 내부 443 이
+        아니라 외부에 열려 있는 HTTPS 포트여야 한다. nginx 는 공유기의 포트
+        대응을 알 수 없으므로 Host 의 포트를 보고 구분한다.
+        """
+        if not (self.public_http_port and self.public_https_port):
+            return "", "$host"
+
+        block = (
+            "\n# 외부(포워딩) 접속과 내부 접속을 구분해 HTTPS 목적지를 정한다.\n"
+            f"# 외부 {self.public_http_port} -> 내부 {self.listen_port}, "
+            f"외부 {self.public_https_port} -> 내부 {self.ssl_port}\n"
+            "map $http_host $public_https_host {\n"
+            "    default              $host;\n"
+            f'    "~:{self.public_http_port}$"  $host:{self.public_https_port};\n'
+            "}\n"
+        )
+        return block, "$public_https_host"
+
+    def client_verify_block(self):
+        if not (self.client_ca and self.verify_client):
+            return ""
+        return (
+            f"\n    ssl_client_certificate {self.client_ca};\n"
+            f"    ssl_verify_client {self.verify_client};\n"
+        )
+
+    def default_route_block(self):
+        """'= /' 는 정확히 '/' 만 매치하므로 다른 경로에는 영향이 없다."""
+        if not self.default_route:
+            return ""
+        return (
+            "\n    # 기본 라우트\n"
+            "    location = / {\n"
+            f"        return 302 {self.default_route};\n"
+            "    }\n"
+        )
+
+    def max_body_block(self):
+        if not self.max_body:
+            return ""
+        return f"\n    client_max_body_size {self.max_body};\n"
+
+
+def render(stack, services, template_text):
+    upstreams = "\n\n".join(s.render_upstream() for s in services)
+
+    # 정규식 location 은 적힌 순서대로 검사되므로 order 가 결과를 바꾼다.
+    # 같은 order 안에서는 서비스 이름 -> 라우트 키 순으로 안정 정렬한다.
+    routes = [r for s in services for r in s.routes]
+    routes.sort(key=lambda r: (r.order, r.service.name, r.key))
+    locations = "\n\n".join(r.render() for r in routes)
+
+    redirect_map, https_redirect_host = stack.redirect_map()
+
+    output = template_text
+    for placeholder, value in (
+        ("__REDIRECT_MAP__", redirect_map),
+        ("__UPSTREAMS__", "\n" + upstreams if upstreams else ""),
+        ("__LOCATIONS__", locations),
+        ("__LISTEN_PORT__", stack.listen_port),
+        ("__SSL_PORT__", stack.ssl_port),
+        ("__SERVER_NAME__", stack.server_name),
+        ("__HTTPS_REDIRECT_HOST__", https_redirect_host),
+        ("__SSL_CERTIFICATE_KEY__", stack.key),
+        ("__SSL_CERTIFICATE__", stack.cert),
+        ("__MAX_BODY__", stack.max_body_block()),
+        ("__SSL_CLIENT_VERIFY__", stack.client_verify_block()),
+        ("__DEFAULT_ROUTE__", stack.default_route_block()),
+    ):
+        output = output.replace(placeholder, value)
+
+    leftover = re.findall(r"__[A-Z_]+__", output)
+    if leftover:
+        die(f"템플릿에 치환되지 않은 자리표시자가 남았습니다: {', '.join(sorted(set(leftover)))}")
+
+    return output
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument("--config", default=os.path.join(HERE, "nginx-stack.conf"))
+    parser.add_argument("--template", default=os.path.join(HERE, "server.conf.template"))
+    parser.add_argument("--output", help="쓸 파일 경로. 없으면 표준 출력")
+    parser.add_argument("--check", action="store_true", help="파싱과 충돌 검사만 하고 끝낸다")
+    args = parser.parse_args()
+
+    stack = Stack(args.config)
+
+    if not os.path.isdir(stack.services_dir):
+        die(f"서비스 디렉토리가 없습니다: {stack.services_dir}")
+
+    print(f"Scanning {stack.services_dir}/*/nginx-conf/*.ini", file=sys.stderr)
+    services = load_services(stack.services_dir)
+
+    if not services:
+        die(f"nginx-conf/*.ini 를 하나도 찾지 못했습니다: {stack.services_dir}")
+
+    check_conflicts(services)
+    stack.check_files()
+
+    for service in services:
+        ports = " ".join(str(p) for p in service.ports)
+        routes = ", ".join(r.match_key for r in service.routes) or "(라우트 없음)"
+        print(f"  ok      {service.name:18} {ports:12} {routes}", file=sys.stderr)
+
+    if args.check:
+        print(f"{len(services)} services, no conflicts.", file=sys.stderr)
+        return
+
+    try:
+        with open(args.template, encoding="utf-8") as handle:
+            template_text = handle.read()
+    except OSError as err:
+        die(f"템플릿을 읽을 수 없습니다: {err}")
+
+    output = render(stack, services, template_text)
+
+    if args.output:
+        with open(args.output, "w", encoding="utf-8") as handle:
+            handle.write(output)
+        print(f"Wrote {args.output}", file=sys.stderr)
+    else:
+        sys.stdout.write(output)
+
+
+if __name__ == "__main__":
+    main()
