@@ -34,6 +34,7 @@ import Route2Unregister from './routes/unregister.js';
 import Route2User from './routes/user.js';
 import Route2Status from './routes/status.js';
 import Route2Mobile from './routes/mobile.js';
+import Route2SipPush from './routes/sipPush.js';
 import logger from './libs/logger.js'; // Import your configured logger
 import { DbConn, DATABASE } from './libs/dbConnection.js';
 import { requirePage } from './auth/session.js';
@@ -373,6 +374,18 @@ export class CallFusion {
                 });
             }
         }, Route2Mobile);
+
+        /**
+         * Kamailio 착신 푸시 — 루프백 전용.
+         *
+         * mobile-crud-operation 과 같은 이유로 **router 가 아니라 앱에 직접** 붙인다.
+         * router 는 BASE_PATH 에도 마운트되는데, Nginx 를 거쳐 들어온 요청은 소켓
+         * 주소가 항상 127.0.0.1 이라 루프백 검사를 무조건 통과해 버린다. 그러면
+         * 외부에서 남의 단말을 임의로 깨울 수 있게 된다.
+         *
+         * Kamailio 는 같은 호스트에 있으므로 포트 직결로 부른다.
+         */
+        this.expressApp.use('/sip-push', Route2SipPush);
 
         // --- 관리 대시보드 ---
         //
