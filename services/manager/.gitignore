@@ -1,0 +1,5 @@
+node_modules/
+server/public/
+
+# 계정 정보와 세션 시크릿이 들어 있으므로 커밋하지 않는다. (config.example.json 참고)
+config.json

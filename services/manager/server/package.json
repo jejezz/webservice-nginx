@@ -1,0 +1,16 @@
+{
+  "name": "manager",
+  "version": "1.0.0",
+  "description": "Nginx / services management dashboard (API + static server)",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "hash-password": "node tools/hash-password.js",
+    "admin": "node tools/admin.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "mysql2": "^3.23.3"
+  }
+}
