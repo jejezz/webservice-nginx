@@ -23,6 +23,32 @@ import WebSocket from 'ws';
 const maxQueuedMsgCount = 1024;
 
 /**
+ * @brief WebSocket → RtcClient 역참조.
+ *
+ * 이전에는 소켓으로 클라이언트를 찾을 때 방 테이블 전체를 훑었다
+ * (RtcRoomTable.findClient / removeClientFromRooms). 그 두 함수는 pong 마다,
+ * 그리고 연결 종료마다 불리므로 접속자 N 명이면 heartbeat 한 주기에
+ * O(N^2) 비교가 이벤트 루프에 몰렸다. 여기서 O(1) 로 답한다.
+ *
+ * WeakMap 이라 소켓이 GC 되면 항목도 같이 사라진다 — 아래 unbind 를 빠뜨려도
+ * 메모리는 새지 않지만, 항목이 남아 있는 동안 잘못된 클라이언트를 돌려줄 수
+ * 있으므로 방에서 최종 제거할 때는 반드시 unbind 한다.
+ *
+ * 이 맵은 항상 RtcClient.websocket 필드를 그대로 비춘다. 그래서 대입은
+ * bind() 한 곳에서만 한다.
+ */
+const clientByWebsocket = new WeakMap<WebSocket, RtcClient>();
+
+/**
+ * @brief 소켓에 묶인 클라이언트를 찾는다.
+ * @param ws 찾을 WebSocket
+ * @return RtcClient|null 묶인 클라이언트, 없으면 null
+ */
+export function findClientByWebsocket(ws: WebSocket): RtcClient | null {
+    return clientByWebsocket.get(ws) ?? null;
+}
+
+/**
  * @class RtcClient
  * @brief Represents a WebRTC client connection with message handling capabilities
  * 
@@ -288,14 +314,35 @@ export class RtcClient {
             logger.warn("Client %s already has an open connection, closing old connection and replacing with new one", this.cid);
             this.websocket.close();
         }
+        // 이전 소켓의 역참조를 먼저 끊는다 — 재접속으로 소켓이 바뀌어도
+        // 옛 소켓이 이 클라이언트를 가리키고 있으면 안 된다.
+        if (this.websocket) {
+            clientByWebsocket.delete(this.websocket);
+        }
         this.removeTimeout();
         this.alive = true;
         this.websocket = websocket;
+        clientByWebsocket.set(websocket, this);
+    }
+
+    /**
+     * @brief 소켓 역참조를 끊는다.
+     *
+     * @details
+     * 방에서 클라이언트를 최종적으로 지울 때만 부른다. leave() 는 부르지 않는데,
+     * leave() 뒤에도 소켓의 'close' 처리기가 이 클라이언트를 찾아 방에서
+     * 정리해야 하기 때문이다. (여기서 끊으면 그 정리가 건너뛰어져 방에 유령
+     * 클라이언트가 남는다.)
+     */
+    public unbind(): void {
+        if (this.websocket) {
+            clientByWebsocket.delete(this.websocket);
+        }
     }
 
     /**
      * @brief Disconnects the client and closes the WebSocket connection
-     * 
+     *
      * @details
      * Gracefully disconnects this client by:
      * - Setting the alive status to false
@@ -305,8 +352,15 @@ export class RtcClient {
      */
      public leave(): void {
         this.alive = false;
-        if (this.websocket) {
-            this.websocket.close();
+        // websocket 은 bind() 전까지 빈 객체({} as WebSocket)라 close 가 없다.
+        // 그대로 부르면 TypeError 가 나고, 그게 타이머나 이벤트 콜백에서 터지면
+        // 프로세스 전체가 위험해진다. 함수인지 확인하고 부른다.
+        if (typeof this.websocket?.close === 'function') {
+            try {
+                this.websocket.close();
+            } catch (err: any) {
+                logger.warn(`close 실패 (client ${this.cid}): ${err?.message ?? err}`);
+            }
         }
     }
 
@@ -319,7 +373,7 @@ export class RtcClient {
      * indicating that it's ready to send and receive messages.
      */
      public isOpened(): boolean {
-        return this.websocket.readyState == WebSocket.OPEN;
+        return this.websocket?.readyState === WebSocket.OPEN;
     }
 
     /**
@@ -370,7 +424,10 @@ export class RtcClient {
         }
         for (let msg of this.messageQueue) {
             msg.receiver = peer.agent;
-            return peer.websocket.send(JSON.stringify(msg));
+            // NOTE: 루프 첫 바퀴에서 return 하므로 큐의 첫 메시지만 나가고
+            // 아래의 messageQueue 비우기에 도달하지 못한다 (기존 동작).
+            // 여기서는 예외만 막고 동작은 그대로 둔다 — 라우팅 수정은 별건이다.
+            return peer.send(msg);
         }
         this.messageQueue = [];
         logger.info("sent queued messages from %s to %s", this.cid, peer.cid);
@@ -392,8 +449,11 @@ export class RtcClient {
             logger.error("invalid client send nothing");
             return;
         }
+        // NOTE: websocket 은 {} 로 초기화되므로 이 조건은 항상 참이고,
+        // 아래 큐 적재 경로에는 도달하지 않는다 (기존 동작).
+        // 여기서는 예외만 막고 동작은 그대로 둔다 — 라우팅 수정은 별건이다.
         if (peer.websocket) {
-            peer.websocket.send(JSON.stringify(message));
+            peer.send(message); // 열려 있을 때만 보내고, 실패해도 던지지 않는다
             return;
         }
         // if websocket is not opened, queue the message
@@ -409,8 +469,16 @@ export class RtcClient {
      * if the connection exists. The message is serialized to JSON before sending.
      */
     public send(message: any): void {
-        if(this.websocket) {
+        // 열려 있을 때만 보낸다. 빈 객체({} as WebSocket)이거나 이미 닫힌
+        // 소켓에 send 하면 던지는데, 상대가 끊은 것은 정상적인 상황이므로
+        // 여기서 삼킨다. (leave() 의 주석 참고)
+        if (!this.isOpened()) {
+            return;
+        }
+        try {
             this.websocket.send(JSON.stringify(message));
+        } catch (err: any) {
+            logger.warn(`send 실패 (client ${this.cid}): ${err?.message ?? err}`);
         }
     }
 

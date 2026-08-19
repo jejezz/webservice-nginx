@@ -218,14 +218,26 @@ export class WebSocketService {
             // Ping all clients in all rooms to check if they are alive
             for (let room of this.app.roomTable.roomTable.values()) {
                 room.clients.forEach((client: RtcClient) => {
+                    clients++;
                     if (client.isAlive() === false) {
                         logger.warn("Client is not alive, closing connection: ", client.cid);
                         client.leave();
-                    } else {
-                        client.setAlive(false);
-                        client.websocket.ping();
+                        return;
                     }
-                    clients++;
+                    client.setAlive(false);
+                    // 아직 소켓이 붙지 않은(또는 이미 닫힌) 클라이언트에 ping 하면
+                    // 던진다. 여기는 타이머 콜백이라 예외가 safeHandle 밖이고,
+                    // 그대로 두면 heartbeat 한 번이 서버 전체를 위협한다.
+                    // ping 을 건너뛰어도 위에서 alive 를 내려 놨으므로
+                    // 다음 주기에 정리된다.
+                    if (!client.isOpened()) {
+                        return;
+                    }
+                    try {
+                        client.websocket.ping();
+                    } catch (err: any) {
+                        logger.warn(`ping 실패 (client ${client.cid}): ${err?.message ?? err}`);
+                    }
                 });
             }
             logger.info(`Checking for alive clients... (${clients})`);
@@ -287,7 +299,7 @@ export class WebSocketService {
     private sendNotUnderstood(ws: WebSocket, raw: string) : void {
         if(ws != null) {
             logger.warn(`파싱할 수 없는 입력: ${raw.slice(0, 200)}`);
-            ws.send("I don't know what to do with:" + raw);
+            this.safeSend(ws, "I don't know what to do with:" + raw);
         }
     } 
 
@@ -305,8 +317,53 @@ export class WebSocketService {
      */
     private sendError(ws: WebSocket, e :  Error): void {
         if(ws != null) {
-            console.log(e.message);
-            ws.send("ERROR:" + e.message);
+            logger.warn(`connection error, closing: ${e.message}`);
+            this.safeSend(ws, "ERROR:" + e.message);
+            ws.close();
+        }
+    }
+
+    /**
+     * @brief 소켓이 열려 있을 때만 보낸다.
+     * @param ws 보낼 대상
+     * @param payload 보낼 문자열
+     *
+     * @details
+     * 닫혔거나 닫히는 중인 소켓에 ws.send 를 하면 오류가 나는데, 그게 메시지
+     * 핸들러 밖으로 새어 나가면 프로세스 전체가 위험해진다. 상대가 이미
+     * 끊은 것은 정상적인 상황이므로 조용히 버린다.
+     */
+    private safeSend(ws: WebSocket, payload: string): void {
+        if (ws.readyState !== WebSocket.OPEN) {
+            return;
+        }
+        try {
+            ws.send(payload);
+        } catch (err: any) {
+            logger.warn(`failed to send: ${err?.message ?? err}`);
+        }
+    }
+
+    /**
+     * @brief 메시지 핸들러의 예외 경계.
+     * @param ws 이 메시지를 보낸 연결
+     * @param label 로그에 남길 이름
+     * @param handler 실제 처리
+     *
+     * @details
+     * ws 의 'message' 리스너는 동기라, 안에서 던진 예외는 EventEmitter 를 지나
+     * uncaughtException 까지 올라간다. 이전에는 그 처리기가 process.exit(1)
+     * 이었으므로 **클라이언트 한 대의 잘못된 요청이 접속자 전원을 끊었다.**
+     * (정원 찬 방에 invite, 큐 1024개 초과 등 실제로 throw 하는 경로가 여럿 있다.)
+     *
+     * 여기서 잡아 그 연결 하나만 끊는다. 나머지 통화는 영향을 받지 않는다.
+     */
+    private safeHandle(ws: WebSocket, label: string, handler: () => void): void {
+        try {
+            handler();
+        } catch (err: any) {
+            logger.error(`[${label}] 처리 중 오류, 이 연결만 끊습니다: ${err?.message ?? err}`, err);
+            this.safeSend(ws, "ERROR:" + (err?.message ?? 'internal error'));
             ws.close();
         }
     }
@@ -382,15 +439,21 @@ export class WebSocketService {
      */
     private handleRtcMessage(ws: WebSocket, req: Request) {
      
-        ws.on('message', (data: WebSocketRawData) => {
+        // safeHandle 로 감싼다 — 이 안에서 던진 예외가 밖으로 나가면
+        // uncaughtException 까지 올라가 서버 전체가 영향을 받는다.
+        ws.on('message', (data: WebSocketRawData) => this.safeHandle(ws, 'RTC', () => {
             let json;
+            const raw = data.toLocaleString();
             try {
-                logger.info("received data " + data);
-                json = JSON.parse(data.toLocaleString());
+                json = JSON.parse(raw);
             }
             catch (e) {
-                return this.sendNotUnderstood(ws, data.toString());
+                return this.sendNotUnderstood(ws, raw);
             }
+            // 본문 전체를 info 로 남기지 않는다. 통화 하나에 SDP(수 KB)와
+            // ICE candidate 수십 개가 오가므로, 여기서 payload 를 찍으면
+            // 통화량이 아니라 로그 쓰기가 먼저 서버를 묶는다.
+            logger.debug('[RTC] message %s (%d bytes)', json.method, raw.length);
 
             if (json.method === undefined) {
                 return this.sendError(ws, Error("method field not found"));
@@ -416,8 +479,7 @@ export class WebSocketService {
                     logger.error("invalid message: unexpected 'method' " , json.method);
                     return;
             }
-
-        });
+        }));
 
         ws.once('error', error => {
             logger.error("error recieved: " + error.message + ", close connection");
@@ -494,7 +556,7 @@ export class WebSocketService {
                                 (error, initiater) => {
             if (error) {
                 logger.error("error to register on roomTable registration " + error);
-                ws.send(`ERROR: ${error}`);
+                this.safeSend(ws, `ERROR: ${error}`);
                 return false;
             }            
             logger.info(`invited to a room - done : initiater ? ${initiater}`);
@@ -502,7 +564,7 @@ export class WebSocketService {
                 logger.info(`now try to send firebase message = ${address}`);
                 findAndSendNotificationAsync(address, msg);
             }
-            ws.send(JSON.stringify({ "method":"update", "clientid": `${clientId}`}));
+            this.safeSend(ws, JSON.stringify({ "method":"update", "clientid": `${clientId}`}));
         });
 
         return true;
@@ -577,19 +639,21 @@ export class WebSocketService {
      * - Supports smart home and industrial IoT device integration
      */
     private handleIoTMessage(ws: WebSocket, req: Request) { 
-        ws.on('message', (data: WebSocketRawData) => {
+        // RTC 쪽과 같은 이유로 예외 경계를 둔다 (safeHandle 주석 참고).
+        ws.on('message', (data: WebSocketRawData) => this.safeHandle(ws, 'IOT', () => {
             let json;
+            const raw = data.toLocaleString();
             try {
-                //console.log("received data " + data);
-                json = JSON.parse(data.toLocaleString());
+                json = JSON.parse(raw);
             }
             catch (e) {
-                return this.sendNotUnderstood(ws, data.toString());
+                return this.sendNotUnderstood(ws, raw);
             }
 
             if (json.method === undefined) {
                 return this.sendError(ws, Error("method field not found"));
             }
+            logger.debug('[IOT] message %s (%d bytes)', json.method, raw.length);
             const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
             const ipv4 = this.extractIPv4FromMappedIPv6(ip ? ip.toString() : '');
             switch (json.method) {
@@ -598,11 +662,17 @@ export class WebSocketService {
                 case WS_METHODS.JOIN: this._handleIotJoin(ws, json); break;
                 case WS_METHODS.SUBSCRIBE: this._handleIotSubscribe(ws, json); break;
                 case WS_METHODS.IOT_CONTROL: this._handleIotControl(ws, json); break;
-                case WS_METHODS.IOT_STATUS: this._handleIotStatusAsync(ws, json); break;
+                // async 함수라 안에서 던진 예외는 safeHandle 이 못 잡는다.
+                // 거부된 프로미스가 unhandledRejection 으로 새지 않게 여기서 받는다.
+                case WS_METHODS.IOT_STATUS:
+                    this._handleIotStatusAsync(ws, json).catch((err: any) => {
+                        logger.error(`[IOT] status 처리 실패: ${err?.message ?? err}`);
+                    });
+                    break;
                 case WS_METHODS.UNSUBSCRIBE: this._handleIotUnsubscribe(ws, json); break;
                 case WS_METHODS.ERROR: this._handleIotError(ws, json); break;
             }
-        });
+        }));
         ws.once('error', error => {
             ws.close();
         });
@@ -856,7 +926,7 @@ export class WebSocketService {
             if(client.initiator) {
                 msg.clientid = Number(client.cid);
                 client.send(msg);
-                logger.info(`${Date.now()} - send control to ${msg.clientid} in the room ${msg.roomid}`);
+                logger.debug(`send control to ${msg.clientid} in the room ${msg.roomid}`);
                 return;
             }
         });
@@ -932,7 +1002,7 @@ export class WebSocketService {
             if (!client[1].initiator && client[1].isSubscribed()) {
                 msg.clientid = Number(client[1].cid);
                 client[1].send(msg);
-                logger.info(`${Date.now()} - send status to ${msg.clientid} in the room ${msg.roomid}`);
+                logger.debug(`send status to ${msg.clientid} in the room ${msg.roomid}`);
             }
             await new Promise(resolve => setTimeout(resolve, delayMs));
         }

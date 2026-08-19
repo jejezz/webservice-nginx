@@ -39,8 +39,15 @@ nano .env
 - `FIREBASE_SERVICE_ACCOUNT_PATH` - Path to Firebase Admin SDK JSON file
 
 ### Logging Configuration
-- `LOG_LEVEL` - Log level (error/warn/info/debug)
-- `CONSOLE_LOGGING` - Enable console logging (true/false)
+- `LOG_LEVEL` - Log level (error/warn/info/debug). 기본값은 프로덕션 `info`, 그 외 `debug`.
+  WebSocket 메시지 단위 로그는 `debug` 에 있다 — 시그널링 한 통화에 SDP 와 ICE
+  candidate 수십 개가 오가므로 프로덕션에서 `debug` 를 켜면 로그 쓰기가 병목이 된다.
+- `CONSOLE_LOGGING` - Enable console logging (true/false). 기본값은 프로덕션에서
+  `false` (pm2 가 stdout 을 파일로 받으므로 아래 파일 로그와 중복된다), 그 외 `true`.
+
+로그 파일은 `logs/` 에 날짜별로 쌓이고 20MB 마다 회전, 14일치만 남는다
+(`application-%DATE%.log`, `error-%DATE%.log`). 회전 없이 무한히 자라던
+`combined.log` 를 대체한 것이라, 남아 있는 옛 `logs/combined.log` 는 지워도 된다.
 
 ### WebSocket Configuration
 - `WS_PING_INTERVAL` - WebSocket ping interval in milliseconds

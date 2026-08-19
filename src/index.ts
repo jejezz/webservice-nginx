@@ -98,21 +98,36 @@ function validateEnvironmentVariables(): void {
 validateEnvironmentVariables();
 
 /**
- * @brief Global error handlers for uncaught exceptions and unhandled promise rejections
- * @details These handlers are critical for debugging silent exits and ensuring
- * proper error logging before process termination.
+ * @brief 최후의 안전망. 잡히지 않은 오류를 기록하되 프로세스는 살려 둔다.
+ *
+ * @details
+ * 이전에는 두 처리기가 모두 process.exit(1) 이었다. 그런데 이 서비스에서
+ * 예외가 나는 자리는 대부분 **특정 연결 하나**를 처리하는 도중이다.
+ *
+ *   - 정원(6명)이 찬 방에 invite → RtcRoom.createCallClient 가 throw
+ *   - 메시지 큐 1024개 초과 → RtcClient.enqueue 가 throw
+ *   - 규약에 없는 입력 → 각 핸들러의 throw
+ *
+ * ws 의 'message' 리스너는 동기라 이 throw 가 그대로 여기까지 올라왔고,
+ * 결과적으로 **클라이언트 한 대의 잘못된 요청이 접속자 전원을 끊었다.**
+ * 상태가 전부 프로세스 메모리에 있으니 재시작하면 모든 방이 사라진다.
+ * 접속자가 늘수록 이 일이 일어날 확률은 선형으로 올라간다.
+ *
+ * 그래서 이제 각 WebSocket 메시지 핸들러가 자기 예외를 직접 잡아
+ * 해당 연결만 끊는다 (websocketService.ts 의 safeHandle). 여기까지 오는 것은
+ * 그 경계를 빠져나온 예기치 못한 오류뿐이므로, 기록만 하고 계속 돈다.
+ *
+ * @note uncaughtException 이후의 프로세스 상태는 원칙적으로 신뢰할 수 없다.
+ * 그럼에도 살려 두는 쪽을 택한 이유는, 여기 도달하는 오류가 대개 한 연결에
+ * 국한된 것이고 죽을 때의 피해(전원 절단)가 훨씬 크기 때문이다. 메모리나
+ * 상태가 실제로 망가진 경우를 대비해 pm2 의 재시작에 여전히 기대고 있다.
  */
-
-// --- Global Error Handlers (VERY IMPORTANT for debugging silent exits) ---
 process.on('uncaughtException', (err) => {
-  console.error('UNCAUGHT EXCEPTION:');
-  console.error(err.stack);
-  process.exit(1); // Exit with a failure code
+  logger.error('UNCAUGHT EXCEPTION (프로세스는 계속 실행):', err);
 });
 
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('UNHANDLED REJECTION at:', promise, 'reason:', reason);
-  process.exit(1); // Exit with a failure code
+process.on('unhandledRejection', (reason) => {
+  logger.error('UNHANDLED REJECTION (프로세스는 계속 실행):', reason);
 });
 
 /**
@@ -479,6 +494,21 @@ export class CallFusion {
      */
     public startService() : void {
         const HTTPS_PORT = process.env.HTTPS_PORT ? parseInt(process.env.HTTPS_PORT) : 28090;
+
+        // 무엇이 치명적인지 여기서 분명히 한다.
+        //
+        // uncaughtException 처리기가 더 이상 종료하지 않으므로, 기동 실패
+        // (EADDRINUSE 등)를 그냥 두면 듣지도 못하는 프로세스가 남아 pm2 는
+        // 정상으로 본다. 그래서 아직 listen 하지 못한 단계의 오류만 종료로
+        // 처리하고, 이미 서비스 중일 때 나는 소켓 오류는 기록만 한다.
+        this.httpsServer.on('error', (err: NodeJS.ErrnoException) => {
+            if (!this.httpsServer.listening) {
+                logger.error(`서버를 시작할 수 없습니다 (포트 ${HTTPS_PORT}): ${err.message}`);
+                process.exit(1);
+            }
+            logger.error(`HTTPS 서버 오류 (계속 실행): ${err.message}`);
+        });
+
         logger.info(`rtc-relay-server is listening on https://0.0.0.0:${HTTPS_PORT}`);
         this.httpsServer.listen(HTTPS_PORT, () => {
             //let endpoints = new WebSocketRouter().express.get('websocket endpoints');

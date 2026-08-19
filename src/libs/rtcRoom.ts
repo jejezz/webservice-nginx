@@ -284,6 +284,7 @@ export class RtcRoom {
         logger.info(`remove client ${client.cid} from room ${this.id} due to timeout`);
         if (client === this.clients.get(client.cid)) {
             if (!client.isOpened()) {
+                client.unbind(); // 소켓 역참조를 끊는다 (RtcRoomTable.findClient 가 쓴다)
                 this.clients.delete(client.cid);
                 if (this.isEmpty() && this.emptyCallback) {
                     this.emptyCallback();
@@ -342,7 +343,7 @@ export class RtcRoom {
     public sendMessageTo(agent: string, message: any): void {
         let sender = null;
         for (const client of this.clients.values()) {
-            logger.info(`this client is ${client.agent}, other is ${agent}`);
+            logger.debug(`this client is ${client.agent}, other is ${agent}`);
             if(client.agent === agent) {
                 if (this.clients.size === 1)
                     return client.enqueue(message);
@@ -374,6 +375,7 @@ export class RtcRoom {
         if (!c) return;
         c.removeTimeout();
         c.leave();
+        c.unbind(); // 소켓 역참조를 끊는다 (RtcRoomTable.findClient 가 쓴다)
         this.clients.delete(cid);
         logger.info(`removed client ${cid} from room ${this.id}`);
         if (this.isEmpty() && this.emptyCallback) {

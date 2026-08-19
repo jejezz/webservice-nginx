@@ -1,7 +1,7 @@
 
 import WebSocket from 'ws';
 import { RtcRoom, InviteCallback } from './rtcRoom';
-import { RtcClient } from './rtcClient';
+import { RtcClient, findClientByWebsocket } from './rtcClient';
 import logger from './logger'; // Import your configured logger
 
 
@@ -166,29 +166,28 @@ export class RtcRoomTable {
     }
 
     /**
-     * 
-     * @param {WebSocket} ws 
+     * 소켓에 묶인 RtcClient 를 찾는다. pong 마다 불리므로 O(1) 이어야 한다.
+     * @param {WebSocket} ws
      * @returns RtcClient instance
      */
     public findClient(ws:WebSocket):RtcClient | null {
-        for (let r of this.roomTable.values()) {
-            if(r.findByWebsocket(ws))
-                return r.findByWebsocket(ws);
-        }
-        return null;
+        return findClientByWebsocket(ws);
     }
 
     /**
      * remove RtcClient with WebSocket from all rooms.
-     * @param {WebSocket} ws 
+     * 연결 종료마다 불리므로 O(1) 이어야 한다 — 클라이언트가 자기 방 번호를
+     * 들고 있으니 역참조로 찾아 그 방만 건드린다.
+     * @param {WebSocket} ws
      */
     public removeClientFromRooms(ws:WebSocket):void {
-        for (let r of this.roomTable.values()) {
-            let client:RtcClient | null= r.findByWebsocket(ws);
-            if(client) {
-                r.removeClientIfJoined(client.cid, ws);
-                return;
-            }
+        const client = findClientByWebsocket(ws);
+        if (!client) {
+            return;
+        }
+        const room = this.findById(client.rid);
+        if (room) {
+            room.removeClientIfJoined(client.cid, ws);
         }
     }
 
