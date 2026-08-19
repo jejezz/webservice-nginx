@@ -1,0 +1,44 @@
+*.seed
+*.log
+*.csv
+*.dat
+*.out
+*.pid
+*.gz
+*.swp
+
+pids
+logs
+results
+tmp
+
+# Coverage reports
+coverage
+
+# API keys and secrets
+.env
+.secret-room-id
+
+# Dependency directory
+node_modules
+
+# Editors
+.idea
+*.iml
+
+# OS metadata
+.DS_Store
+Thumbs.db
+
+# Ignore built ts files
+dist/**/*
+
+# ignore yarn.lock
+yarn.lock
+
+# 대시보드 빌드 산출물
+web/dist
+web/node_modules
+
+# 서비스 계정 키 등 비밀값 (database/secrets 와 같은 규약)
+secrets/
