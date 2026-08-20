@@ -31,15 +31,15 @@ function loadAdminSecret() {
   try {
     adminSecret = fs.readFileSync(config.ADMIN_SECRET_FILE, 'utf8').trim() || null;
     if (!adminSecret) {
-      adminSecretError = `비어 있습니다: ${config.ADMIN_SECRET_FILE}`;
+      adminSecretError = `비밀 파일이 비어 있습니다: ${config.ADMIN_SECRET_FILE}`;
     }
   } catch (err) {
     adminSecretError = err.code === 'ENOENT'
-      ? `없습니다: ${config.ADMIN_SECRET_FILE} — sudo ./install.sh --apply 를 먼저 실행하세요`
-      : `읽을 수 없습니다: ${config.ADMIN_SECRET_FILE} (${err.code})`;
+      ? `비밀 파일이 없습니다: ${config.ADMIN_SECRET_FILE} — sudo ./install.sh --apply 를 먼저 실행하세요`
+      : `비밀 파일을 읽을 수 없습니다: ${config.ADMIN_SECRET_FILE} (${err.code})`;
   }
 
-  if (adminSecretError) log.warn(`Admin API 비밀번호를 ${adminSecretError}`);
+  if (adminSecretError) log.warn(`Admin API — ${adminSecretError}`);
   return adminSecret;
 }
 

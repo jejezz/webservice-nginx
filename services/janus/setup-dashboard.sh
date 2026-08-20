@@ -111,7 +111,12 @@ report() {
         ok "pm2 에 떠 있습니다 (pid $(pm2 pid janus-dashboard | tr -d '[:space:]'))"
     else
         no "pm2 에 떠 있지 않습니다"
-        echo "         pm2-conf/dashboard.ini 의 enabled 를 true 로 바꾼 뒤"
+        # 선언이 꺼져 있는 것과 아직 안 띄운 것은 할 일이 다르다.
+        if grep -qE '^[[:space:]]*enabled[[:space:]]*=[[:space:]]*false' "${SCRIPT_DIR}/pm2-conf/dashboard.ini"; then
+            echo "         pm2-conf/dashboard.ini 의 enabled 를 true 로 바꾼 뒤:"
+        else
+            echo "         선언은 켜져 있습니다. 띄우려면:"
+        fi
         echo "         cd pm2 && pm2 start ecosystem.config.js --only janus-dashboard && pm2 save"
     fi
 
