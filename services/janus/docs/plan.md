@@ -511,10 +511,66 @@ POST /janus-api/  → {"janus":"success", …}          ✅
 
 | | 할 일 | 확인 |
 |---|---|---|
-| 4-1 | 브라우저용 SIP 계정 둘 생성 (`2001` · `2002`) | ⬜ **사람이 비밀번호를 정합니다** (아래) |
-| 4-2 | 시험 클라이언트에서 `register` (③의 `proxy` 주소로) | 🔸 화면은 준비됨. Janus 의 `registered` 이벤트를 기다림 |
-| 4-3 | Kamailio 가 실제로 등록을 잡았는지 | ⬜ kamailio 대시보드의 **등록 단말** 화면에 `2001` |
-| 4-4 | **Kamailio 가 NAT 로 오판하지 않는지** (③) | ⬜ `sngrep` 으로 REGISTER 확인 · rtpproxy 오류가 로그에 없을 것 |
+| 4-1 | 브라우저용 SIP 계정 둘 생성 (`2001` · `2002`) | ✅ `pluto.org`, 평문 컬럼 채워짐 |
+| 4-2 | 시험 클라이언트에서 `register` (③의 `proxy` 주소로) | ✅ `registration_status: registered` |
+| 4-3 | Kamailio 가 실제로 등록을 잡았는지 | ✅ Kamailio 저널에 `2001` REGISTER |
+| 4-4 | **Kamailio 가 NAT 로 오판하지 않는지** (③) | ⬜ 등록 단말 화면의 `received` 가 비어 있어야 함 (아래) |
+
+#### 4-2·4-3 에서 확인한 것 — 전 구간이 이어집니다
+
+브라우저에서 실제로 눌러 확인했습니다. nginx 접근 로그와 Janus Admin API 가
+같은 이야기를 합니다.
+
+```
+22:16:19  POST /janus-api                          200   ← 세션 생성. 301 이 없다
+22:16:19  POST /janus-api/<세션>                    200   ← janus.plugin.sip attach
+22:16:27  POST /janus-api/<세션>/<핸들>              200   ← register 요청
+22:16:27  GET  /janus-api/<세션>?rid=…&maxev=10      200   ← long-poll 로 이벤트 수신
+22:16:27  kamailio: REGISTER … for 2001
+```
+
+Janus Admin API 의 `handle_info` 가 등록 상태를 그대로 보여 줍니다.
+
+```json
+{
+  "identity": "sip:2001@pluto.org",
+  "registration_status": "registered",
+  "call_status": "idle"
+}
+```
+
+> **`POST /janus-api` 가 200 입니다.** 3단계에서 고친 끝 슬래시 문제(위험 목록 9)가
+> 실제 브라우저에서도 해결됐다는 뜻입니다. 여기가 301 이었다면 세션 생성부터
+> 실패했을 자리입니다.
+
+#### 곁가지로 확인된 것 — 시그널링은 이미 바깥에서도 됩니다
+
+브라우저가 `https://jejezzhome.iptime.org:28443/janus/dashboard/test-call` 로
+붙었습니다. nginx 가 본 클라이언트 주소는 공유기(`192.168.0.1`)입니다.
+
+즉 **9단계에서 "시그널링은 추가 포워딩이 필요 없다"고 적어 둔 것이 이미
+사실로 확인**됐습니다. `28443 → 443` 이 그대로 동작합니다. 9단계에 남는 것은
+미디어(UDP `20000-20200`) 포워딩과 `nat_1_1_mapping` 뿐입니다.
+
+#### 4-4 는 화면 한 곳을 보면 끝납니다
+
+`ul.dump` RPC 는 `/run/kamailio` FIFO 로만 되고 그 디렉토리는 `kamailio` 그룹
+전용이라, 이 계획서 쪽에서는 읽을 수 없습니다. kamailio 대시보드가 그 일을
+이미 합니다.
+
+```
+https://<서버>/kamailio/dashboard  →  등록 단말  →  2001
+```
+
+| 보는 곳 | 기대값 | 다르면 |
+|---|---|---|
+| `contact` | `sip:2001@192.168.0.252:…` | `127.0.0.1` 이면 ③의 `local_ip` 가 안 먹은 것 |
+| `received` | **비어 있음** | 값이 있으면 Kamailio 가 NAT 로 판정한 것 |
+
+`received` 는 `fix_nated_register()` 가 **NAT 로 판정했을 때만** 채웁니다.
+비어 있으면 `FLT_NATS` 가 서지 않았다는 뜻이고, 그러면 `route[NATMANAGE]` 가
+첫 줄에서 돌아가 rtpengine/rtpproxy 를 부르지 않습니다. 지금 rtpengine 데몬이
+없는 상태와 맞아떨어져야 5단계 미디어가 정상입니다.
 
 계정 비밀번호는 **평문 컬럼이 채워져야** 합니다. 이 서버의 `auth_db` 는
 `calculate_ha1=yes` 라 `ha1` 은 쓰지 않습니다 (kamailio README 7-4).
