@@ -1,0 +1,53 @@
+# Janus HTTP 트랜스포트 — OWNED-BY-WEBSERVICES
+#
+# derived-from-sample: a15c632d2e3ae077   (janus.transport.http.jcfg.sample, Janus 1.4.1)
+#
+# 이 파일은 services/janus/janus.transport.http.jcfg 의 사본입니다.
+# **직접 고치지 마세요** — install.sh --apply 가 덮어씁니다.
+#
+# 이 프로젝트가 쓰는 **유일한** 시그널링 트랜스포트입니다. janus.js 는 여기에
+# REST + long-poll 로 붙습니다. WebSocket 을 쓰지 않는 이유는 성능이 아니라
+# /health 때문입니다 — docs/plan.md 의 ① 절.
+
+general: {
+	# 전송량과 로그를 줄입니다. 사람이 읽을 일이 없습니다.
+	json = "compact"
+
+	# nginx 의 location 과 **같아야** 합니다 (nginx-conf/service.ini 의
+	# [route:api]). proxy_path 를 비워 두므로 원본 URI 가 그대로 오기 때문입니다.
+	#
+	# 배포본 기본값 "/janus" 를 그대로 두면 대시보드의 /janus/ 라우트와
+	# 겹칩니다. 그래서 API 쪽을 옮겼습니다.
+	base_path = "/janus-api"
+
+	http = true
+	port = 8088
+
+	# nginx 가 TLS 를 끊고 루프백으로 넘깁니다. 여기에 묶어 두면 nginx 를
+	# 우회한 직접 접근이 차단됩니다 (다른 서비스와 같은 자세).
+	ip = "127.0.0.1"
+
+	# Janus 가 직접 TLS 를 끊지 않습니다. 인증서는 nginx/cert/ 한 곳에만 둡니다.
+	https = false
+}
+
+admin: {
+	# 관찰용 대시보드(janus-dashboard, 28087)가 세션·핸들·미디어 상태를
+	# 읽는 곳입니다. 모든 요청에 janus.jcfg 의 admin_secret 이 필요합니다.
+	#
+	# ⚠️ **nginx 라우트를 만들지 않습니다.** 같은 장비의 대시보드 프로세스만
+	#    부릅니다. 비밀번호는 브라우저로 내려가지 않습니다.
+	admin_base_path = "/admin"
+	admin_http = true
+	admin_port = 7088
+	admin_ip = "127.0.0.1"
+	admin_https = false
+}
+
+cors: {
+	# 같은 출처(nginx 뒤 같은 호스트)에서만 부르므로 CORS 를 열지 않습니다.
+}
+
+certificates: {
+	# https = false 이므로 쓰지 않습니다.
+}

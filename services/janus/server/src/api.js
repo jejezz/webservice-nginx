@@ -1,0 +1,85 @@
+/**
+ * 대시보드가 부르는 API. 모두 manager 세션이 있어야 한다.
+ *
+ * 3단계에서는 개요와 시험 클라이언트 설정 둘뿐입니다. 세션·핸들·미디어 화면은
+ * 8단계에서 Admin API 로 채웁니다 (docs/plan.md).
+ */
+const express = require('express');
+const janus = require('./janus');
+const config = require('./config');
+const { requireAuth } = require('./auth/session');
+
+function createApiRouter() {
+  const router = express.Router();
+  router.use(requireAuth);
+
+  /**
+   * 개요 — Janus 가 살아 있는가, 무엇이 올라와 있는가.
+   *
+   * Janus 가 죽어 있어도 200 으로 답하고 running:false 로 알린다. 대시보드가
+   * 오류 화면 대신 "Janus 가 떠 있지 않습니다" 를 보여줄 수 있어야 한다.
+   */
+  router.get('/overview', async (req, res) => {
+    const [i, adminPing] = await Promise.all([janus.info(), janus.ping()]);
+
+    if (!i.ok) {
+      return res.json({
+        running: false,
+        error: i.error,
+        latencyMs: i.latencyMs,
+        admin: { ok: false, error: adminPing.error },
+        apiBase: config.JANUS_API_BASE,
+      });
+    }
+
+    const d = i.data;
+    return res.json({
+      running: true,
+      latencyMs: i.latencyMs,
+      apiBase: config.JANUS_API_BASE,
+      server: {
+        name: d.name,
+        version: d.version_string,
+        commit: d['commit-hash'],
+        compiledAt: d['compile-time'],
+        serverName: d['server-name'],
+        localIp: d['local-ip'],
+        sessionTimeout: d['session-timeout'],
+        acceptingNewSessions: d['accepting-new-sessions'],
+      },
+      ice: {
+        lite: d['ice-lite'],
+        tcp: d['ice-tcp'],
+        fullTrickle: d['full-trickle'],
+        ipv6: d.ipv6,
+        nomination: d['ice-nomination'],
+      },
+      // 이름만 추린다. 화면에서 "무엇이 올라와 있는가" 만 보면 된다.
+      plugins: Object.keys(d.plugins || {}).sort(),
+      transports: Object.keys(d.transports || {}).sort(),
+      admin: { ok: adminPing.ok, error: adminPing.error || null },
+    });
+  });
+
+  /**
+   * 시험 클라이언트가 Janus 에 붙는 데 필요한 값.
+   *
+   * api_secret 이 여기에 실려 브라우저로 내려간다. **로그인된 세션에만** 준다는
+   * 것이 이 엔드포인트의 존재 이유다 (docs/plan.md ⑤). 완전한 방어는 아니고,
+   * 진짜 관문은 Kamailio 의 digest 인증이다.
+   */
+  router.get('/testcall-config', (req, res) => {
+    res.json({
+      // 상대 경로다. 공유기가 외부 28443 을 내부 443 으로 넘기므로 서버는
+      // 브라우저가 아는 호스트·포트를 알 수 없다. 브라우저가 현재 주소로 푼다.
+      janusPath: config.JANUS_PUBLIC_PATH,
+      apiSecret: janus.loadApiSecret(),
+      sipProxy: config.SIP_PROXY,
+      sipDomain: config.SIP_DOMAIN,
+    });
+  });
+
+  return router;
+}
+
+module.exports = { createApiRouter };
