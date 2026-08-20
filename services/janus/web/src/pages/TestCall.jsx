@@ -232,6 +232,18 @@ export default function TestCall() {
   const connected = state === 'connected';
   const registered = regState === 'registered';
 
+  /*
+   * 버튼을 왜 누를 수 없는지 화면에 적는다.
+   *
+   * 처음에는 그냥 disabled 로만 두었는데, 비밀번호를 넣기 전에는 버튼이 죽어
+   * 있고 이유가 어디에도 없어서 "연결은 됐는데 등록 버튼이 안 눌린다" 로만
+   * 보였다. 비활성 이유를 말하지 않는 버튼은 고장난 버튼과 구분되지 않는다.
+   */
+  const missing = [];
+  if (!user.trim()) missing.push('계정');
+  if (!secret) missing.push('비밀번호');
+  if (!proxy.trim()) missing.push('proxy');
+
   return (
     <div className="space-y-6">
       <Alert>
@@ -334,7 +346,9 @@ export default function TestCall() {
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="sip-secret" className="text-xs">비밀번호</Label>
+              <Label htmlFor="sip-secret" className="text-xs">
+                비밀번호 <span className="text-destructive">*</span>
+              </Label>
               <Input
                 id="sip-secret"
                 type="password"
@@ -342,7 +356,7 @@ export default function TestCall() {
                 onChange={(e) => setSecret(e.target.value)}
                 disabled={!connected || registered}
                 autoComplete="current-password"
-                placeholder="저장하지 않습니다"
+                placeholder="계정의 SIP 비밀번호"
               />
             </div>
             <div className="space-y-1.5">
@@ -355,13 +369,18 @@ export default function TestCall() {
                 className="font-mono"
               />
             </div>
-            <div className="sm:col-span-3 flex items-center gap-2">
-              <Button type="submit" disabled={!connected || registered || !user || !secret || !proxy}>
+            <div className="sm:col-span-3 flex flex-wrap items-center gap-2">
+              <Button type="submit" disabled={!connected || registered || missing.length > 0}>
                 등록
               </Button>
               <Button type="button" variant="outline" onClick={unregister} disabled={!registered}>
                 해지
               </Button>
+              {connected && !registered && missing.length > 0 && (
+                <span className="text-xs text-muted-foreground">
+                  {missing.join(' · ')} 을(를) 채우면 누를 수 있습니다
+                </span>
+              )}
               {registeredAs && (
                 <span className="font-mono text-xs text-muted-foreground">{registeredAs}</span>
               )}
@@ -386,8 +405,10 @@ export default function TestCall() {
           )}
 
           <p className="text-xs text-muted-foreground">
-            비밀번호는 저장하지 않습니다. 이 화면에서 Janus 로 바로 넘어가고,
-            Kamailio 에는 Janus 가 digest 로 응답합니다.
+            비밀번호는 <strong>계정을 만들 때 정한 SIP 비밀번호</strong>입니다
+            (manager 로그인 비밀번호가 아닙니다). 어디에도 저장하지 않고 이 화면에서
+            Janus 로 바로 넘어가며, Kamailio 에는 Janus 가 digest 로 응답합니다.
+            새로 고치면 다시 입력해야 합니다.
           </p>
         </CardContent>
       </Card>
