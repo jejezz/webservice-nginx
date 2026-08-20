@@ -511,13 +511,59 @@ POST /janus-api/  → {"janus":"success", …}          ✅
 
 | | 할 일 | 확인 |
 |---|---|---|
-| 4-1 | 브라우저용 SIP 계정 둘 생성 (`2001` · `2002`) | `sudo /usr/sbin/kamctl show` · kamailio 대시보드의 SIP 계정 화면 |
-| 4-2 | 시험 클라이언트에서 `register` (③의 `proxy` 주소로) | Janus 가 `registered` 이벤트 |
-| 4-3 | Kamailio 가 실제로 등록을 잡았는지 | `sudo /usr/sbin/kamctl ul show` 에 `2001` |
-| 4-4 | **Kamailio 가 NAT 로 오판하지 않는지** (③) | `sngrep` 으로 REGISTER 확인 · rtpproxy 오류가 로그에 없을 것 |
+| 4-1 | 브라우저용 SIP 계정 둘 생성 (`2001` · `2002`) | ⬜ **사람이 비밀번호를 정합니다** (아래) |
+| 4-2 | 시험 클라이언트에서 `register` (③의 `proxy` 주소로) | 🔸 화면은 준비됨. Janus 의 `registered` 이벤트를 기다림 |
+| 4-3 | Kamailio 가 실제로 등록을 잡았는지 | ⬜ kamailio 대시보드의 **등록 단말** 화면에 `2001` |
+| 4-4 | **Kamailio 가 NAT 로 오판하지 않는지** (③) | ⬜ `sngrep` 으로 REGISTER 확인 · rtpproxy 오류가 로그에 없을 것 |
 
 계정 비밀번호는 **평문 컬럼이 채워져야** 합니다. 이 서버의 `auth_db` 는
 `calculate_ha1=yes` 라 `ha1` 은 쓰지 않습니다 (kamailio README 7-4).
+
+#### 4-1 계정은 자동으로 만들지 않습니다
+
+`services/kamailio/` 가 그렇게 정해 두었습니다 — *"계정과 비밀번호는 사람이 정해야
+하고, 스크립트 인자로 받으면 셸 히스토리와 `ps` 에 남습니다"* (accounts.md).
+여기서도 따릅니다. 이 계획서가 계정을 만들지 않는 것은 빠뜨린 것이 아닙니다.
+
+**kamailio 대시보드에서 만드는 것을 권합니다** — sudo 도, 셸 히스토리도 없습니다.
+
+```
+https://<서버>/kamailio/dashboard  →  SIP 계정  →  추가
+    사용자명  2001 / 2002
+    도메인    pluto.org          ← Kamailio 의 alias. 다르면 대시보드가 거절한다
+    비밀번호  6자 이상
+```
+
+그쪽 대시보드는 도메인이 Kamailio 의 `alias` 목록에 있는지 검사하고, 없으면
+만들지 않습니다. *"이대로 만들면 등록되지 않는 계정이 됩니다"* 라는 판단이
+이미 들어 있습니다.
+
+셸에서 하려면:
+
+```bash
+sudo /usr/sbin/kamctl add 2001 '<비밀번호>'
+```
+
+`/usr/sbin/` 절대경로여야 합니다. `PATH` 의 `kamctl` 은 구동 중이 아닌 소스빌드
+5.7.7 판입니다 (kamailio README 의 "두 벌 설치").
+
+#### 시험 클라이언트에 붙인 것
+
+`/janus/dashboard/test-call` 이 두 칸으로 나뉩니다.
+
+| | 무엇 |
+|---|---|
+| 1. Janus 연결 | 세션 생성 · `janus.plugin.sip` attach (3단계) |
+| 2. SIP 등록 | 계정 · 비밀번호 · proxy 를 넣고 REGISTER (4단계) |
+
+Janus SIP 플러그인이 보내는 `registering` → `registered` / `registration_failed`
+이벤트를 그대로 상태와 로그에 보여 줍니다. 실패하면 흔한 두 원인을 화면에서
+짚어 줍니다 — `401` 이면 평문 `password` 컬럼이 비었거나 비밀번호가 다르고,
+`403 Not relaying` 이면 SIP 도메인이 Kamailio 의 alias 와 다릅니다.
+
+**비밀번호는 저장하지 않습니다.** 화면에서 Janus 로 바로 넘어가고, Kamailio 에는
+Janus 가 digest 로 응답합니다. 새로 고치면 다시 입력해야 합니다. 대시보드
+서버가 `api_secret` 은 내려주지만 SIP 비밀번호는 다루지 않습니다.
 
 ### 5단계 — 시험 통화 ① 브라우저 ↔ 브라우저
 

@@ -48,7 +48,7 @@ services/janus/
 | 1 | 계획서 · 서비스 선언 · 점검 스크립트 | ✅ **완료** (2026-08-20) |
 | 2 | Janus 설정 소유 (`.jcfg` 넷) · systemd 유닛 · 기동 | ✅ **완료** (2026-08-20) |
 | 3 | 대시보드 서비스 · nginx 라우트 개방 | ✅ **완료** — 브라우저 확인만 남음 |
-| 4 | Kamailio 연동 (SIP 등록) | ⬜ |
+| 4 | Kamailio 연동 (SIP 등록) | 🔸 화면 준비됨 — **SIP 계정 생성이 먼저** |
 | 5 | 시험 통화 ① 브라우저 ↔ 브라우저 | ⬜ |
 | 6 | 시험 통화 ② 브라우저 ↔ 소프트폰 | ⬜ |
 | 7 | 시험 통화 ③ 브라우저 ↔ 인터폰 | ⬜ |
@@ -81,7 +81,7 @@ SIP 플러그인 attach · long-poll 이벤트 수신 · Admin API 조회까지
 |---|---|
 | `https://<서버>/manager` | `janus` · `janus-dashboard` 둘 다 정상 |
 | `https://<서버>/janus/dashboard` | 개요 — 버전 · ICE · 올라온 모듈 |
-| `https://<서버>/janus/dashboard/test-call` | **연결** → "연결됨" 이면 3단계 끝 |
+| `https://<서버>/janus/dashboard/test-call` | **연결** → "연결됨" · 그 아래에서 SIP 등록 |
 
 ### 다시 세우거나 되돌릴 때
 
