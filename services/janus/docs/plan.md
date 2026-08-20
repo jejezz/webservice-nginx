@@ -374,9 +374,20 @@ Janus 를 올릴 때마다 라이브러리와 서버 버전이 어긋날 수 있
 | 2-1 | `.jcfg` 넷 작성 (②) — 포트·ICE·`base_path`·`local_ip` (③⑦) | ✅ 작성·검증 완료 |
 | 2-2 | `secrets/{admin,api}-secret` 생성과 치환 (④⑤) | ✅ `install.sh --apply` 에 구현 |
 | 2-3 | `janus` 시스템 사용자 + `janus.service` | ✅ 작성 완료. 사용자는 이미 있음(uid 997) |
-| 2-4 | **`sudo ./install.sh --apply`** — 백업 · 설치 · 기동 · 실패 시 롤백 | ⬜ **사람이 실행해야 합니다** |
-| 2-5 | 시그널링 API 가 실제로 응답하는지 | ⬜ `curl -s http://127.0.0.1:8088/janus-api/info` |
-| 2-6 | Admin API 가 루프백에서만 열렸는지 | ⬜ `ss -lnt \| grep 7088` 이 `127.0.0.1` |
+| 2-4 | **`sudo ./install.sh --apply`** — 백업 · 설치 · 기동 · 실패 시 롤백 | ✅ `active` · `enabled` |
+| 2-5 | 시그널링 API 가 실제로 응답하는지 | ✅ `GET /janus-api/info → 200` |
+| 2-6 | Admin API 가 루프백에서만 열렸는지 | ✅ `127.0.0.1:7088` |
+
+**✅ 2단계 완료 (2026-08-20).** 저널이 정한 것을 그대로 보여줍니다.
+
+```
+Adding 'enp2s0' to the ICE enforce list...
+ICE port range: 20000-20200
+HTTP webserver started (port 8088, /janus-api path listener)...
+Admin/monitor HTTP webserver started (port 7088, /admin path listener)...
+[WARN] No WebSockets server started, giving up...          ← 의도한 대로 (①)
+플러그인: sip · echotest 둘뿐                                ← plugins.disable 이 먹었다
+```
 
 > `systemctl is-active` 만 믿지 않습니다. Kamailio 에서 **포트도 열리고
 > `is-active` 도 정상인데 WS 가 전혀 동작하지 않은** 전례가 있습니다
@@ -424,9 +435,9 @@ LAN 안에서 시험하는 5~7단계 동안은 문제가 되지 않습니다.
 |---|---|---|
 | 3-1 | `server/` — Express, `/health`, manager 세션 검증 | ✅ 루프백에서 확인 (아래) |
 | 3-2 | `web/` — 개요 화면 + 시험 클라이언트 페이지 | ✅ `setup-dashboard.sh --build` 통과 |
-| 3-3 | 선언 셋을 `enabled = true` 로 + nginx 반영 | 🔸 선언은 켰고 **반영은 sudo 필요** |
-| 3-4 | manager 대시보드에 `janus` · `janus-dashboard` 가 **정상**으로 뜨는지 | ⬜ `https://<서버>/manager` |
-| 3-5 | 브라우저에서 `janus.js` 가 Janus 에 붙는지 (세션 생성까지) | ⬜ `/janus/dashboard/test-call` 에서 "연결됨" |
+| 3-3 | 선언 셋을 `enabled = true` 로 + nginx 반영 | ✅ 반영됨 |
+| 3-4 | manager 가 보는 헬스가 둘 다 정상인지 | ✅ `/janus-api/info` 200 · `/health` 200 |
+| 3-5 | 브라우저에서 `janus.js` 가 Janus 에 붙는지 (세션 생성까지) | 🔸 HTTP 경로는 검증됨. **브라우저 클릭만 남음** |
 
 3-4 가 ①의 결론을 검증하는 지점입니다. `janus` 가 여기서 초록이 아니면 헬스
 경로 결정을 다시 봐야 합니다.
@@ -453,6 +464,42 @@ LAN 안에서 시험하는 5~7단계 동안은 문제가 되지 않습니다.
 > `degraded` 로 낮추지 않고 `details` 로 드러냅니다. Janus 자체의 헬스는
 > `nginx-conf/service.ini` 가 `/janus-api/info` 로 따로 선언합니다 —
 > manager 는 그쪽을 봅니다. (kamailio-dashboard 와 같은 판단)
+
+#### 3-3·3-4 에서 확인한 것 — nginx 를 거쳐 실제로
+
+`janus.js` 가 하는 순서를 `curl` 로 그대로 재현했습니다. 브라우저의 JS 만 빼고
+경로 전체가 검증됩니다.
+
+| 단계 | 결과 |
+|---|---|
+| `api_secret` 없이 세션 생성 | ✅ `403 Unauthorized request` |
+| `api_secret` 붙여 `POST /janus-api` | ✅ `success` — 세션 id |
+| `POST /janus-api/<세션>` 로 `janus.plugin.sip` attach | ✅ `success` — 핸들 id |
+| long-poll `GET /janus-api/<세션>?rid=…` | ✅ **30.03초** 뒤 `{"janus":"keepalive"}` |
+| Admin API `list_sessions` 로 그 세션이 보이는가 | ✅ 보임. `destroy` 후 `[]` |
+| 기존 서비스 (`/manager` · `/kamailio/` · `/rtc-relay/`) | ✅ 영향 없음 |
+
+long-poll 이 30초를 꽉 채우고 돌아온 것이 중요합니다. nginx 가 먼저 끊지 않았고
+(`timeout = 120`), 버퍼링에 갇히지도 않았다는 뜻입니다 (`buffering = off`).
+이벤트 수신 경로가 실제로 동작합니다.
+
+#### ⚠️ 여기서 결함 하나가 나왔습니다 — `/janus-api` 의 끝 슬래시
+
+`location` 을 `/janus-api/` 로 두었더니 nginx 가 슬래시 없는 요청에 301 을
+냈습니다. 그런데 `janus.js` 는 **세션을 만들 때 정확히 그 주소로 POST** 합니다 —
+`server + "/" + sessionId` 이 되는 것은 세션이 생긴 다음부터입니다. POST 는 301 을
+따라가며 본문을 잃으므로 **연결 자체가 되지 않습니다.**
+
+```
+POST /janus-api   → 301 (Location: /janus-api/)     ❌ 세션 생성이 여기서 죽는다
+POST /janus-api/  → {"janus":"success", …}          ✅
+```
+
+슬래시를 빼면 `/janus-api` 와 `/janus-api/<세션>/<핸들>` 이 모두 하나에 걸립니다.
+`/manager` 와 `/stock-analyzer` 도 같은 이유로 슬래시가 없습니다.
+
+이런 종류는 설정을 읽어서는 보이지 않습니다. 실제로 그 순서대로 불러 봐야
+드러납니다.
 
 #### 3단계에서 정한 것 — 정적 파일을 어디까지 인증 없이 줄 것인가
 
@@ -554,6 +601,9 @@ LAN 시험이 끝난 뒤에 손댑니다. 여기서부터 라우터 설정이 �
 | 6 | Admin API 가 **기본 비밀번호**로 열림 | `janusoverlord` | ④ |
 | 7 | `janus.js` 와 서버 버전 불일치 | 라이브러리를 커밋해 두고 Janus 만 올림 | 빌드 때 `/opt/janus` 에서 복사 |
 | 8 | 재부팅 후 Janus 가 안 뜸 | systemd `enable` 을 빠뜨림 | 2-3. pm2 부팅 복원과는 별개다 |
+| 9 | **연결 자체가 안 됨** | `/janus-api` 라우트에 끝 슬래시 → 세션 생성 POST 가 301 | 3-3 에서 겪음. 슬래시를 빼 두었다 |
+| 10 | 설치가 멀쩡한데 점검이 "고친 흔적" 이라고 함 | `janus.jcfg` 는 `0640 root:janus` 라 일반 사용자가 못 읽는다 | 점검이 "확인 불가" 로 구분한다 |
+| 11 | 비밀을 만들었는데 대시보드가 계속 없다고 함 | 실패를 캐시했다 | 성공만 캐시하도록 고침. 재시작이 필요 없다 |
 
 ## 이 저장소 밖에서 해야 하는 것
 
