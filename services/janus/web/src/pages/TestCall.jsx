@@ -201,6 +201,20 @@ export default function TestCall() {
         if (result.code >= 400 && result.code !== 487) {
           setCallError(`${result.code} ${result.reason ?? ''}`.trim());
         }
+        /*
+         * ⚠️ **PeerConnection 을 여기서 반드시 정리한다.**
+         *
+         * 상태만 idle 로 되돌리고 넘어갔더니, 다음 통화의 createOffer 가 남아
+         * 있던 PeerConnection 을 다시 쓰면서 Janus 가 이렇게 거절했다.
+         *
+         *     [WARN] Agent already exists?
+         *     [ERR]  Error setting ICE locally
+         *
+         * 첫 통화가 실패한 뒤 다시 거는 것이 아예 막히는 형태라, 원인을 첫
+         * 실패 쪽에서 찾게 되어 더 헷갈렸다. janus.js 의 hangup() 이 로컬
+         * WebRTC 자원을 정리한다 (SIP 쪽 hangup 요청과는 별개다).
+         */
+        handleRef.current?.hangup();
         resetCall();
         break;
       case 'declining':
@@ -678,7 +692,8 @@ export default function TestCall() {
                   <span className="font-mono"> 486</span> 통화 중 ·
                   <span className="font-mono"> 488</span> 코덱·미디어 협상 실패.
                   연결은 됐는데 소리만 없으면 아래 로그의 <span className="font-mono">미디어 audio 수신 시작</span> 이
-                  떴는지 보세요.
+                  떴는지 보세요. 상대가 <strong>다른 단말에서 같은 계정으로 등록</strong>돼 있으면
+                  그쪽으로도 함께 울립니다.
                 </p>
               </AlertDescription>
             </Alert>

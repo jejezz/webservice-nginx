@@ -744,8 +744,8 @@ Janus 가 digest 로 응답합니다. 새로 고치면 다시 입력해야 합�
 
 | | 할 일 | 확인 |
 |---|---|---|
-| 5-1 | 탭 둘에서 각각 `2001` · `2002` 로 등록 | ⬜ |
-| 5-2 | `2001` → `2002` 발신, 수신 쪽에서 수락 | ⬜ 양쪽 음성 |
+| 5-1 | 탭 둘에서 각각 `2001` · `2002` 로 등록 | ⬜ **`2002` 를 다른 단말이 잡고 있다** (아래) |
+| 5-2 | `2001` → `2002` 발신, 수신 쪽에서 수락 | ⬜ 1차 시도 실패. 원인 둘 중 하나는 고침 |
 | 5-3 | 미디어가 실제로 흐르는지 | ⬜ 로그의 `미디어 audio 수신 시작` · `chrome://webrtc-internals` |
 | 5-4 | 통화 종료 · 재발신 | ⬜ 세션이 남지 않는지 (Admin API) |
 
@@ -775,6 +775,58 @@ Janus 가 digest 로 응답합니다. 새로 고치면 다시 입력해야 합�
 
 `hangup` 의 코드도 그대로 보여 줍니다 — `404` 없는 계정, `480` 등록 안 됨,
 `486` 통화 중, `488` 협상 실패.
+
+#### 1차 시도 (2026-08-20 22:58) — 실패. 알아낸 것
+
+**증상:** 전화가 걸리지 않음. Kamailio 저널에 INVITE 흔적 없음.
+
+Janus 저널이 이렇게 남았습니다.
+
+```
+22:58:06  [WARN] No stream, queueing this trickle as it got here before the SDP...
+22:58:06  Creating ICE agent (ICE Full mode, controlled)      ← 1차 시도
+22:58:29  [WARN] Agent already exists?                        ← 2차 시도
+22:58:29  [ERR]  Error setting ICE locally
+22:58:35  [ERR]  Wrong state (… status=closing)               ← 끊기 요청이 무시됨
+```
+
+**원인 ① (고침) — 통화가 끝나도 PeerConnection 을 정리하지 않았다.**
+상태만 `idle` 로 되돌리고 `handle.hangup()` 을 부르지 않아, 두 번째
+`createOffer` 가 남아 있던 연결을 다시 쓰려다 Janus 에 거절당했습니다.
+**한 번 실패하면 다시 걸기 자체가 막히는** 형태라, 원인을 첫 실패 쪽에서
+찾게 되어 더 헷갈립니다. `hangup` 이벤트에서 정리하도록 고쳤습니다.
+
+**원인 ② (남음) — `2002` 를 브라우저가 아닌 다른 단말이 잡고 있다.**
+Kamailio 저널의 Call-ID 로 갈립니다.
+
+```
+2002:  22:23 … 22:58  전부 Call-ID 5befa749-…   ← 같은 단말이 5분마다 재등록
+2001:  22:57:49       Call-ID f8c1f6e9-…        ← 브라우저(Janus)
+```
+
+`2001 → 2002` 로 걸면 브라우저 탭이 아니라 그 단말로 갑니다. 브라우저 ↔
+브라우저 시험이 성립하지 않습니다. **그 단말을 끄거나 계정을 하나 더 만들어야
+합니다** (`2003`).
+
+**1차 시도 자체가 왜 실패했는지는 아직 모릅니다.** 화면 로그를 못 봤고,
+그때 Janus 로그 레벨이 4라 SIP 플러그인의 INVITE 생성 과정이 남지 않았습니다.
+
+> "Kamailio 저널에 INVITE 가 없으니 INVITE 가 안 나갔다" 는 추론은 **근거가
+> 약합니다.** Kamailio 는 응답된 통화만 ACC 로 남기므로 실패한 INVITE 는 로그에
+> 없을 수 있습니다.
+
+#### ⚠️ 지금 Janus 로그 레벨이 6입니다 — 설정 파일에는 없습니다
+
+다음 시도를 계측하려고 Admin API 로 올려 두었습니다. **재시작하면 `janus.jcfg`
+의 4로 돌아갑니다.** 설정 파일 어디에도 없는 상태이므로 여기 적어 둡니다.
+
+```bash
+SECRET=$(cat services/janus/secrets/admin-secret)
+# 되돌리기
+curl -s -X POST -H 'Content-Type: application/json' \
+  -d "{\"janus\":\"set_log_level\",\"level\":4,\"transaction\":\"l\",\"admin_secret\":\"$SECRET\"}" \
+  http://127.0.0.1:7088/admin
+```
 
 #### 만들면서 걸린 것 둘
 
