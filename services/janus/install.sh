@@ -174,6 +174,12 @@ report() {
         if [[ ! -f "$target" ]]; then
             no "${cfg} — 설치되지 않음"
             pending=$((pending + 1))
+        elif [[ ! -r "$target" ]]; then
+            # janus.jcfg 는 비밀을 담아 0640 root:janus 로 설치한다. 일반 사용자는
+            # 읽을 수 없다. **읽지 못한 것을 "고친 흔적" 으로 보고하면 안 된다** —
+            # 실제로 그렇게 보고해 멀쩡한 설치를 문제로 잡은 적이 있다.
+            # (services/kamailio/install.sh 도 같은 이유로 같은 분기를 둔다)
+            ok "${cfg} — 설치됨 (내용 확인 불가, root 전용. sudo $0 로 보세요)"
         elif grep -q "$CFG_MARKER" "$target" 2>/dev/null; then
             if cmp -s <(sed "s/__ADMIN_SECRET__/x/; s/__API_SECRET__/x/" "$tmpl") \
                       <(sed "s/\(admin_secret = \"\)[^\"]*\"/\1x\"/; s/\(api_secret = \"\)[^\"]*\"/\1x\"/" "$target"); then

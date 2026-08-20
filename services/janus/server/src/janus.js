@@ -17,30 +17,47 @@ const log = require('./utils/logger');
 
 let adminSecret = null;
 let adminSecretError = null;
+let warnedAboutSecret = false;
 
 /**
  * Admin API 비밀번호를 읽는다. install.sh 가 만들고 600 으로 두므로,
  * 이 프로세스가 그 파일을 읽을 수 있는 사용자로 떠야 한다.
  *
- * 한 번 읽고 캐시한다. 파일이 바뀌는 일은 --apply 를 다시 돌릴 때뿐이고,
- * 그때는 프로세스도 다시 띄우게 된다.
+ * ⚠️ **성공만 캐시한다. 실패는 캐시하지 않는다.**
+ *
+ * 실패를 캐시했더니, 대시보드를 먼저 띄우고 나중에 install.sh --apply 로 비밀을
+ * 만든 경우 프로세스를 다시 띄우기 전까지 계속 "비밀 파일이 없습니다" 를
+ * 보고했다. 파일은 멀쩡히 생겼는데도 그랬다. 실제로 그 순서로 겪었다.
+ *
+ * 다만 경고 로그는 상태가 바뀔 때만 남긴다 — /health 를 주기적으로 부르므로
+ * 매번 찍으면 로그가 그것으로 덮인다.
  */
 function loadAdminSecret() {
-  if (adminSecret !== null || adminSecretError !== null) return adminSecret;
+  if (adminSecret) return adminSecret;
 
   try {
-    adminSecret = fs.readFileSync(config.ADMIN_SECRET_FILE, 'utf8').trim() || null;
-    if (!adminSecret) {
-      adminSecretError = `비밀 파일이 비어 있습니다: ${config.ADMIN_SECRET_FILE}`;
+    const value = fs.readFileSync(config.ADMIN_SECRET_FILE, 'utf8').trim();
+    if (value) {
+      adminSecret = value;
+      adminSecretError = null;
+      if (warnedAboutSecret) {
+        log.info('Admin API 비밀번호를 읽었습니다 — 이제 Admin API 를 씁니다');
+        warnedAboutSecret = false;
+      }
+      return adminSecret;
     }
+    adminSecretError = `비밀 파일이 비어 있습니다: ${config.ADMIN_SECRET_FILE}`;
   } catch (err) {
     adminSecretError = err.code === 'ENOENT'
       ? `비밀 파일이 없습니다: ${config.ADMIN_SECRET_FILE} — sudo ./install.sh --apply 를 먼저 실행하세요`
       : `비밀 파일을 읽을 수 없습니다: ${config.ADMIN_SECRET_FILE} (${err.code})`;
   }
 
-  if (adminSecretError) log.warn(`Admin API — ${adminSecretError}`);
-  return adminSecret;
+  if (!warnedAboutSecret) {
+    log.warn(`Admin API — ${adminSecretError}`);
+    warnedAboutSecret = true;
+  }
+  return null;
 }
 
 /** 브라우저에 내려줄 api_secret. 없으면 null (Janus 가 요구하지 않는 설정일 수도 있다). */
