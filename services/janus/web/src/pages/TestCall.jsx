@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertCircle, PhoneCall, Plug, PlugZap, Trash2, UserCheck } from 'lucide-react';
+import { AlertCircle, Phone, PhoneCall, PhoneIncoming, PhoneOff, Plug, PlugZap, Trash2, UserCheck, Video } from 'lucide-react';
 import { InfoCard } from '@/components/InfoCard';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -14,8 +14,11 @@ import { initJanus } from '@/lib/janusLib';
  * 시험 클라이언트.
  *
  * 3단계  브라우저 → nginx(/janus-api) → Janus 세션 · SIP 플러그인 attach   ✅
- * 4단계  Kamailio 에 SIP 등록                                              ← 지금
- * 5단계  실제 통화 (브라우저 ↔ 브라우저)                                   다음
+ * 4단계  Kamailio 에 SIP 등록                                              ✅
+ * 5단계  실제 통화 (브라우저 ↔ 브라우저)                                   ← 지금
+ *
+ * 브라우저 ↔ 브라우저를 시험하려면 **탭 둘**을 열어 각각 2001 · 2002 로
+ * 등록한 뒤 한쪽에서 다른 쪽으로 겁니다.
  *
  * 비밀번호는 어디에도 저장하지 않습니다. 이 화면에서 Janus 로 바로 넘어가고,
  * Janus 가 Kamailio 에 digest 로 응답합니다. 새로 고치면 다시 입력해야 합니다.
@@ -48,8 +51,28 @@ export default function TestCall() {
   const [regError, setRegError] = useState('');
   const [registeredAs, setRegisteredAs] = useState('');
 
+  // 통화
+  const [callState, setCallState] = useState('idle'); // idle|calling|ringing|incoming|incall
+  const [peer, setPeer] = useState('2002');
+  const [incomingFrom, setIncomingFrom] = useState('');
+  const [withVideo, setWithVideo] = useState(false);
+  const [callError, setCallError] = useState('');
+  const [iceState, setIceState] = useState('');
+
   const janusRef = useRef(null);
   const handleRef = useRef(null);
+  const remoteStreamRef = useRef(null);
+  const remoteAudioRef = useRef(null);
+  const remoteVideoRef = useRef(null);
+  const incomingJsepRef = useRef(null);
+
+  /*
+   * janus.js 콜백은 attach 할 때 한 번 등록되고 그대로 붙들립니다. 그 자리에
+   * 함수를 직접 넘기면 그때의 state 를 평생 들고 있게 됩니다 (React 의 낡은
+   * 클로저). 등록만 할 때는 드러나지 않았지만 통화 상태가 붙으면 바로 문제가
+   * 됩니다 — 그래서 ref 를 한 겹 두고 항상 최신 함수를 부릅니다.
+   */
+  const msgHandlerRef = useRef(null);
 
   const push = useCallback((level, message) => {
     setLogs((prev) => [
@@ -74,8 +97,24 @@ export default function TestCall() {
     }
   }, []);
 
-  /** SIP 플러그인이 보내는 이벤트. 등록 결과가 여기로 온다. */
-  const onPluginMessage = useCallback((msg) => {
+  /** createOffer/createAnswer 에 넘길 트랙 구성. 음성이 기본이다 (계획서 ⑥). */
+  const trackSpec = useCallback(() => {
+    const tracks = [{ type: 'audio', capture: true, recv: true }];
+    if (withVideo) tracks.push({ type: 'video', capture: true, recv: true });
+    return tracks;
+  }, [withVideo]);
+
+  const resetCall = useCallback(() => {
+    setCallState('idle');
+    setIncomingFrom('');
+    setCallError('');
+    setIceState('');
+    incomingJsepRef.current = null;
+    remoteStreamRef.current = null;
+  }, []);
+
+  /** SIP 플러그인이 보내는 이벤트. 등록과 통화 결과가 모두 여기로 온다. */
+  const onPluginMessage = useCallback((msg, jsep) => {
     const result = msg?.result;
 
     if (msg?.error) {
@@ -85,6 +124,21 @@ export default function TestCall() {
       push('error', `plugin error: ${msg.error_code ?? ''} ${msg.error}`);
       return;
     }
+    /*
+     * 상대의 SDP.
+     *
+     * ⚠️ **answer 일 때만** handleRemoteJsep 을 부른다. offer 는 착신
+     *    (incomingcall)과 함께 오는데, 그건 createAnswer 에 넘겨야 하는
+     *    것이라 여기서 먼저 삼키면 응답을 만들 수 없다.
+     *
+     *    answer 는 accepted(200 OK)와 progress(183)에 실려 온다. 이걸
+     *    빠뜨리면 통화가 "연결됨" 인데 소리가 안 난다.
+     */
+    if (jsep && handleRef.current) {
+      push('info', `SDP ${jsep.type} 수신`);
+      if (jsep.type === 'answer') handleRef.current.handleRemoteJsep({ jsep });
+    }
+
     if (!result?.event) {
       push('info', `plugin: ${JSON.stringify(msg)}`);
       return;
@@ -115,11 +169,55 @@ export default function TestCall() {
         setRegisteredAs('');
         push('ok', '해지됨');
         break;
+      // --- 통화 ---
+      case 'calling':
+        setCallState('calling');
+        push('info', 'INVITE 를 보냈습니다');
+        break;
+      case 'ringing':
+      case 'proceeding':
+        setCallState('ringing');
+        push('info', `상대가 울리는 중 (${result.event})`);
+        break;
+      case 'incomingcall':
+        incomingJsepRef.current = jsep || null;
+        setIncomingFrom(result.username || result.displayname || '(알 수 없음)');
+        setCallState('incoming');
+        push('ok', `착신: ${result.username || ''}`);
+        break;
+      case 'progress':
+        // 얼리 미디어(183). jsep 이 함께 오면 링백이 들린다.
+        push('info', '183 Session Progress');
+        break;
+      case 'accepted':
+        setCallState('incall');
+        setCallError('');
+        push('ok', '통화 연결됨 (200 OK)');
+        break;
+      case 'hangup':
+        // code/reason 이 왜 끊겼는지 알려 준다. 486 = 통화 중, 480 = 없음 등.
+        push(result.code >= 400 && result.code !== 487 ? 'error' : 'info',
+          `통화 종료: ${result.code ?? ''} ${result.reason ?? ''}`.trim());
+        if (result.code >= 400 && result.code !== 487) {
+          setCallError(`${result.code} ${result.reason ?? ''}`.trim());
+        }
+        resetCall();
+        break;
+      case 'declining':
+      case 'hangingup':
+        push('info', `plugin: ${result.event}`);
+        break;
+      case 'missed_call':
+        push('info', `부재중: ${result.caller ?? ''}`);
+        resetCall();
+        break;
       default:
-        // incomingcall · accepted · hangup 등은 5단계에서 다룬다.
         push('info', `plugin: ${result.event}`);
     }
-  }, [push, user]);
+  }, [push, user, resetCall]);
+
+  // 콜백이 항상 최신 함수를 보게 한다 (위 msgHandlerRef 주석 참고).
+  msgHandlerRef.current = onPluginMessage;
 
   const connect = useCallback(async () => {
     if (!config) return;
@@ -169,8 +267,32 @@ export default function TestCall() {
             setState('error');
             push('error', `attach 실패: ${err}`);
           },
-          onmessage: onPluginMessage,
-          oncleanup: () => push('info', 'plugin: cleanup'),
+          // 함수를 직접 넘기지 않는다 — 낡은 클로저를 붙들게 된다.
+          onmessage: (msg, jsep) => msgHandlerRef.current?.(msg, jsep),
+
+          /*
+           * 상대 미디어. Janus 1.x 는 스트림이 아니라 **트랙 단위**로 준다
+           * (onremotestream 은 없어졌다). 하나의 MediaStream 에 모아 붙인다.
+           */
+          onremotetrack: (track, mid, on) => {
+            if (!on) {
+              remoteStreamRef.current?.removeTrack(track);
+              push('info', `상대 ${track.kind} 트랙 제거 (mid ${mid})`);
+              return;
+            }
+            if (!remoteStreamRef.current) remoteStreamRef.current = new MediaStream();
+            remoteStreamRef.current.addTrack(track);
+            push('ok', `상대 ${track.kind} 트랙 도착 (mid ${mid})`);
+
+            const el = track.kind === 'video' ? remoteVideoRef.current : remoteAudioRef.current;
+            if (el && window.Janus) window.Janus.attachMediaStream(el, remoteStreamRef.current);
+          },
+
+          // 미디어가 실제로 흐르기 시작했는지. "연결됨인데 무음" 을 가르는 신호다.
+          mediaState: (kind, on) => push(on ? 'ok' : 'info', `미디어 ${kind} ${on ? '수신 시작' : '멈춤'}`),
+          webrtcState: (up) => push(up ? 'ok' : 'info', `WebRTC ${up ? '연결됨' : '끊김'}`),
+          iceState: (st) => { setIceState(st); push('info', `ICE ${st}`); },
+          oncleanup: () => { push('info', 'plugin: cleanup'); resetCall(); },
         });
       },
       error: (err) => {
@@ -185,10 +307,11 @@ export default function TestCall() {
         setHandleId(null);
         setRegState('idle');
         setRegisteredAs('');
+        resetCall();
         push('info', '세션이 정리되었습니다');
       },
     });
-  }, [config, push, onPluginMessage]);
+  }, [config, push, resetCall]);
 
   const disconnect = useCallback(() => {
     if (janusRef.current) {
@@ -229,6 +352,55 @@ export default function TestCall() {
     handleRef.current.send({ message: { request: 'unregister' } });
   }, []);
 
+  const doCall = useCallback(() => {
+    if (!handleRef.current || !config) return;
+    setCallError('');
+    setCallState('calling');
+
+    const uri = peer.includes('@') ? `sip:${peer}` : `sip:${peer}@${config.sipDomain}`;
+    push('info', `전화를 겁니다: ${uri}`);
+
+    handleRef.current.createOffer({
+      tracks: trackSpec(),
+      success: (jsep) => handleRef.current.send({ message: { request: 'call', uri }, jsep }),
+      error: (err) => {
+        // 대개 마이크 권한 거부다. HTTPS 가 아니면 getUserMedia 자체가 없다.
+        setCallError(`미디어를 준비하지 못했습니다: ${err.message || err}`);
+        setCallState('idle');
+        push('error', `createOffer 실패: ${err.message || err}`);
+      },
+    });
+  }, [config, peer, push, trackSpec]);
+
+  const doAccept = useCallback(() => {
+    if (!handleRef.current || !incomingJsepRef.current) return;
+    setCallError('');
+    push('info', '전화를 받습니다');
+
+    handleRef.current.createAnswer({
+      jsep: incomingJsepRef.current,
+      tracks: trackSpec(),
+      success: (jsep) => handleRef.current.send({ message: { request: 'accept' }, jsep }),
+      error: (err) => {
+        setCallError(`응답 SDP 를 만들지 못했습니다: ${err.message || err}`);
+        push('error', `createAnswer 실패: ${err.message || err}`);
+        handleRef.current.send({ message: { request: 'decline' } });
+        resetCall();
+      },
+    });
+  }, [push, trackSpec, resetCall]);
+
+  const doDecline = useCallback(() => {
+    handleRef.current?.send({ message: { request: 'decline' } });
+    resetCall();
+  }, [resetCall]);
+
+  const doHangup = useCallback(() => {
+    handleRef.current?.send({ message: { request: 'hangup' } });
+    handleRef.current?.hangup();
+    resetCall();
+  }, [resetCall]);
+
   const connected = state === 'connected';
   const registered = regState === 'registered';
 
@@ -248,10 +420,12 @@ export default function TestCall() {
     <div className="space-y-6">
       <Alert>
         <PhoneCall className="size-4" />
-        <AlertTitle>지금은 SIP 등록까지입니다 (계획서 4단계)</AlertTitle>
+        <AlertTitle>브라우저 ↔ 브라우저 시험 통화 (계획서 5단계)</AlertTitle>
         <AlertDescription>
-          브라우저가 Janus 를 거쳐 Kamailio 에 REGISTER 하는 것까지 확인합니다.
-          실제 통화(발신·착신)는 5단계에서 이 화면에 붙입니다.
+          <strong>탭 둘</strong>을 열어 각각 <span className="font-mono">2001</span> ·
+          <span className="font-mono"> 2002</span> 로 등록한 뒤 한쪽에서 다른 쪽으로 겁니다.
+          미디어는 <span className="font-mono">브라우저 ↔ Janus ↔ rtpproxy ↔ Janus ↔ 브라우저</span> 로
+          흐릅니다. 음성부터 확인하고 영상은 그 다음입니다.
         </AlertDescription>
       </Alert>
 
@@ -410,6 +584,122 @@ export default function TestCall() {
             Janus 로 바로 넘어가며, Kamailio 에는 Janus 가 digest 로 응답합니다.
             새로 고치면 다시 입력해야 합니다.
           </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="flex-row items-center justify-between space-y-0 pb-4">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Phone className="size-4" />
+            3. 통화
+          </CardTitle>
+          <div className="flex items-center gap-2">
+            {iceState && (
+              <Badge variant="secondary" className="font-mono text-xs">ICE {iceState}</Badge>
+            )}
+            <Badge variant={callState === 'incall' ? 'default' : callState === 'idle' ? 'secondary' : 'outline'}>
+              {{
+                idle: '대기', calling: '거는 중…', ringing: '울리는 중…',
+                incoming: '착신!', incall: '통화 중',
+              }[callState]}
+            </Badge>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {!registered && (
+            <p className="text-xs text-muted-foreground">먼저 SIP 등록을 마치세요.</p>
+          )}
+
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="peer" className="text-xs">상대</Label>
+              <Input
+                id="peer"
+                value={peer}
+                onChange={(e) => setPeer(e.target.value)}
+                disabled={!registered || callState !== 'idle'}
+                className="w-44 font-mono"
+                placeholder="2002"
+              />
+            </div>
+
+            <label className="flex h-9 items-center gap-2 text-xs text-muted-foreground">
+              <input
+                type="checkbox"
+                checked={withVideo}
+                onChange={(e) => setWithVideo(e.target.checked)}
+                disabled={callState !== 'idle'}
+                className="size-3.5"
+              />
+              <Video className="size-3.5" />
+              영상 포함
+            </label>
+
+            {callState === 'idle' && (
+              <Button onClick={doCall} disabled={!registered || !peer.trim()}>
+                <Phone className="size-3.5" />
+                전화 걸기
+              </Button>
+            )}
+            {callState === 'incoming' && (
+              <>
+                <Button onClick={doAccept}>
+                  <PhoneIncoming className="size-3.5" />
+                  받기
+                </Button>
+                <Button variant="outline" onClick={doDecline}>거절</Button>
+              </>
+            )}
+            {(callState === 'calling' || callState === 'ringing' || callState === 'incall') && (
+              <Button variant="destructive" onClick={doHangup}>
+                <PhoneOff className="size-3.5" />
+                끊기
+              </Button>
+            )}
+          </div>
+
+          {callState === 'incoming' && (
+            <Alert>
+              <PhoneIncoming className="size-4" />
+              <AlertTitle>걸려 온 전화</AlertTitle>
+              <AlertDescription className="font-mono text-xs">{incomingFrom}</AlertDescription>
+            </Alert>
+          )}
+
+          {callError && (
+            <Alert variant="destructive">
+              <AlertCircle className="size-4" />
+              <AlertTitle>통화가 성립하지 않았습니다</AlertTitle>
+              <AlertDescription className="space-y-1">
+                <p className="font-mono text-xs">{callError}</p>
+                <p className="text-xs">
+                  <span className="font-mono">404</span> 상대 계정이 없음 ·
+                  <span className="font-mono"> 480</span> 등록돼 있지 않음 ·
+                  <span className="font-mono"> 486</span> 통화 중 ·
+                  <span className="font-mono"> 488</span> 코덱·미디어 협상 실패.
+                  연결은 됐는데 소리만 없으면 아래 로그의 <span className="font-mono">미디어 audio 수신 시작</span> 이
+                  떴는지 보세요.
+                </p>
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {/*
+            상대 소리. controls 를 남겨 둔다 — 브라우저 자동재생 정책에 막혔을 때
+            사람이 직접 재생할 수 있어야 원인을 가릴 수 있다.
+          */}
+          <div className="space-y-2">
+            <p className="text-xs text-muted-foreground">상대 미디어</p>
+            <audio ref={remoteAudioRef} autoPlay playsInline controls className="w-full" />
+            {withVideo && (
+              <video
+                ref={remoteVideoRef}
+                autoPlay
+                playsInline
+                className="w-full max-w-md rounded-md border bg-muted"
+              />
+            )}
+          </div>
         </CardContent>
       </Card>
 
