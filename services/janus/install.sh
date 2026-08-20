@@ -103,6 +103,35 @@ ini_enabled() {
     echo "${value:-true}"
 }
 
+# .jcfg 에서 rtp_port_range 값을 "최소 최대" 로 뽑는다. 없으면 빈 문자열.
+#
+# 설정 파일을 진실로 삼는다 — 이 스크립트에 숫자를 또 적어 두면 둘이 어긋난다.
+jcfg_rtp_range() {
+    local file="$1"
+    [[ -r "$file" ]] || return 0
+    sed -n 's/^[[:space:]]*rtp_port_range[[:space:]]*=[[:space:]]*"\([0-9]\{1,\}\)-\([0-9]\{1,\}\)".*/\1 \2/p' "$file" | head -1
+}
+
+# rtpproxy 가 쓰는 포트 범위. 배포판 기본값은 35000-65000 이고 -m/-M 이 덮는다.
+#
+# ⚠️ **-M 을 안 주면 최대가 65000 이다.** /etc/default/rtpproxy 에 -m 만 적혀
+#    있으면 그 위쪽 전부가 rtpproxy 것이 되어 Janus 의 범위를 통째로 삼킨다.
+#    실제로 그런 상태였다 (docs/plan.md ③ 절의 정정).
+rtpproxy_range() {
+    local file="/etc/default/rtpproxy" opts mn mx
+    [[ -r "$file" ]] || return 0
+    opts="$(sed -n 's/^EXTRA_OPTS=//p' "$file" | tr -d '"' || true)"
+    # 같은 플래그가 여러 번 적혀 있으면 뒤엣것이 이긴다.
+    mn="$(grep -oE -- '-m[[:space:]]*[0-9]+' <<<"$opts" | tail -1 | grep -oE '[0-9]+' || true)"
+    mx="$(grep -oE -- '-M[[:space:]]*[0-9]+' <<<"$opts" | tail -1 | grep -oE '[0-9]+' || true)"
+    echo "${mn:-35000} ${mx:-65000}"
+}
+
+# 두 구간이 겹치는가. [a1,a2] 와 [b1,b2] 는 a1<=b2 이고 b1<=a2 일 때 겹친다.
+ranges_overlap() {
+    [[ $1 -le $4 && $3 -le $2 ]]
+}
+
 # 포트를 듣고 있는 주소. 없으면 빈 문자열.
 listen_addr() {
     local port="$1"
@@ -301,6 +330,45 @@ report() {
     if [[ -n "$ws_addr" ]]; then
         warn "WebSocket 트랜스포트가 켜져 있습니다 (${ws_addr}) — 이 계획에서는 쓰지 않습니다 (plan.md ①)"
         problems=$((problems + 1))
+    fi
+
+    info ""
+    info "미디어 포트 범위"
+    # 겹치면 조용히 실패한다. 통화는 성립하는데 소리만 안 나거나, 어느 한쪽이
+    # 포트를 못 잡는 형태로 나타난다.
+    local web_range sip_range rtpp_range
+    web_range="$(jcfg_rtp_range "${SCRIPT_DIR}/janus.jcfg")"
+    sip_range="$(jcfg_rtp_range "${SCRIPT_DIR}/janus.plugin.sip.jcfg")"
+    rtpp_range="$(rtpproxy_range)"
+
+    [[ -n "$web_range" ]] && ok "Janus WebRTC 쪽: ${web_range% *}-${web_range#* } (janus.jcfg)" \
+                          || { warn "janus.jcfg 에서 rtp_port_range 를 읽지 못했습니다"; problems=$((problems + 1)); }
+    [[ -n "$sip_range" ]] && ok "Janus SIP 쪽:    ${sip_range% *}-${sip_range#* } (janus.plugin.sip.jcfg)" \
+                          || { warn "janus.plugin.sip.jcfg 에서 rtp_port_range 를 읽지 못했습니다"; problems=$((problems + 1)); }
+
+    if [[ -n "$rtpp_range" ]]; then
+        local rtpp_state
+        rtpp_state="$(systemctl is-active rtpproxy 2>/dev/null || echo inactive)"
+        info "  rtpproxy:        ${rtpp_range% *}-${rtpp_range#* } (${rtpp_state})"
+        info "                   Kamailio 가 NAT 로 판정한 통화의 미디어를 중계합니다."
+        info "                   이 배치에서는 LAN 단말 전부가 그렇습니다 (docs/plan.md ③ 정정)."
+
+        local r1 r2 j1 j2 label clashes=0
+        r1="${rtpp_range% *}"; r2="${rtpp_range#* }"
+        for label in "WebRTC:${web_range}" "SIP:${sip_range}"; do
+            [[ "${label#*:}" == "" ]] && continue
+            j1="${label#*:}"; j2="${j1#* }"; j1="${j1% *}"
+            if ranges_overlap "$r1" "$r2" "$j1" "$j2"; then
+                warn "rtpproxy(${r1}-${r2}) 와 Janus ${label%%:*}(${j1}-${j2}) 가 겹칩니다"
+                warn "  /etc/default/rtpproxy 의 EXTRA_OPTS 에 -M 을 주어 위쪽을 막으세요."
+                warn "  -M 이 없으면 최대가 65000 이라 Janus 범위를 통째로 삼킵니다."
+                clashes=$((clashes + 1))
+                problems=$((problems + 1))
+            fi
+        done
+        [[ $clashes -eq 0 ]] && ok "범위가 서로 겹치지 않습니다"
+    else
+        no "rtpproxy 설정(/etc/default/rtpproxy)을 읽지 못해 겹침을 검사하지 못했습니다"
     fi
 
     info ""
