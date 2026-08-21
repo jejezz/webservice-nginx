@@ -104,16 +104,19 @@ const STEPS = [
     title: 'SIP 계정 만들기',
     why:
       '인터폰과 단말이 쓸 내선을 만듭니다. **비밀번호는 사람이 정합니다** — ' +
-      '기계가 대신 정할 수 없고, 만들었는지도 기계가 대신 판단하지 않습니다.',
+      '기계가 대신 정할 수 없습니다. 무엇이 만들어져 있는지는 아래 점검이 보여 주고, ' +
+      '**쓸 것이 다 있는지**는 사람이 판단합니다.',
     requires: ['kamailio.config'],
-    manualOnly: true,
     command: {
       cwd: 'services/kamailio',
       run: "sudo /usr/sbin/kamctl add 1001 '내선1001비밀번호'\nsudo /usr/sbin/kamctl show",
       sudo: true,
     },
     guide: { text: 'kamailio 대시보드에서도 만들 수 있습니다', href: '/kamailio/' },
-    attest: { question: '쓸 내선 계정을 모두 만들었습니까? (인터폰·모바일 각각)' },
+    // 무엇이 있는지는 기계가 보여 주고(도메인이 어긋난 계정·비밀번호가 빈 계정도
+    // 잡는다), **쓸 것이 다 있는지**는 사람이 판단한다. 그 판단만은 대신할 수 없다.
+    check: { cwd: 'services/kamailio', file: './check-accounts.sh', args: ['--check', '--json'] },
+    attest: { question: '위 목록에 쓸 내선이 다 있습니까? (인터폰·모바일 각각)' },
   },
   {
     id: 'janus.deps',
@@ -191,12 +194,14 @@ const STEPS = [
     why:
       '"연결됨인데 소리가 안 난다" 가 이 게이트웨이에서 가장 자주 만나는 실패 모양입니다. ' +
       'verify-call.sh 는 헤드리스 크롬으로 실제 통화를 걸어 **RTP 가 양방향으로 왔는지** ' +
-      '패킷 수로 판정합니다.',
+      '패킷 수로 판정합니다. 마법사는 그 통화를 대신 걸지 않고, ' +
+      '**--run 이 남긴 결과 파일**을 읽어 판정합니다.',
     requires: ['janus.config', 'sip.accounts'],
     command: { cwd: 'services/janus', run: './verify-call.sh --run', sudo: false },
-    // 마법사는 준비 상태까지만 본다. 90초짜리 통화는 사람이 돌린다 (아래 attest).
+    // 마법사는 90초짜리 통화를 대신 돌리지 않는다. 대신 **--run 이 남긴 결과
+    // 파일을 읽는다** — 사람의 확인 기록보다 낫다. 주장이 아니라 증거이고,
+    // 언제 돌렸는지도 함께 남아 설정이 바뀐 뒤인지까지 가릴 수 있다.
     check: { cwd: 'services/janus', file: './verify-call.sh', args: ['--check', '--json'] },
-    attest: { question: '--run 이 4단계(등록·발신·RTP·재통화)를 모두 통과했습니까?' },
   },
   {
     id: 'janus.publicip',

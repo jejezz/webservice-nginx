@@ -225,13 +225,13 @@ database ─┬─────────────────────�
 | 2 | pm2 설치·부팅 등록 | `pm2.apps` | ✅ | `pm2/ecosystem.config.js --check-json` |
 | 3 | Kamailio 패키지·그룹·DB | `kamailio.deps` | ✅ | `services/kamailio/bootstrap.sh` |
 | 4 | Kamailio 설정 포크 설치 | `kamailio.config` | ✅ | `services/kamailio/install.sh` |
-| 5 | SIP 계정 만들기 | `sip.accounts` | ❌ 사람 | **사람의 확인만** — 대시보드로 유도 |
+| 5 | SIP 계정 만들기 | `sip.accounts` | ❌ 사람 | `check-accounts.sh` ⭐ + **쓸 것이 다 있는지는 사람의 확인** |
 | 6 | Janus 빌드 의존성 | `janus.deps` | ✅ | `services/janus/bootstrap.sh` |
 | 7 | **Janus 소스 빌드** | `janus.build` | ✅ 사람 | **사람의 확인만** — 오래 걸리고 실패 지점이 많음 |
 | 8 | Janus 설정·유닛 | `janus.config` | ✅ | `services/janus/install.sh` |
 | 9 | 대시보드 빌드 | `janus.dashboard` | ❌ | `services/janus/setup-dashboard.sh` |
 | 10 | nginx 라우트 반영 | `nginx.routes` | ✅ | `nginx/install_nginx_stack.sh` |
-| 11 | 시험 통화 | `janus.verify.call` | ❌ | `verify-call.sh --check` + **통화 결과는 사람의 확인** |
+| 11 | 시험 통화 | `janus.verify.call` | ❌ | `verify-call.sh --check` — **`--run` 이 남긴 결과 파일을 읽는다** |
 | 12 | 외부 브라우저 (선택) | `janus.publicip` | ❌ | `check-public-ip.sh` + **포워딩은 사람의 확인** |
 | 13 | 착신 푸시 (선택) | `push.incoming` | ✅ | `services/kamailio/check-push.sh` ⭐ |
 
@@ -409,10 +409,10 @@ sudo 명령을 다루는 방식과 같습니다 — **오래 걸리고 되돌리
 
 | 단계 | 점검 | 확인 | 결과 |
 |---|---|---|---|
-| 5 · 7 (사람만) | 없음 | 있음 | `attested` |
-| 11 · 12 (둘 다) | `complete` | 없음 | `incomplete` — "남은 것은 사람의 확인입니다" |
-| 11 · 12 (둘 다) | `complete` | 있음 | `attested` |
-| 11 · 12 (둘 다) | `problem` | 있음 | `problem` — **확인이 덮지 못합니다** |
+| 7 (사람만) | 없음 | 있음 | `attested` |
+| 5 · 12 (둘 다) | `complete` | 없음 | `incomplete` — "남은 것은 사람의 확인입니다" |
+| 5 · 12 (둘 다) | `complete` | 있음 | `attested` |
+| 5 · 12 (둘 다) | `problem` | 있음 | `problem` — **확인이 덮지 못합니다** |
 
 ### 점검이 없던 두 자리를 새로 썼습니다
 
@@ -573,6 +573,34 @@ SIP_LISTEN_ADDR="192.168.0.252"      # ← 이 장비의 LAN 주소
 그리고 원인 하나를 고쳤습니다. `kamailio-local.cfg` 의 **주석에**
 `__DBURL__` 이라고 적혀 있어서, 치환이 파일 전체를 훑는 바람에 설치본 주석에
 DB 비밀번호가 박히고 있었습니다.
+
+## 사람의 확인보다 증거가 낫다 — 11단계를 바꿨습니다
+
+3단계에서 시험 통화(11)는 "사람이 `--run` 을 돌리고 결과를 확인으로 기록" 하게
+두었습니다. 그런데 `verify-call.sh --run` 은 이미 결과를 파일로 남깁니다
+(`test-harness/last-run/result.json` — 통과 여부·패킷 수·코덱까지).
+
+**주장 대신 증거를 읽으면 됩니다.** 점검이 그 파일을 읽어 판정합니다.
+
+```
+[ok]   통과 (08-22 03:04)
+```
+
+사람의 확인 기록보다 나은 점이 둘입니다.
+
+- **언제 돌렸는지가 남습니다.** 그래서 그 뒤에 Janus 설정이나
+  `kamailio-local.cfg` 가 바뀌었으면 "지금 설정으로 다시 걸어 보세요" 라고
+  말할 수 있습니다. 확인 기록으로는 그 판단을 할 수 없습니다.
+- 사람이 "통과했다" 고 누른 것과, 도구가 "297패킷 양방향, opus" 라고 적어 둔
+  것은 무게가 다릅니다.
+
+마법사가 그 90초짜리 통화를 **대신 돌리지는 않습니다** — 그건 그대로입니다.
+`.applied-settings` 를 읽는 것과 같은 자세입니다. 사람이 한 일의 흔적을 읽을
+뿐, 사람에게 다시 묻지 않습니다.
+
+같은 이유로 5단계(SIP 계정)에도 점검을 붙였습니다. 무엇이 만들어져 있는지는
+기계가 보여 주고(도메인이 어긋난 계정과 비밀번호가 빈 계정도 잡습니다),
+**쓸 것이 다 있는지**만 사람이 판단합니다. 그 판단은 대신할 수 없습니다.
 
 ## 만들지 않는 것
 

@@ -136,6 +136,40 @@ else
     ok "${HARNESS_PORT} 비어 있음 (하니스가 잠깐 쓴다)"
 fi
 
+# ── 마지막으로 걸어 본 결과 ────────────────────────────────────────────
+#
+# 이 점검은 준비 상태만 봅니다. 실제 통화는 사람이 --run 으로 돌립니다
+# (90초쯤 걸리므로 마법사가 대신 돌리지 않습니다 — docs/setup-wizard.md).
+#
+# 그러면 "정말 걸어 봤는가" 는 무엇으로 아는가. **--run 이 남긴 결과 파일을
+# 읽습니다.** 사람의 확인 기록보다 낫습니다 — 주장이 아니라 증거이고, 언제
+# 돌렸는지도 함께 남습니다. .applied-settings 를 읽는 것과 같은 자세입니다.
+info
+info "마지막으로 걸어 본 결과"
+RESULT_JSON="${OUTDIR}/result.json"
+if [[ ! -f "$RESULT_JSON" ]]; then
+    pend "아직 걸어 본 적이 없습니다 → ./verify-call.sh --run"
+elif ! grep -q '"ok"[[:space:]]*:[[:space:]]*true' "$RESULT_JSON"; then
+    warn "마지막 시험 통화가 실패했습니다 ($(date -r "$RESULT_JSON" '+%m-%d %H:%M')) — ${OUTDIR}/ 를 보세요"
+else
+    ok "통과 ($(date -r "$RESULT_JSON" '+%m-%d %H:%M'))"
+
+    # 그 뒤로 설정이 바뀌었으면 그 결과는 지금 설정의 것이 아니다.
+    #
+    # 설치본 자체가 아니라 **시각을 볼 수 있는 것**을 견준다. Janus 설정은
+    # /opt/janus/etc/janus/ 아래에 있고 권한이 좁아 사용자가 stat 하지 못할 수
+    # 있어서, install.sh --apply 가 남기는 .applied-settings 를 대신 본다.
+    for cfg in "${SCRIPT_DIR}/.applied-settings" /etc/kamailio/kamailio-local.cfg; do
+        if [[ -e "$cfg" && "$cfg" -nt "$RESULT_JSON" ]]; then
+            case "$cfg" in
+                *.applied-settings) what="Janus 설정" ;;
+                *)                  what="${cfg##*/}" ;;
+            esac
+            pend "그 뒤에 바뀐 것이 있습니다: ${what} — 지금 설정으로 다시 걸어 보세요 (./verify-call.sh --run)"
+        fi
+    done
+fi
+
 info
 if [[ "$MODE" == "check" ]]; then
     check_finish            # --json 이면 여기서 끝난다

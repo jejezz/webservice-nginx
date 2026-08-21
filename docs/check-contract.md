@@ -302,6 +302,7 @@ node pm2/ecosystem.config.js --check-json
 | `services/janus/check-public-ip.sh` | `janus.publicip` | ✅ |
 | `services/kamailio/bootstrap.sh` | `kamailio.deps` | ✅ |
 | `services/kamailio/install.sh` | `kamailio.config` | ✅ |
+| `services/kamailio/check-accounts.sh` | `sip.accounts` | ✅ 확인 전용 |
 | `services/kamailio/check-push.sh` | `push.incoming` | ✅ 확인 전용 |
 | `database/check-database.sh` | `database.schema` | ✅ 확인 전용 |
 | `nginx/install_nginx_stack.sh` | `nginx.routes` | ✅ (생성기가 낸다) |

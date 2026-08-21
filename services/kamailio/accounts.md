@@ -3,6 +3,13 @@
 계정은 `kamailio` 데이터베이스의 `subscriber` 테이블에 있습니다.
 `kamctl` 로 다루는 방법과 SQL 로 직접 다루는 방법 두 가지가 있고, 결과는 같습니다.
 
+만들어진 계정이 **등록될 수 있는 모양인지**는 아래로 봅니다 (sudo 불필요).
+
+```bash
+./check-accounts.sh          # 계정 목록 · 도메인 어긋남 · 비밀번호 빈 계정
+./check-accounts.sh --json   # 구축 마법사가 읽는 형식
+```
+
 ## kamctl 로 (권장)
 
 > **반드시 절대경로 `/usr/sbin/kamctl` 을 쓰세요.**
