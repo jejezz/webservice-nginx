@@ -41,9 +41,36 @@ CFG_MARKER="OWNED-BY-WEBSERVICES"
 SECRETS_DIR="${SCRIPT_DIR}/secrets"
 ADMIN_SECRET_FILE="${SECRETS_DIR}/admin-secret"
 API_SECRET_FILE="${SECRETS_DIR}/api-secret"
-# 공인 IP (9단계). 비밀이 아니고 환경마다 달라지므로 secrets/ 가 아니라
-# 서비스 루트에 둔다. 없으면 LAN 전용으로 설치된다.
-PUBLIC_IP_FILE="${SCRIPT_DIR}/public-ip"
+
+# ═══ 배포 설정 ═══════════════════════════════════════════════════════
+#
+# 장비마다 다르고 회선 따라 바뀌는 값들은 settings.ini 에 있습니다.
+# 대시보드의 '설정' 화면이 그 파일을 쓰고, 이 스크립트가 읽습니다.
+# 손으로 고쳐도 됩니다 — 어느 쪽이든 반영은 `sudo ./install.sh --apply` 입니다.
+#
+#   public_ip        공인 IP. 외부(인터넷) 브라우저를 받을 때만 씁니다.
+#                    비우면 nat_1_1_mapping 없이 LAN 전용으로 설치됩니다.
+#   rtp_port_range   브라우저 ↔ Janus 의 WebRTC 미디어 포트. 공유기에서 이
+#                    범위를 UDP 로 포워딩해야 외부 통화의 소리가 납니다.
+#
+# 파일이 없으면 기본값(LAN 전용 · 20000-20200)으로 설치됩니다.
+# 값이 형식에 맞지 않으면 --apply 가 아무것도 바꾸지 않고 멈춥니다.
+SETTINGS_FILE="${SCRIPT_DIR}/settings.ini"
+# 마지막으로 설치한 값. 대시보드가 '적용 대기'를 이걸로 가른다.
+APPLIED_FILE="${SCRIPT_DIR}/.applied-settings"
+
+# settings.ini 에서 `키 = 값` 하나를 읽는다. 없으면 기본값.
+# 절(section)은 쓰지 않는다 — node 쪽에서도 같은 파일을 파싱한다.
+settings_get() {
+    local key="$1" fallback="${2:-}" v=""
+    if [[ -r "$SETTINGS_FILE" ]]; then
+        v="$(sed -n "s/^[[:space:]]*${key}[[:space:]]*=[[:space:]]*\\(.*\\)$/\\1/p" "$SETTINGS_FILE" | tail -1)"
+        v="${v%%[;#]*}"
+    fi
+    v="${v//[[:space:]]/}"
+    echo "${v:-$fallback}"
+}
+# ═════════════════════════════════════════════════════════════════════
 
 SERVICE_TEMPLATE="${SCRIPT_DIR}/janus.service"
 SERVICE_UNIT="/etc/systemd/system/janus.service"
@@ -111,6 +138,16 @@ ini_enabled() {
 # 설정 파일을 진실로 삼는다 — 이 스크립트에 숫자를 또 적어 두면 둘이 어긋난다.
 jcfg_rtp_range() {
     local file="$1"
+    # janus.jcfg 의 미디어 범위는 설치할 때 RTP_PORT_RANGE 로 덮어써진다.
+    # 그러니 겹침 검사도 **설치될 값**을 봐야 한다 — 템플릿에 남아 있는 옛 값을
+    # 보면, 실제로는 겹치는데 검사가 통과하는 일이 생긴다.
+    if [[ "$file" == "${SCRIPT_DIR}/janus.jcfg" ]]; then
+        local configured; configured="$(settings_get rtp_port_range "")"
+        if [[ "$configured" =~ ^([0-9]+)-([0-9]+)$ ]]; then
+            echo "${BASH_REMATCH[1]} ${BASH_REMATCH[2]}"
+            return 0
+        fi
+    fi
     [[ -r "$file" ]] || return 0
     sed -n 's/^[[:space:]]*rtp_port_range[[:space:]]*=[[:space:]]*"\([0-9]\{1,\}\)-\([0-9]\{1,\}\)".*/\1 \2/p' "$file" | head -1
 }
@@ -528,18 +565,31 @@ apply() {
     api_secret="$(head -1 "$API_SECRET_FILE" | tr -d '\r\n')"
     [[ -n "$admin_secret" && -n "$api_secret" ]] || die "비밀 파일이 비어 있습니다"
 
-    # --- 공인 IP (선택) ---
-    local public_ip=""
-    if [[ -r "$PUBLIC_IP_FILE" ]]; then
-        public_ip="$(head -1 "$PUBLIC_IP_FILE" | tr -d '[:space:]')"
-        # 형식을 보고 들어간다. 잘못된 값이 들어가면 외부 통화가 조용히 무음이 된다.
-        if [[ ! "$public_ip" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]]; then
-            die "public-ip 의 값이 IPv4 로 보이지 않습니다: ${public_ip}"
-        fi
+    # --- 배포 설정 ---
+    #
+    # 대시보드가 이 파일을 고칠 수 있으므로 **여기서 반드시 다시 검증한다.**
+    # 대시보드를 우회해 손으로 고친 경우에도 같은 관문을 지나게 하려는 것이다.
+    local public_ip rtp_range
+    public_ip="$(settings_get public_ip "")"
+    rtp_range="$(settings_get rtp_port_range "20000-20200")"
+
+    if [[ -n "$public_ip" ]]; then
+        [[ "$public_ip" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] \
+            || die "settings.ini 의 public_ip 가 IPv4 로 보이지 않습니다: ${public_ip}"
+        local o; for o in ${public_ip//./ }; do
+            (( o <= 255 )) || die "settings.ini 의 public_ip 각 자리는 255 이하여야 합니다: ${public_ip}"
+        done
         info "  공인 IP: ${public_ip} (nat_1_1_mapping 을 켭니다)"
     else
         info "  공인 IP: 없음 — LAN 전용으로 설치합니다 (nat_1_1_mapping 을 지웁니다)"
     fi
+
+    [[ "$rtp_range" =~ ^[0-9]{4,5}-[0-9]{4,5}$ ]] \
+        || die "settings.ini 의 rtp_port_range 형식이 맞지 않습니다 (예: 20000-20200): ${rtp_range}"
+    local rlo="${rtp_range%-*}" rhi="${rtp_range#*-}"
+    (( rlo < rhi ))        || die "settings.ini 의 rtp_port_range 는 시작이 끝보다 작아야 합니다: ${rtp_range}"
+    (( rlo >= 1024 && rhi <= 65535 )) || die "settings.ini 의 rtp_port_range 는 1024~65535 안이어야 합니다: ${rtp_range}"
+    info "  WebRTC 미디어 포트: ${rtp_range}"
 
     # --- 설정 ---
     local target mode owner
@@ -557,16 +607,36 @@ apply() {
         install -o "${owner%%:*}" -g "${owner##*:}" -m "$mode" "${SCRIPT_DIR}/${cfg}" "$target"
         sed -i "s/__ADMIN_SECRET__/${admin_secret}/; s/__API_SECRET__/${api_secret}/" "$target"
 
-        # 공인 IP — 있으면 켜고, 없으면 그 두 줄을 지운다 (LAN 전용).
-        # 자리표시자가 남으면 Janus 가 그 문자열을 주소로 알아듣고 외부 통화가
-        # 조용히 무음이 된다. 그래서 '지운다' 쪽을 기본으로 둔다.
-        if [[ -n "$public_ip" ]]; then
-            sed -i "s/__PUBLIC_IP__/${public_ip}/" "$target"
-        else
-            sed -i '/__PUBLIC_IP__/d; /^[[:space:]]*keep_private_host[[:space:]]*=/d' "$target"
+        if [[ "$cfg" == "janus.jcfg" ]]; then
+            # 공인 IP — 있으면 켜고, 없으면 그 두 줄을 지운다 (LAN 전용).
+            # 자리표시자가 남으면 Janus 가 그 문자열을 주소로 알아듣고 외부
+            # 통화가 조용히 무음이 된다. 그래서 '지운다' 쪽을 기본으로 둔다.
+            if [[ -n "$public_ip" ]]; then
+                sed -i "s/__PUBLIC_IP__/${public_ip}/" "$target"
+            else
+                sed -i '/__PUBLIC_IP__/d; /^[[:space:]]*keep_private_host[[:space:]]*=/d' "$target"
+            fi
+
+            # 미디어 포트 범위 — 템플릿의 값을 설정값으로 덮어쓴다.
+            # 자리표시자를 두지 않은 이유는 janus.jcfg 가 그 자체로 온전한
+            # 설정으로 남아 있게 하기 위해서다 (그대로 복사해도 동작한다).
+            sed -i "s|^\([[:space:]]*rtp_port_range[[:space:]]*=[[:space:]]*\)\"[0-9]\{1,\}-[0-9]\{1,\}\"|\1\"${rtp_range}\"|" "$target"
         fi
         info "  설치: ${target} (${mode})"
     done
+
+    # --- 적용 기록 ---
+    #
+    # 무엇을 실제로 설치했는지 남긴다. 대시보드는 settings.ini 와 이것을 비교해
+    # '저장은 됐지만 아직 반영 안 됨' 을 알린다. 설치된 janus.jcfg 는 0640
+    # root:janus 라 대시보드가 읽을 수 없어, 대신 이 파일을 남기는 것이다.
+    {
+        echo "; install.sh --apply 가 마지막으로 설치한 값. 손으로 고치지 마세요."
+        echo "public_ip = ${public_ip}"
+        echo "rtp_port_range = ${rtp_range}"
+    } > "$APPLIED_FILE"
+    chmod 644 "$APPLIED_FILE"
+    info "  적용 기록: ${APPLIED_FILE}"
 
     # --- systemd ---
     backup "$SERVICE_UNIT"

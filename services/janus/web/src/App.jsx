@@ -1,7 +1,8 @@
 import { NavLink, Navigate, Route, Routes } from 'react-router-dom';
-import { ArrowLeft, Activity, PhoneCall, Radio } from 'lucide-react';
+import { ArrowLeft, Activity, PhoneCall, Radio, SlidersHorizontal } from 'lucide-react';
 import Overview from '@/pages/Overview';
 import Sessions from '@/pages/Sessions';
+import Settings from '@/pages/Settings';
 import TestCall from '@/pages/TestCall';
 import { cn } from '@/lib/utils';
 
@@ -10,6 +11,7 @@ const TABS = [
   { to: '/', label: '개요', Icon: Activity, end: true },
   { to: '/sessions', label: '세션·미디어', Icon: Radio },
   { to: '/test-call', label: '시험 통화', Icon: PhoneCall },
+  { to: '/settings', label: '설정', Icon: SlidersHorizontal },
 ];
 
 function Header() {
@@ -76,6 +78,7 @@ export default function App() {
           <Route path="/" element={<Overview />} />
           <Route path="/sessions" element={<Sessions />} />
           <Route path="/test-call" element={<TestCall />} />
+          <Route path="/settings" element={<Settings />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>

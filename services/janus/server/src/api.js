@@ -7,6 +7,7 @@
 const express = require('express');
 const janus = require('./janus');
 const sessions = require('./sessions');
+const settings = require('./settings');
 const config = require('./config');
 const { requireAuth } = require('./auth/session');
 
@@ -70,6 +71,23 @@ function createApiRouter() {
    */
   router.get('/sessions', async (req, res) => {
     res.json(await sessions.snapshot());
+  });
+
+  /**
+   * 배포 설정 (공인 IP · 미디어 포트 범위 …).
+   *
+   * ⚠️ 이 대시보드에서 **유일하게 쓰기가 있는 자리**입니다. 그래도 하는 일은
+   *    settings.ini 에 값을 적는 것뿐이고, sudo 를 부르지 않습니다. 적용은
+   *    사람이 `sudo ./install.sh --apply` 를 실행해야 일어납니다.
+   */
+  router.get('/settings', (req, res) => {
+    res.json(settings.state());
+  });
+
+  router.put('/settings', (req, res) => {
+    const result = settings.save(req.body || {});
+    if (!result.ok) return res.status(400).json({ error: '입력을 확인하세요', errors: result.errors });
+    res.json(result);
   });
 
   /**
