@@ -58,8 +58,16 @@ restart nginx` 로 실제 재기동까지 확인했습니다 — master 프로�
 이어서 `callfusion-ts-server` 를 **`rtc-relay-server`** 로 개명했습니다 — 이름이
 너무 일반적이라 서비스를 특정하기 어려웠기 때문입니다. 디렉토리, pm2 앱 이름,
 `process.title`, `/health` 의 `service` 필드, `package.json` 의 `name` 을 모두 맞췄습니다.
-MariaDB 스키마 `callfusion2rtc` 와 Android 알림 채널 ID `callfusion_2_rtc` 는
-외부와 맞물려 있어 그대로 둡니다. 아래 구조 그림은 이관 당시 이름으로 남아 있습니다.
+Android 알림 채널 ID `callfusion_2_rtc` 는 외부와 맞물려 있어 그대로 둡니다.
+아래 구조 그림은 이관 당시 이름으로 남아 있습니다.
+
+> **정정 (2026-08-21).** 원래 이 자리에 *"MariaDB 스키마 `callfusion2rtc` 도 그대로
+> 둡니다"* 라고 적혀 있었는데, 실제로는 **`rtc_relay` 로 개명됐습니다.**
+> `database/database.ini` 의 `[user:jyahn]` 선언(`rtc_relay`)과 실제 권한이 맞고,
+> `callfusion2rtc` 라는 DB 는 존재하지 않습니다.
+>
+> 이 줄이 사람을 헷갈리게 합니다 — 없는 이름으로 접속하면 MariaDB 가 "없는 DB"
+> 가 아니라 **`Access denied`** 를 돌려주기 때문에, 권한 문제로 오해하기 쉽습니다.
 
 ### 검증 결과
 
