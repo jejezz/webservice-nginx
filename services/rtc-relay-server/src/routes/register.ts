@@ -95,9 +95,20 @@ Route2Register.get('/findip', function (req: Request, res: Response) {
  * - complex: Building/complex information
  * - address: Device address
  * - token: Firebase push notification token
+ * - sip_user: (선택) SIP 내선. SIP 착신 푸시 대상 조회에 쓴다
  * 
  * @return JSON response with success/error status
  */
+
+/**
+ * SIP 내선에 쓸 수 있는 문자.
+ *
+ * services/kamailio 의 subscriber 검증(USERNAME_RE)과 같게 맞춘다 — 이쪽에서만
+ * 넓게 받으면 Kamailio 에 없는 내선이 저장되어, 푸시는 나가는데 통화는 안 되는
+ * 상태가 된다. '@' 와 ':' 는 절대 허용하면 안 된다 (URI 와 해시 계산이 깨진다).
+ */
+const SIP_USER_RE = /^[A-Za-z0-9._-]{1,64}$/;
+
 async function handlePostMobile(req: Request, res: Response) {
     const { uuid, email, complex, address, token } = req.body ?? {};
     if (!uuid || !email || !complex || !address || !token) {
@@ -105,19 +116,43 @@ async function handlePostMobile(req: Request, res: Response) {
         return;
     }
 
+    /*
+     * sip_user — SIP 착신 푸시가 이 단말을 찾는 열쇠다 (schema/002-sip-user.sql).
+     *
+     * 세 가지를 구분한다.
+     *   보내지 않음   → null → **기존 값을 건드리지 않는다** (아래 COALESCE)
+     *   빈 문자열     → '' 로 저장 = 연결 해제. sipPush 의 조회에 걸리지 않는다
+     *   값이 있음     → 형식을 보고 저장
+     *
+     * 안 보낸 것을 '지움' 으로 다루면, 이 필드를 모르는 옛 앱이 갱신할 때마다
+     * 연결이 조용히 끊긴다. 그래서 '건드리지 않음' 을 기본으로 둔다.
+     */
+    const rawSipUser = req.body?.sip_user;
+    let sipUser: string | null = null;
+    if (rawSipUser !== undefined && rawSipUser !== null) {
+        const v = String(rawSipUser).trim();
+        if (v !== '' && !SIP_USER_RE.test(v)) {
+            res.status(400).json({ error: 'sip_user 는 영문·숫자·. _ - 만 쓸 수 있고 64자 이내여야 합니다.' });
+            return;
+        }
+        sipUser = v;
+    }
+
     // uuid 에 UNIQUE 가 걸려 있어 조회 없이 한 번으로 끝난다.
     // (이관 전에는 SELECT COUNT → INSERT 또는 UPDATE 3단계였다)
+    // sip_user 만 COALESCE 로 받는다 — 안 보냈을 때(null) 기존 값을 지우지 않기 위해서다.
     const sql = `INSERT INTO ${CallFusion.getTableForMobile()}
-                    (uuid, email, complex, address, token, phone, image)
-                 VALUES (?, ?, ?, ?, ?, ?, ?)
+                    (uuid, email, complex, address, token, phone, image, sip_user)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                  ON DUPLICATE KEY UPDATE
                     email = VALUES(email), complex = VALUES(complex), address = VALUES(address),
-                    token = VALUES(token), phone = VALUES(phone), image = VALUES(image)`;
+                    token = VALUES(token), phone = VALUES(phone), image = VALUES(image),
+                    sip_user = COALESCE(VALUES(sip_user), sip_user)`;
 
     try {
         const result = await DbConn.execute(sql, [
             uuid, email, complex, address, token,
-            req.body.phone ?? null, req.body.image ?? null,
+            req.body.phone ?? null, req.body.image ?? null, sipUser,
         ]);
         // affectedRows: 1 = 새로 넣음, 2 = 갱신함
         const created = result.affectedRows === 1;
