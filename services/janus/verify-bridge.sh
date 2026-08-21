@@ -48,6 +48,14 @@ LOCAL_IP="${LOCAL_IP:-192.168.0.252}"
 UA_SIP_PORT="${UA_SIP_PORT:-45060}"
 UA_RTP_PORT="${UA_RTP_PORT:-40100}"
 
+# 점검 출력은 공용 규약을 따른다 (docs/check-contract.md).
+source "${SCRIPT_DIR}/../../lib/check-report.sh"
+
+# --json 은 아래 인자 파싱보다 **먼저** 걸러낸다.
+check_init "janus.verify.bridge"
+check_args "$@"
+set -- "${CHECK_REST[@]:-}"
+
 MODE="check"
 BROWSER_USER="2001"
 UA_USER="2004"
@@ -68,14 +76,16 @@ while [[ $# -gt 0 ]]; do
         --video)   WITH_VIDEO=1; shift ;;
         --phone)   UA_USER="${2:?}"; shift 2 ;;
         -h|--help) sed -n '2,30p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        "") shift ;;             # check_args 가 비운 자리
         *) echo "Unknown option: $1"; exit 1 ;;
     esac
 done
 
-ok()   { echo "  [ok]   $*"; }
-warn() { echo "  [!!]   $*"; PROBLEMS=$((PROBLEMS + 1)); }
 die()  { echo "오류: $*" >&2; exit 1; }
 PROBLEMS=0
+
+# warn 은 공용 규약의 판정에 더해 이 스크립트의 카운터도 올린다.
+warn() { _check_add problem "$*"; [[ $CHECK_JSON -eq 1 ]] || echo "  [!!]   $*"; PROBLEMS=$((PROBLEMS + 1)); }
 
 probe_http() {
     local out
@@ -91,24 +101,24 @@ find_chrome() {
 }
 
 # ── 점검 ────────────────────────────────────────────────────────────────
-echo "도구"
+info "도구"
 command -v node >/dev/null && ok "node $(node --version)" || warn "node 가 없습니다"
 if CHROME="$(find_chrome)"; then ok "브라우저 ${CHROME}"; else CHROME=""; warn "크롬이 없습니다"; fi
 
-echo
-echo "자원"
+info
+info "자원"
 [[ -f "$JANUS_JS_SRC" ]] && ok "janus.js" || warn "janus.js 없음: ${JANUS_JS_SRC}"
 [[ -f "$ADAPTER_JS_SRC" ]] && ok "webrtc-adapter" || warn "webrtc-adapter 없음 — ./setup-dashboard.sh --build"
 [[ -f "${HARNESS_DIR}/sipua.js" ]] && ok "평문 SIP 단말 (test-harness/sipua.js)" || warn "sipua.js 가 없습니다"
 
-echo
-echo "Janus"
+info
+info "Janus"
 [[ "$(probe_http "http://127.0.0.1:${JANUS_HTTP_PORT}/janus-api/info")" == "200" ]] \
     && ok "시그널링 API 200" || warn "시그널링 API 응답 없음 — systemctl status janus"
 [[ -f "${SECRETS_DIR}/api-secret" ]] && ok "api-secret" || warn "secrets/api-secret 없음"
 
-echo
-echo "SIP 계정 (브라우저 ${BROWSER_USER} · 평문 단말 ${UA_USER})"
+info
+info "SIP 계정 (브라우저 ${BROWSER_USER} · 평문 단말 ${UA_USER})"
 for u in "$BROWSER_USER" "$UA_USER"; do
     if [[ -f "${SECRETS_DIR}/sip-${u}.pw" ]]; then ok "${u}: secrets/sip-${u}.pw"
     else
@@ -117,8 +127,8 @@ for u in "$BROWSER_USER" "$UA_USER"; do
     fi
 done
 
-echo
-echo "포트"
+info
+info "포트"
 for p in "$HARNESS_PORT" "$UA_SIP_PORT" "$UA_RTP_PORT"; do
     if ss -lun 2>/dev/null | grep -q ":${p}\b" || ss -ltn 2>/dev/null | grep -q ":${p}\b"; then
         warn "${p} 이 이미 쓰이고 있습니다"
@@ -127,8 +137,9 @@ for p in "$HARNESS_PORT" "$UA_SIP_PORT" "$UA_RTP_PORT"; do
     fi
 done
 
-echo
+info
 if [[ "$MODE" == "check" ]]; then
+    check_finish            # --json 이면 여기서 끝난다
     [[ $PROBLEMS -gt 0 ]] && { echo "점검: [!!] ${PROBLEMS}개."; exit 1; }
     echo "점검: 문제 없음. 실제로 걸어 보려면 --run 을 붙이세요."
     exit 0

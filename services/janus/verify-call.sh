@@ -40,6 +40,14 @@ HARNESS_PORT="${HARNESS_PORT:-28199}"
 SIP_DOMAIN="${SIP_DOMAIN:-pluto.org}"
 SIP_PROXY="${SIP_PROXY:-sip:192.168.0.252:5060}"
 
+# 점검 출력은 공용 규약을 따른다 (docs/check-contract.md).
+source "${SCRIPT_DIR}/../../lib/check-report.sh"
+
+# --json 은 아래 인자 파싱보다 **먼저** 걸러낸다.
+check_init "janus.verify.call"
+check_args "$@"
+set -- "${CHECK_REST[@]:-}"
+
 MODE="check"
 FROM_USER="2001"
 TO_USER="2003"
@@ -53,15 +61,16 @@ while [[ $# -gt 0 ]]; do
         -h|--help)
             sed -n '2,25p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
             exit 0 ;;
+        "") shift ;;             # check_args 가 비운 자리
         *) echo "Unknown option: $1"; echo "Usage: $0 [--check|--run] [--from USER] [--to USER]"; exit 1 ;;
     esac
 done
 
-ok()   { echo "  [ok]   $*"; }
-no()   { echo "  [--]   $*"; }
-warn() { echo "  [!!]   $*"; PROBLEMS=$((PROBLEMS + 1)); }
 die()  { echo "오류: $*" >&2; exit 1; }
 PROBLEMS=0
+
+# warn 은 공용 규약의 판정에 더해 이 스크립트의 카운터도 올린다.
+warn() { _check_add problem "$*"; [[ $CHECK_JSON -eq 1 ]] || echo "  [!!]   $*"; PROBLEMS=$((PROBLEMS + 1)); }
 
 pw_file() { echo "${SECRETS_DIR}/sip-$1.pw"; }
 
@@ -81,7 +90,7 @@ find_chrome() {
 }
 
 # ── 점검 ────────────────────────────────────────────────────────────────
-echo "도구"
+info "도구"
 command -v node >/dev/null && ok "node $(node --version)" || warn "node 가 없습니다"
 if CHROME="$(find_chrome)"; then
     ok "브라우저 ${CHROME}"
@@ -90,23 +99,23 @@ else
     warn "크롬이 없습니다 — google-chrome / chromium 중 하나가 필요합니다"
 fi
 
-echo
-echo "자원"
+info
+info "자원"
 [[ -f "$JANUS_JS_SRC" ]] && ok "janus.js ${JANUS_JS_SRC}" \
     || warn "janus.js 를 찾지 못했습니다: ${JANUS_JS_SRC}"
 [[ -f "$ADAPTER_JS" ]] && ok "webrtc-adapter" \
     || warn "webrtc-adapter 가 없습니다 — ./setup-dashboard.sh --build 를 먼저 도세요"
 
-echo
-echo "Janus"
+info
+info "Janus"
 INFO_CODE="$(probe_http "http://127.0.0.1:${JANUS_HTTP_PORT}/janus-api/info")"
 [[ "$INFO_CODE" == "200" ]] && ok "시그널링 API 200 (127.0.0.1:${JANUS_HTTP_PORT})" \
     || warn "시그널링 API 가 ${INFO_CODE} 입니다 — systemctl status janus"
 [[ -f "${SECRETS_DIR}/api-secret" ]] && ok "api-secret" \
     || warn "secrets/api-secret 이 없습니다 — sudo ./install.sh --apply"
 
-echo
-echo "SIP 계정 (${FROM_USER} → ${TO_USER})"
+info
+info "SIP 계정 (${FROM_USER} → ${TO_USER})"
 for u in "$FROM_USER" "$TO_USER"; do
     f="$(pw_file "$u")"
     if [[ -f "$f" ]]; then
@@ -119,16 +128,17 @@ for u in "$FROM_USER" "$TO_USER"; do
     fi
 done
 
-echo
-echo "포트"
+info
+info "포트"
 if ss -ltn 2>/dev/null | grep -q "127.0.0.1:${HARNESS_PORT}\b"; then
     warn "${HARNESS_PORT} 이 이미 쓰이고 있습니다 — HARNESS_PORT 로 바꾸세요"
 else
     ok "${HARNESS_PORT} 비어 있음 (하니스가 잠깐 쓴다)"
 fi
 
-echo
+info
 if [[ "$MODE" == "check" ]]; then
+    check_finish            # --json 이면 여기서 끝난다
     if [[ $PROBLEMS -gt 0 ]]; then
         echo "점검: [!!] ${PROBLEMS}개. 위를 먼저 해결하세요."
         exit 1

@@ -29,6 +29,14 @@ INSTALLED_CFG="/opt/janus/etc/janus/janus.jcfg"
 # 어차피 공유기가 갱신하고 있고, 바깥에 요청을 하나 덜 보낸다.
 DDNS_NAME="${JANUS_DDNS_NAME:-jejezzhome.iptime.org}"
 
+# 점검 출력은 공용 규약을 따른다 (docs/check-contract.md).
+source "${SCRIPT_DIR}/../../lib/check-report.sh"
+
+# --json 은 아래 인자 파싱보다 **먼저** 걸러낸다.
+check_init "janus.publicip"
+check_args "$@"
+set -- "${CHECK_REST[@]:-}"
+
 QUIET=0
 WRITE=0
 for a in "$@"; do
@@ -36,15 +44,19 @@ for a in "$@"; do
         --quiet) QUIET=1 ;;
         --write) WRITE=1 ;;
         -h|--help) sed -n '2,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        "") ;;                  # check_args 가 비운 자리
         *) echo "Unknown option: $a" >&2; exit 2 ;;
     esac
 done
 
-say() { [[ $QUIET -eq 1 ]] || echo "$@"; }
+# JSON 모드에서도 조용해야 한다 — stdout 은 JSON 한 덩어리여야 하므로.
+say() { [[ $QUIET -eq 1 || $CHECK_JSON -eq 1 ]] || echo "$@"; }
 
 # ── 지금의 공인 IP ──────────────────────────────────────────────────────
 current="$(getent hosts "$DDNS_NAME" 2>/dev/null | awk '{print $1}' | head -1)"
 if [[ -z "$current" ]]; then
+    judge skip "${DDNS_NAME} 를 해석하지 못해 공인 IP 를 확인할 수 없습니다"
+    check_finish
     echo "확인 불가: ${DDNS_NAME} 를 해석하지 못했습니다" >&2
     exit 2
 fi
@@ -101,18 +113,24 @@ fi
 # 비교 대상은 '실제로 Janus 가 쓰는 값' 이 우선이고, 못 읽으면 public-ip 파일이다.
 reference="${installed:-${applied:-$declared}}"
 
-echo
+[[ $CHECK_JSON -eq 1 ]] || echo
 if [[ -z "$reference" ]]; then
+    judge skip "LAN 전용으로 설치돼 있습니다 (nat_1_1_mapping 없음)"
+    check_finish
     say "판정: LAN 전용으로 설치돼 있습니다. 외부 브라우저를 받으려면 9단계를 켜세요."
     say "      ./check-public-ip.sh --write && sudo ./install.sh --apply"
     exit 0
 fi
 
 if [[ "$reference" == "$current" ]]; then
+    judge ok "광고 중인 공인 IP 가 현재 값과 같습니다 (${current})"
+    check_finish
     say "판정: 같습니다 — 외부 통화의 ICE 후보 주소가 유효합니다."
     exit 0
 fi
 
+judge problem "Janus 는 ${reference} 를 광고하는데 지금 공인 IP 는 ${current} 입니다 — 외부 통화가 무음이 됩니다"
+check_finish
 echo "판정: ⚠️ 다릅니다 — Janus 는 ${reference} 를 광고하는데 지금 공인 IP 는 ${current} 입니다."
 echo "      이 상태에서는 외부 브라우저와 신호는 붙고 **소리가 나지 않습니다.**"
 echo "      고치려면:"

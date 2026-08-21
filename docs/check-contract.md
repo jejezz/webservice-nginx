@@ -149,9 +149,9 @@ check_finish                  # JSON 이면 여기서 출력하고 종료
 | `services/janus/bootstrap.sh` | `janus.deps` | ✅ |
 | `services/janus/install.sh` | `janus.config` | ✅ |
 | `services/janus/setup-dashboard.sh` | `janus.dashboard` | ✅ |
-| `services/janus/verify-call.sh` | `janus.verify.call` | ⬜ |
-| `services/janus/verify-bridge.sh` | `janus.verify.bridge` | ⬜ |
-| `services/janus/check-public-ip.sh` | `janus.publicip` | ⬜ |
+| `services/janus/verify-call.sh` | `janus.verify.call` | ✅ |
+| `services/janus/verify-bridge.sh` | `janus.verify.bridge` | ✅ |
+| `services/janus/check-public-ip.sh` | `janus.publicip` | ✅ |
 | `services/kamailio/bootstrap.sh` | `kamailio.deps` | ✅ |
 | `services/kamailio/install.sh` | `kamailio.config` | ✅ |
 | `nginx/install_nginx_stack.sh` | `nginx.routes` | ⬜ |
