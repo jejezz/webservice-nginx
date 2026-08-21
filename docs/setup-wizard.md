@@ -559,6 +559,7 @@ SIP_LISTEN_ADDR="192.168.0.252"      # ← 이 장비의 LAN 주소
 | `kamailio.cfg` · `kamailio-local.cfg` | `services/kamailio/install.sh` |
 | `.jcfg` 넷 · `janus.service` | `services/janus/install.sh` |
 | `path-routing.conf` | `nginx/generate_nginx_conf.py` (선언대로 만든 것과 견줌) |
+| 선언 ↔ 실행 중 ↔ `dump.pm2` | `pm2/ecosystem.config.js` (파일이 아니라 프로세스) |
 | `99-project.cnf` | `database/check-database.sh` (`database.ini` 로 만든 것과 견줌) |
 
 세 가지를 지켰습니다.
@@ -609,6 +610,8 @@ DB 비밀번호가 박히고 있었습니다.
 4. ~~**설치본이 저장소보다 낡은 것을 어떻게 알아챌지**~~ — 답했습니다.
    `lib/config-diff.sh` 로 파일 단위 비교를 넣었고, 붙이자마자 nginx 에서
    하나 더 나왔습니다 (위 '설치본이 낡은 것을 잡는다').
-5. **pm2 는 어떻게 볼지** — 거기서 어긋나는 것은 파일이 아니라 `pm2 save` 가
-   만든 `dump.pm2` 입니다. 선언을 고치고 `pm2 start`+`save` 를 안 하면 재부팅
-   때 옛 목록이 돌아옵니다. 같은 종류의 어긋남인데 견줄 방식이 다릅니다.
+5. ~~**pm2 는 어떻게 볼지**~~ — 답했습니다. 파일이 아니라 프로세스라
+   **셋**(선언 · `pm2 jlist` · `dump.pm2`)을 견줍니다
+   ([check-contract.md](check-contract.md) 의 'pm2 는 파일이 아니라').
+   재기동만 하고 `pm2 save` 를 잊은 상태는 **재부팅 전까지 아무 증상이
+   없어서**, 이 셋 중 셋째를 보지 않으면 잡을 방법이 없습니다.

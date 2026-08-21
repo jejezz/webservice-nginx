@@ -207,9 +207,38 @@ report_config_diff "kamailio-local.cfg" "sudo $0 --apply" \
 | `services/janus/install.sh` | `.jcfg` 넷 · `janus.service` |
 | `nginx/generate_nginx_conf.py` | `/etc/nginx/conf.d/path-routing.conf` (선언대로 만든 것과) |
 | `database/check-database.sh` | `99-project.cnf` (`database.ini` 로 만든 것과) |
+| `pm2/ecosystem.config.js` | 선언 ↔ 실행 중 ↔ `dump.pm2` (아래) |
 
-`pm2` 는 아직입니다 — 거기서 어긋나는 것은 파일이 아니라 `pm2 save` 가 만든
-`dump.pm2` 라 방식이 다릅니다.
+### pm2 는 파일이 아니라 프로세스라 셋을 견줍니다
+
+| 무엇 | 어디서 오는가 |
+|---|---|
+| 선언 | `services/*/pm2-conf/*.ini` |
+| 실행 중 | `pm2 jlist` |
+| 재부팅하면 살아날 것 | `~/.pm2/dump.pm2` (`pm2 save` 가 씁니다) |
+
+어긋나는 방식이 각각 다릅니다. 선언만 고치고 재기동을 안 하면 **둘째**가 낡고,
+재기동만 하고 `pm2 save` 를 잊으면 **셋째**가 낡습니다.
+
+**뒤엣것은 재부팅 전까지 아무 증상이 없습니다.** 그날 `pm2 resurrect` 가
+복원하는 것은 마지막 `pm2 save` 시점의 목록이라, 몇 주 전 설정으로 서비스가
+올라옵니다. 그래서 여기서 봅니다.
+
+견주는 값은 **선언이 정한 것만**입니다 — `script` · `cwd` · `interpreter` ·
+`watch` · 선언에 적힌 `env` 키들. pm2 는 부모 환경을 통째로 물려주므로 `env` 를
+전부 비교하면 소음만 커집니다. 선언은 커밋된 ini 에서 오므로 그 값에 비밀이
+섞이지 않습니다.
+
+안내하는 명령이 경우마다 다릅니다. **"돌고 있는데 선언에 없는" 앱에 대고
+`pm2 save` 를 권하면 원하지 않는 앱을 굳혀 버립니다.**
+
+| 어긋남 | 할 일 |
+|---|---|
+| 선언돼 있는데 안 돎 | `pm2 start … --only <이름> && pm2 save` |
+| 선언과 다르게 돎 | `pm2 restart <이름> --update-env && pm2 save` |
+| 돌고 있는데 선언에 없음 | `pm2 delete <이름> && pm2 save` 하거나 선언을 되살리기 |
+| 돌고 있는데 재부팅 목록에 없음 | `pm2 save` |
+| 재부팅 목록에만 있음 | 지운 뒤 `pm2 save` 를 잊은 것 |
 
 ## 스크립트에 붙이는 법
 

@@ -20,7 +20,9 @@
  * 맡는다. 설정 반영은 ../nginx/install_nginx_stack.sh 를 쓴다.
  */
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
+const { execFileSync } = require('child_process');
 
 const SERVICES_DIR = path.resolve(__dirname, '..', 'services');
 const LOG_DIR = path.join(__dirname, 'logs');
@@ -216,6 +218,163 @@ function checkState() {
   return 'complete';
 }
 
+/*
+ * ── 선언대로 돌고 있는가 (docs/check-contract.md 의 '설치본이 저장소와 같은가')
+ *
+ * 다른 서비스들은 **파일**을 견주면 되지만 pm2 는 대상이 프로세스라 방식이
+ * 다르다. 볼 것이 셋이다.
+ *
+ *   선언 (pm2-conf/*.ini)   지금 무엇을 돌려야 하는가
+ *   실행 중 (pm2 jlist)     지금 무엇이 돌고 있는가
+ *   dump.pm2 (pm2 save)     재부팅하면 무엇이 살아날 것인가
+ *
+ * 어긋나는 방식이 각각 다르다. 선언만 고치고 재기동을 안 하면 둘째가 낡고,
+ * 재기동만 하고 `pm2 save` 를 잊으면 셋째가 낡는다. **뒤엣것은 재부팅 전까지
+ * 아무 증상이 없다** — pm2/README 가 경고하는 바로 그 함정이다.
+ *
+ * 견주는 값은 선언이 정한 것만이다. pm2 는 부모 환경을 통째로 물려주므로 env
+ * 를 전부 비교하면 소음만 커진다. 선언은 커밋된 ini 에서 오므로 여기 찍히는
+ * 값에 비밀이 섞이지 않는다.
+ */
+const PM2_HOME = process.env.PM2_HOME || path.join(os.homedir(), '.pm2');
+
+function pm2List() {
+  try {
+    const out = execFileSync('pm2', ['jlist'], {
+      encoding: 'utf8', timeout: 10000, maxBuffer: 8 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    return JSON.parse(out);
+  } catch {
+    return null;   // pm2 가 없거나 데몬이 없다. 못 본 것이지 잘못된 것이 아니다.
+  }
+}
+
+function pm2Dump() {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(PM2_HOME, 'dump.pm2'), 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+// jlist 는 pm2_env 안에, dump.pm2 는 그 자체가 같은 모양이다.
+const envOf = (entry) => entry.pm2_env || entry;
+
+/** 선언과 실물의 차이를 사람이 읽을 문장들로. 같으면 빈 배열. */
+function compareApp(app, actual) {
+  const a = envOf(actual);
+  const out = [];
+  const differ = (label, want, have) => {
+    if (want === undefined || want === null) return;
+    if (String(want) !== String(have ?? '')) out.push(`${label} 선언 ${want} ≠ 실물 ${have ?? '(없음)'}`);
+  };
+
+  differ('script', path.resolve(app.cwd || '.', app.script), a.pm_exec_path);
+  differ('cwd', app.cwd, a.pm_cwd);
+  if (app.interpreter) differ('interpreter', app.interpreter, a.exec_interpreter);
+  if (app.watch !== undefined) differ('watch', JSON.stringify(app.watch), JSON.stringify(a.watch ?? false));
+
+  for (const [key, want] of Object.entries(app.env || {})) {
+    differ(`env.${key}`, want, a.env ? a.env[key] : undefined);
+  }
+  return out;
+}
+
+function checkRunning(entries) {
+  const declared = entries.filter((e) => e.enabled).map((e) => e.app);
+  const list = pm2List();
+
+  if (!list) {
+    skipLine('pm2 에 물어보지 못해 "선언대로 돌고 있는가" 를 건너뜁니다 (pm2 jlist)');
+    return;
+  }
+
+  const byName = new Map(list.map((p) => [p.name, p]));
+  let drift = 0;
+
+  for (const app of declared) {
+    const proc = byName.get(app.name);
+    if (!proc) {
+      judge('pending', `${app.name} — 선언돼 있는데 돌고 있지 않습니다 → cd pm2 && pm2 start ecosystem.config.js --only ${app.name} && pm2 save`);
+      drift += 1;
+      continue;
+    }
+    const status = envOf(proc).status;
+    if (status !== 'online') {
+      judge('problem', `${app.name} — 상태가 ${status} 입니다 (pm2 logs ${app.name})`);
+      drift += 1;
+      continue;
+    }
+    const diffs = compareApp(app, proc);
+    if (diffs.length) {
+      judge('pending', `${app.name} — 선언과 다르게 돌고 있습니다: ${diffs.join(' · ')} → pm2 restart ${app.name} --update-env && pm2 save`);
+      drift += 1;
+    }
+  }
+
+  // 선언에 없는데 돌고 있는 것. 껐다고 적어 둔 앱이 그대로 떠 있는 경우다.
+  const declaredNames = new Set(declared.map((a) => a.name));
+  for (const proc of list) {
+    if (declaredNames.has(proc.name)) continue;
+    judge('pending', `${proc.name} — 돌고 있는데 선언에 없습니다 (pm2 delete ${proc.name} && pm2 save 하거나 선언을 되살리세요)`);
+    drift += 1;
+  }
+
+  if (!drift) judge('ok', `실행 중 ${list.length}개 — 선언대로 돌고 있습니다`);
+
+  checkSaved(declared, list);
+}
+
+/** 재부팅하면 살아날 목록. pm2 save 를 잊으면 여기만 낡는다. */
+function checkSaved(declared, list) {
+  const dump = pm2Dump();
+  if (!dump) {
+    judge('pending', `재부팅 목록이 없습니다 (${path.join(PM2_HOME, 'dump.pm2')}) — pm2 save 를 한 번도 하지 않았습니다`);
+    return;
+  }
+
+  const running = new Set(list.map((p) => p.name));
+  const saved = new Map(dump.map((a) => [a.name, a]));
+  const declaredNames = new Set(declared.map((a) => a.name));
+
+  // 돌고 있는데 재부팅 목록에 없다 = 띄우고 pm2 save 를 잊었다.
+  // **선언에 없는 것은 여기서 말하지 않는다** — 그건 위에서 이미 짚었고,
+  // 거기에 대고 "pm2 save 를 하세요" 라고 하면 원하지 않는 앱을 굳혀 버린다.
+  const notSaved = [...running].filter((n) => !saved.has(n) && declaredNames.has(n));
+  // 재부팅 목록에는 있는데 지금 안 돌고 있다 = 지우고 pm2 save 를 잊었다.
+  const ghosts = [...saved.keys()].filter((n) => !running.has(n));
+
+  let mismatch = 0;
+  if (notSaved.length) {
+    judge('pending', `재부팅 목록에 없습니다: ${notSaved.join(', ')} — 지금은 돌고 있지만 재부팅하면 뜨지 않습니다. pm2 save 를 하세요`);
+    mismatch += 1;
+  }
+  if (ghosts.length) {
+    judge('pending', `재부팅하면 살아납니다: ${ghosts.join(', ')} — 지금은 돌고 있지 않습니다. 지운 뒤 pm2 save 를 하지 않았습니다`);
+    mismatch += 1;
+  }
+  if (mismatch) return;
+
+  // 목록은 같은데 설정이 옛것인 경우. 재기동은 했고 save 를 잊은 상태다.
+  const stale = [];
+  for (const app of declared) {
+    const entry = saved.get(app.name);
+    if (!entry) continue;
+    const diffs = compareApp(app, entry);
+    if (diffs.length) stale.push(`${app.name}(${diffs[0]})`);
+  }
+
+  if (stale.length) {
+    judge('pending', `재부팅하면 옛 설정으로 뜹니다: ${stale.join(', ')} — pm2 save 를 하세요`);
+  } else {
+    judge('ok', `재부팅 목록도 같습니다 (${dump.length}개, pm2 save 됨)`);
+  }
+}
+
+function skipLine(text) {
+  judge('skip', text);
+}
+
 function check(entries, quiet = false) {
   let problems = 0;
 
@@ -247,6 +406,21 @@ function check(entries, quiet = false) {
       console.log(
         `  ${status.padEnd(6)}  ${app.name.padEnd(16)} ${(port || '-').padEnd(7)} ${where.padEnd(22)} ${note}`
       );
+    }
+  }
+
+  // 선언이 옳은가 다음에, 그것이 실제로 돌고 있는가를 본다.
+  // 사람 화면에는 이 절이 낸 줄만 따로 모아 찍는다 (앞의 선언 목록과 섞이지 않게).
+  const before = CHECK_ENTRIES.length;
+  checkRunning(entries);
+  const runtimeEntries = CHECK_ENTRIES.slice(before);
+  problems += runtimeEntries.filter((e) => e.level === 'problem' || e.level === 'pending').length;
+
+  if (!quiet && runtimeEntries.length) {
+    console.log('\n선언대로 돌고 있는가');
+    const MARK = { ok: 'ok', problem: '!!', pending: '--', skip: '--' };
+    for (const entry of runtimeEntries) {
+      console.log(`  ${MARK[entry.level].padEnd(6)}  ${entry.text}`);
     }
   }
 

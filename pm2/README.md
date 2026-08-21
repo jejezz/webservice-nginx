@@ -122,6 +122,23 @@ cron 은 `PATH=/usr/bin:/bin` 으로 돌아서 `/usr/local/bin/pm2` 를 못 찾�
 **`pm2 resurrect` 가 복원하는 것은 마지막 `pm2 save` 시점의 목록입니다.**
 선언을 고쳤어도 `pm2 start` + `pm2 save` 를 하지 않으면 옛 목록이 돌아옵니다.
 
+이 어긋남은 **재부팅 전까지 아무 증상이 없습니다.** 그래서 점검이 대신 봅니다.
+
+```bash
+node ecosystem.config.js --check        # 선언 · 실행 중 · 재부팅 목록 셋을 견준다
+```
+
+```
+선언대로 돌고 있는가
+  ok      실행 중 8개 — 선언대로 돌고 있습니다
+  ok      재부팅 목록도 같습니다 (8개, pm2 save 됨)
+```
+
+어긋나면 무엇을 해야 하는지 경우마다 다르게 알려 줍니다 — 돌고 있는데 선언에
+없는 앱에 대고 `pm2 save` 를 하면 원하지 않는 앱이 굳어 버리기 때문입니다.
+규칙은 [docs/check-contract.md](../docs/check-contract.md) 의 'pm2 는 파일이
+아니라 프로세스라 셋을 견줍니다' 에 있습니다.
+
 ### (대안) systemd
 
 ```bash
