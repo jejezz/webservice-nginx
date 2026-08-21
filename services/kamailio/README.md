@@ -14,7 +14,7 @@ services/kamailio/
 ├── kamailio-local.cfg      /etc/kamailio/ 오버라이드 — digest 인증 (install.sh 가 설치)
 ├── kamailio-websocket.cfg  /etc/kamailio/ 오버라이드 — WS 전송 (setup-websocket.sh 가 설치)
 ├── docs/
-│   ├── websocket-plan.md   SIP over WSS 로 가기 위한 작업과 결정 사항
+│   ├── websocket-plan.md   SIP over WSS 계획 — ⛔ 채택 안 됨 (모바일도 Janus 로)
 │   ├── incoming-call.md    인터폰 → 모바일 착신 (FCM 으로 단말 깨우기)
 │   ├── mobile-transport.md 모바일을 무엇으로 붙일 것인가 — 확인한 것과 정한 것
 │   └── alternatives.md     Asterisk 를 다시 검토하게 될 때 (판단 보류 기록)

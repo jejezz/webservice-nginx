@@ -219,5 +219,16 @@ Kamailio 의 5060 은 `0.0.0.0` 에 바인딩돼 있어, 포워딩만 열리면 
 | ① Janus | `/janus-api` (브라우저와 같은 길) | 없음 — 이미 동작 |
 | ② Kamailio WS | `/sip/` (SIP over WebSocket) | **rtpengine** (미설치) |
 
-①이면 `/sip/` 라우트와 rtpengine 이 둘 다 필요 없어집니다. 지금까지 검증된 것도
-①쪽이므로 그편이 자연스럽습니다.
+**✅ ①로 정했습니다 (2026-08-21).** `/sip/` 라우트와 rtpengine 이 둘 다 필요
+없어집니다. 지금까지 검증된 것도 ①쪽입니다.
+
+그래서 SIP 는 **서버 안쪽의 신호 언어**로만 남습니다. 밖에서 SIP 로 들어오는
+길은 두지 않습니다.
+
+```
+브라우저 ─WSS/DTLS-SRTP─▶ Janus ─평문 SIP/RTP─▶ Kamailio ─▶ LAN SIP 단말
+모바일   ─WSS/DTLS-SRTP─▶ Janus ─┘
+```
+
+`websocket-plan.md` 는 채택되지 않은 계획이 되었습니다 — 그 문서 머리에 적어
+두었습니다. 1단계에서 확인한 사실들은 그대로 유효하므로 지우지 않습니다.

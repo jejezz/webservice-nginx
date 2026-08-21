@@ -3,9 +3,27 @@
 이 문서는 결정이 필요한 지점과 검증한 사실을 모아 둔 것입니다.
 현재 상태는 `./setup-websocket.sh` 로 언제든 확인할 수 있습니다.
 
+> ## ⛔ 이 계획은 채택되지 않았습니다 (2026-08-21)
+>
+> **모바일도 Janus 로 붙기로 정했습니다.** 브라우저와 같은 길(`/janus-api`)을
+> 쓰므로, 이 문서가 세운 *SIP over WebSocket* 경로에는 쓸 클라이언트가 없습니다.
+>
+> | | |
+> |---|---|
+> | 1단계 (WS 전송·내부 통화) | ✅ 실제로 해 봤고 동작함 — `/sip/` 라우트와 `tcp:127.0.0.1:5080` 이 그 결과 |
+> | 2단계 (rtpengine) | ⛔ 하지 않습니다 — **rtpengine 은 필요 없어졌습니다** |
+> | 3단계 (tsilo + 푸시 착신) | 🔸 착신 문제는 남아 있습니다. 다만 Janus 쪽에서 풀 문제입니다 |
+>
+> 여기까지 확인한 사실들(모듈 유무, 배포판 설정의 동작, NAT 판정)은 그대로
+> 유효하고 다른 문서들이 참조합니다. 그래서 지우지 않고 남깁니다.
+>
+> 결정의 경위: [mobile-transport.md](mobile-transport.md) 7절 ·
+> [../../janus/docs/plan.md](../../janus/docs/plan.md) 10-4
+
 > **운영 중이 아닙니다.** 지금은 변경에 제약이 없습니다.
 
-관련: [incoming-call.md](incoming-call.md) · [alternatives.md](alternatives.md)
+관련: [incoming-call.md](incoming-call.md) · [alternatives.md](alternatives.md) ·
+[mobile-transport.md](mobile-transport.md)
 
 ## 무엇을 만들려는가
 
