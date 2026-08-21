@@ -16,6 +16,7 @@ services/kamailio/
 ├── docs/
 │   ├── websocket-plan.md   SIP over WSS 로 가기 위한 작업과 결정 사항
 │   ├── incoming-call.md    인터폰 → 모바일 착신 (FCM 으로 단말 깨우기)
+│   ├── mobile-transport.md 모바일을 무엇으로 붙일 것인가 — 확인한 것과 정한 것
 │   └── alternatives.md     Asterisk 를 다시 검토하게 될 때 (판단 보류 기록)
 ├── rtpengine.conf          미디어 릴레이 데몬 설정 원본 (아직 도입 전)
 ├── server/                 관찰용 대시보드 — Node
