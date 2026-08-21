@@ -87,6 +87,17 @@ SIP_LOCAL_IP="192.168.0.252"
 # ICE 후보를 여기서만 모은다. docker0/virbr0 까지 실어 보내면 통화 성립이 느려진다.
 LAN_IFACE="enp2s0"
 
+# 점검 출력은 공용 규약을 따른다 (docs/check-contract.md).
+# ok · warn · info 는 예전과 같고, 예전의 no() 는 skip/pend 로 나뉜다.
+source "${SCRIPT_DIR}/../../lib/check-report.sh"
+die()  { echo "오류: $*" >&2; exit 1; }
+
+# --json 은 아래 인자 파싱보다 **먼저** 걸러낸다. 그러지 않으면 "Unknown option"
+# 으로 걸린다.
+check_init "janus.config"       # docs/check-contract.md 의 step id
+check_args "$@"
+set -- "${CHECK_REST[@]:-}"
+
 MODE="check"
 ASSUME_YES=false
 
@@ -96,15 +107,10 @@ for arg in "$@"; do
         --remove) MODE="remove" ;;
         --check)  MODE="check" ;;
         --yes|-y) ASSUME_YES=true ;;
-        *) echo "Unknown option: $arg"; echo "Usage: $0 [--check|--apply|--remove] [--yes]"; exit 1 ;;
+        "") ;;                  # check_args 가 비운 자리
+        *) echo "Unknown option: $arg"; echo "Usage: $0 [--check|--apply|--remove] [--yes] [--json]"; exit 1 ;;
     esac
 done
-
-ok()   { echo "  [ok]   $*"; }
-no()   { echo "  [--]   $*"; }
-warn() { echo "  [!!]   $*"; }
-info() { echo "$*"; }
-die()  { echo "오류: $*" >&2; exit 1; }
 
 # curl 은 연결 실패에도 %{http_code} 로 "000" 을 찍고 종료 코드만 0 이 아니다.
 # `|| echo 000` 를 붙이면 "000000" 이 되어 버린다. 종료 코드는 무시하고
@@ -224,7 +230,7 @@ report() {
     if id "$JANUS_USER" &>/dev/null; then
         ok "실행 계정: ${JANUS_USER} (uid $(id -u "$JANUS_USER"))"
     else
-        no "실행 계정 ${JANUS_USER} 없음 — --apply 가 만듭니다"
+        pend "실행 계정 ${JANUS_USER} 없음 — --apply 가 만듭니다"
         pending=$((pending + 1))
     fi
 
@@ -241,7 +247,7 @@ report() {
         fi
 
         if [[ ! -f "$target" ]]; then
-            no "${cfg} — 설치되지 않음"
+            pend "${cfg} — 설치되지 않음"
             pending=$((pending + 1))
         elif [[ ! -r "$target" ]]; then
             # janus.jcfg 는 비밀을 담아 0640 root:janus 로 설치한다. 일반 사용자는
@@ -258,7 +264,7 @@ report() {
                 problems=$((problems + 1))
             fi
         elif [[ -f "$sample" ]] && cmp -s "$target" "$sample"; then
-            no "${cfg} — 배포본 그대로 (아직 결정이 반영되지 않음)"
+            pend "${cfg} — 배포본 그대로 (아직 결정이 반영되지 않음)"
             pending=$((pending + 1))
         else
             warn "${cfg} — 손으로 고친 흔적이 있습니다 (sample 과 다르고 표식도 없음)"
@@ -294,7 +300,7 @@ report() {
                 problems=$((problems + 1))
             fi
         else
-            no "${name}: $(basename "$sf") 없음 — --apply 가 만듭니다"
+            pend "${name}: $(basename "$sf") 없음 — --apply 가 만듭니다"
             pending=$((pending + 1))
         fi
     done
@@ -306,7 +312,7 @@ report() {
             warn "admin_secret 이 배포본 기본값(janusoverlord)인 채로 Janus 가 떠 있습니다"
             problems=$((problems + 1))
         else
-            no "janus.jcfg 의 admin_secret 이 배포본 기본값입니다 — --apply 가 바꿉니다"
+            pend "janus.jcfg 의 admin_secret 이 배포본 기본값입니다 — --apply 가 바꿉니다"
         fi
     fi
 
@@ -321,7 +327,7 @@ report() {
             && ok "구동 중" \
             || { warn "구동 중이 아닙니다 (journalctl -u janus -n 40)"; problems=$((problems + 1)); }
     else
-        no "유닛 없음: ${SERVICE_UNIT}"
+        pend "유닛 없음: ${SERVICE_UNIT}"
         pending=$((pending + 1))
     fi
 
@@ -351,7 +357,7 @@ report() {
             problems=$((problems + 1))
         fi
     else
-        no "시그널링 API(${API_PORT}) 가 열려 있지 않습니다"
+        pend "시그널링 API(${API_PORT}) 가 열려 있지 않습니다"
         pending=$((pending + 1))
     fi
 
@@ -363,7 +369,7 @@ report() {
             problems=$((problems + 1))
         fi
     else
-        no "Admin API(${ADMIN_PORT}) 가 열려 있지 않습니다 — 대시보드가 상태를 읽지 못합니다"
+        pend "Admin API(${ADMIN_PORT}) 가 열려 있지 않습니다 — 대시보드가 상태를 읽지 못합니다"
         pending=$((pending + 1))
     fi
 
@@ -408,7 +414,7 @@ report() {
         done
         [[ $clashes -eq 0 ]] && ok "범위가 서로 겹치지 않습니다"
     else
-        no "rtpproxy 설정(/etc/default/rtpproxy)을 읽지 못해 겹침을 검사하지 못했습니다"
+        skip "rtpproxy 설정(/etc/default/rtpproxy)을 읽지 못해 겹침을 검사하지 못했습니다"
     fi
 
     info ""
@@ -421,7 +427,7 @@ report() {
         if [[ "$iface" == "$LAN_IFACE" ]]; then
             ok "${iface} ${addr}  ← ice_enforce_list 로 이것만 쓴다"
         else
-            no "${iface} ${addr}  (ICE 후보에서 빠져야 한다)"
+            skip "${iface} ${addr}  (ICE 후보에서 빠져야 한다)"
         fi
     done < <(ip -o -4 addr show 2>/dev/null | awk '{print $2, $4}')
 
@@ -452,7 +458,7 @@ report() {
     if [[ -f "${SCRIPT_DIR}/server/src/index.js" ]]; then
         ok "대시보드 서버 있음"
     else
-        no "대시보드 서버 없음: server/src/index.js — 계획서 3단계"
+        pend "대시보드 서버 없음: server/src/index.js — 계획서 3단계"
         pending=$((pending + 1))
     fi
 
@@ -744,7 +750,7 @@ remove() {
 }
 
 case "$MODE" in
-    check)  report ;;
+    check)  report; check_finish ;;
     apply)  apply ;;
     remove) remove ;;
 esac
