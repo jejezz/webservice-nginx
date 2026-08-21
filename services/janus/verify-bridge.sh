@@ -6,6 +6,12 @@
 #   ./verify-bridge.sh --run          양방향 (발신 · 착신) 다 시험
 #   ./verify-bridge.sh --run --out    브라우저 → 평문 단말 (6-2) 만
 #   ./verify-bridge.sh --run --in     평문 단말 → 브라우저 (6-3) 만
+#   ./verify-bridge.sh --run --device 2002   실단말에 걸어 본다 (7단계 진단)
+#
+# --device 는 상대를 우리가 세우지 않는다. 브라우저가 그 번호로 걸고 **사람이
+# 받아야** 한다. 대신 통화 내내 rtpproxy 에 물어(probe-peer.js) 음성·영상
+# 스트림이 각각 실제로 흐르는지 기록한다 — "안 들린다" 가 무음인지 무패킷인지
+# 가르는 자리다.
 #
 # 5단계(verify-call.sh)와 무엇이 다른가 — **상대가 WebRTC 가 아니다.**
 #
@@ -47,6 +53,8 @@ BROWSER_USER="2001"
 UA_USER="2004"
 DO_OUT=1
 DO_IN=1
+DEVICE=""       # 비어 있지 않으면 실단말 모드
+WITH_VIDEO=0
 TALK="${TALK:-10}"
 
 while [[ $# -gt 0 ]]; do
@@ -56,6 +64,8 @@ while [[ $# -gt 0 ]]; do
         --out)   DO_IN=0; shift ;;
         --in)    DO_OUT=0; shift ;;
         --browser) BROWSER_USER="${2:?}"; shift 2 ;;
+        --device)  DEVICE="${2:?}"; shift 2 ;;
+        --video)   WITH_VIDEO=1; shift ;;
         --phone)   UA_USER="${2:?}"; shift 2 ;;
         -h|--help) sed -n '2,30p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "Unknown option: $1"; exit 1 ;;
@@ -145,10 +155,14 @@ write_config() {  # $1 = 상대 사용자명 (발신 방향에서만 쓰인다)
     fs.writeFileSync(path.join(rundir, "accounts.json"), JSON.stringify({
       apiSecret: read(path.join(secrets, "api-secret")),
       sipDomain: domain, sipProxy: proxy, peer,
+      withVideo: process.env.WITH_VIDEO === "1",
+      acceptTimeoutMs: Number(process.env.ACCEPT_TIMEOUT_MS || 25000),
+      observeMs: Number(process.env.OBSERVE_MS || 6000),
       accounts: { a: { user: browser, secret: read(path.join(secrets, `sip-${browser}.pw`)) } },
     }));
     ' "$RUNDIR" "$SECRETS_DIR" "$SIP_DOMAIN" "$SIP_PROXY" "$BROWSER_USER" "$1"
 }
+export WITH_VIDEO ACCEPT_TIMEOUT_MS OBSERVE_MS
 
 start_harness() {  # $1 = 페이지
     HARNESS_PORT="$HARNESS_PORT" HARNESS_RUNDIR="$RUNDIR" HARNESS_OUTDIR="$OUTDIR" \
@@ -204,6 +218,51 @@ report() {  # $1 = 제목, $2 = 브라우저 result.json, $3 = 단말 json
 }
 
 VERDICT=0
+
+# ── 7단계 — 실단말에 걸어 본다 ──────────────────────────────────────────
+if [[ -n "$DEVICE" ]]; then
+    WITH_VIDEO=1                      # 실단말은 대개 영상을 함께 낸다
+    echo "7단계  브라우저(${BROWSER_USER}) → 실단말(${DEVICE})"
+    echo
+    echo "  ⚠️  이 시험은 **사람이 받아야** 합니다. 단말이 울리면 받으세요."
+    echo "      브라우저는 440Hz 톤을 보냅니다 — 단말에서 그 소리가 들리는지 보세요."
+    echo
+    rm -f "${OUTDIR}/result.json"
+    # 사람이 받아야 하므로 넉넉히 기다리고, 관찰도 길게 한다.
+    ACCEPT_TIMEOUT_MS=90000 OBSERVE_MS=15000 WITH_VIDEO=1 write_config "$DEVICE"
+    start_harness test-bridge-out.html
+    start_chrome device
+    node "${HARNESS_DIR}/probe-peer.js" --seconds 120 > "${OUTDIR}/probe.json" 2> "${OUTDIR}/probe.log" &
+    PROBE_PID=$!
+    CHILDREN+=("$PROBE_PID")
+    set +e; wait "$HARNESS_PID"; R=$?; set -e
+    kill "$CHROME_PID" 2>/dev/null || true
+    wait "$PROBE_PID" 2>/dev/null || true
+    echo
+    echo "── 브라우저(WebRTC 다리) ─────────────────────────────────"
+    node -e '
+    const d = require(process.argv[1]);
+    for (const [k, v] of Object.entries(d.steps || {})) console.log(`  ${k}  →  ${v}`);
+    if (d.error) console.log(`  중단: ${d.error}`);
+    const s = d.stats || {};
+    console.log(`  음성  코덱 ${s.codec}  수신 ${s.inPackets} / 송신 ${s.outPackets}`);
+    console.log(`  영상  코덱 ${s.videoCodec}  수신 ${s.videoInPackets} / 송신 ${s.videoOutPackets}`);
+    ' "${OUTDIR}/result.json" 2>/dev/null || echo "  결과 없음"
+    echo
+    echo "── rtpproxy(평문 다리) ───────────────────────────────────"
+    node -e '
+    const d = require(process.argv[1]);
+    if (!d.sawAnySession) { console.log("  rtpproxy 세션을 보지 못했습니다 — 이 통화는 rtpproxy 를 지나지 않았습니다"); process.exit(0); }
+    for (const m of d.media) {
+      console.log(`  미디어 #${m.media}  흐름 ${m.flowing ? "있음" : "없음"}`);
+      for (const l of m.lines) console.log(`      ${l.caller} → ${l.callee}   증가 ${l.delta.join("/")}`);
+    }
+    if (d.silentMedia.length) console.log(`  ⚠️ 흐르지 않은 미디어: ${d.silentMedia.join(", ")} (m-line 순서대로 보통 1=음성, 2=영상)`);
+    ' "${OUTDIR}/probe.json" 2>/dev/null || echo "  probe 결과 없음"
+    echo
+    echo "  자세한 내용: test-harness/last-run-bridge/"
+    exit 0
+fi
 
 # ── 6-2 브라우저 → 평문 단말 ────────────────────────────────────────────
 if [[ $DO_OUT -eq 1 ]]; then

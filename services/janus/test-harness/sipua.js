@@ -42,6 +42,16 @@ const WAIT = parseInt(arg('wait', '120'), 10);
 const LOCAL_IP = arg('local-ip', '192.168.0.252');
 const SIP_PORT = parseInt(arg('sip-port', '45060'), 10);
 const RTP_PORT = parseInt(arg('rtp-port', '40100'), 10);
+/*
+ * 영상 m-line 을 함께 낸다 (7단계 진단용).
+ *
+ * 실단말(인터폰·안드로이드)은 음성과 영상을 함께 제시하는데, m-line 이 둘일 때
+ * 음성만 죽는 일이 있다. 그것이 상대 단말의 문제인지 이 경로의 문제인지 가르려면
+ * **통제 가능한 상대**로 같은 모양을 만들어 봐야 한다. 영상 RTP 를 실제로 보내지는
+ * 않고, 받은 것만 센다 — 관심사는 어디까지나 음성이 함께 흐르는가이다.
+ */
+const WITH_VIDEO = process.argv.includes('--with-video');
+const VIDEO_RTP_PORT = parseInt(arg('video-rtp-port', String(RTP_PORT + 2)), 10);
 /** 이 단말이 제시하는 코덱. **평문 G.711 만** 낸다 — 그것이 이 시험의 요점이다. */
 const OFFER_CODECS = [
   { pt: 0, name: 'PCMU/8000' },
@@ -134,6 +144,14 @@ function makeSdp(ptList) {
     maps,
     'a=sendrecv',
     'a=ptime:20',
+    ...(WITH_VIDEO ? [
+      `m=video ${VIDEO_RTP_PORT} RTP/AVP 103`,
+      `c=IN IP4 ${LOCAL_IP}`,
+      'a=rtpmap:103 H264/90000',
+      'a=fmtp:103 profile-level-id=42001e; packetization-mode=1',
+      'a=rtcp-fb:103 nack pli',
+      'a=sendrecv',
+    ] : []),
     '',                 // 마지막 줄도 CRLF 로 끝나야 한다 (RFC 4566)
   ].join('\r\n');
 }
@@ -215,6 +233,13 @@ function startRtp() {
 
 function stopRtp() {
   if (rtpTimer) { clearInterval(rtpTimer); rtpTimer = null; }
+}
+
+const vrtp = WITH_VIDEO ? dgram.createSocket('udp4') : null;
+if (vrtp) {
+  vrtp.on('error', (e) => log(`영상 RTP 소켓 오류: ${e.code || ''} ${e.message}`));
+  vrtp.on('message', (m) => { if (m.length >= 12) { state.videoIn = (state.videoIn || 0) + 1; state.videoInPts = state.videoInPts || new Set(); state.videoInPts.add(m[1] & 0x7F); } });
+  vrtp.bind(VIDEO_RTP_PORT, LOCAL_IP, () => log(`영상 RTP 대기 ${LOCAL_IP}:${VIDEO_RTP_PORT}`));
 }
 
 rtp.on('error', (e) => log(`RTP 소켓 오류: ${e.code || ''} ${e.message}`));
@@ -487,6 +512,7 @@ function finish() {
     rtpPacketsIn: state.rtpIn,
     rtpPacketsOut: state.rtpOut,
     rtpInPayloadTypes: [...state.rtpInPts],
+    ...(WITH_VIDEO ? { videoPacketsIn: state.videoIn || 0, videoInPayloadTypes: [...(state.videoInPts || [])] } : {}),
     remoteRtp: state.remoteRtp,
     hangup: state.hangupReason,
     error: state.error,

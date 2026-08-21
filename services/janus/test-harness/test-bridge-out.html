@@ -35,6 +35,17 @@ function finish(verdict) {
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * createOffer/createAnswer 에 넘길 트랙 구성.
+ * cfg.withVideo 가 켜지면 영상 m-line 도 함께 낸다 — 실단말과 같은 모양을
+ * 만들어 "m-line 이 둘일 때 음성이 죽는가" 를 가르기 위한 것이다 (7단계 진단).
+ */
+function trackSpec(cfg) {
+  const t = [{ type: 'audio', capture: true, recv: true }];
+  if (cfg && cfg.withVideo) t.push({ type: 'video', capture: true, recv: true });
+  return t;
+}
+
 /** 한 쪽(브라우저 한 대에 해당). 세션 + sip 플러그인 핸들 하나씩. */
 class Peer {
   constructor(name, account, cfg) {
@@ -181,7 +192,7 @@ class Peer {
     say(this.name, 'info', `발신: ${uri}`);
     return new Promise((resolve, reject) => {
       this.handle.createOffer({
-        tracks: [{ type: 'audio', capture: true, recv: true }],
+        tracks: trackSpec(this.cfg),
         success: (jsep) => { this.handle.send({ message: { request: 'call', uri }, jsep }); resolve(); },
         error: (e) => reject(new Error(`${this.name} createOffer 실패: ${e.message || e}`)),
       });
@@ -193,7 +204,7 @@ class Peer {
     return new Promise((resolve, reject) => {
       this.handle.createAnswer({
         jsep: this.incomingJsep,
-        tracks: [{ type: 'audio', capture: true, recv: true }],
+        tracks: trackSpec(this.cfg),
         success: (jsep) => { this.handle.send({ message: { request: 'accept' }, jsep }); resolve(); },
         error: (e) => reject(new Error(`${this.name} createAnswer 실패: ${e.message || e}`)),
       });
@@ -212,18 +223,34 @@ class Peer {
     if (!pc) return { error: 'PeerConnection 이 없음' };
     const s = { ice: pc.iceConnectionState, dtls: pc.connectionState };
     const report = await pc.getStats();
+    /*
+     * 코덱은 **종류별로** 담는다. 예전에는 codec 항목을 만나는 대로 s.codec 에
+     * 덮어썼더니, 영상이 함께 있는 통화에서 음성 코덱이 video/H264 로 가려져
+     * "PCMU 로 붙었는가" 판정이 거짓으로 실패했다.
+     */
+    const codecById = {};
+    report.forEach((r) => { if (r.type === 'codec' && r.mimeType) codecById[r.id] = r.mimeType; });
     report.forEach((r) => {
       if (r.type === 'inbound-rtp' && r.kind === 'audio') {
         s.inPackets = r.packetsReceived; s.inBytes = r.bytesReceived; s.inLost = r.packetsLost;
+        if (r.codecId && codecById[r.codecId]) s.codec = codecById[r.codecId];
       }
       if (r.type === 'outbound-rtp' && r.kind === 'audio') {
         s.outPackets = r.packetsSent; s.outBytes = r.bytesSent;
       }
+      if (r.type === 'inbound-rtp' && r.kind === 'video') {
+        s.videoInPackets = r.packetsReceived; s.videoInBytes = r.bytesReceived;
+        if (r.codecId && codecById[r.codecId]) s.videoCodec = codecById[r.codecId];
+      }
+      if (r.type === 'outbound-rtp' && r.kind === 'video') {
+        s.videoOutPackets = r.packetsSent; s.videoOutBytes = r.bytesSent;
+      }
       if (r.type === 'candidate-pair' && r.state === 'succeeded' && r.nominated) {
         s.pair = `${r.localCandidateId}→${r.remoteCandidateId}`;
       }
-      if (r.type === 'codec' && r.mimeType) s.codec = r.mimeType;
     });
+    // 음성 코덱을 못 찾았을 때만 아무거나 채운다 (진단에 도움이 되도록).
+    if (!s.codec) s.codec = Object.values(codecById)[0] || null;
     return s;
   }
 }
@@ -246,14 +273,15 @@ async function main() {
     verdict.steps['6-2 등록'] = 'ok';
     say('--', 'ok', '브라우저 등록됨');
 
-    const accepted = A.once('accepted', 25000);
+    const accepted = A.once('accepted', cfg.acceptTimeoutMs || 25000);
     await A.call(cfg.peer);
     await accepted;
     verdict.steps['6-2 발신'] = 'ok — 평문 SIP 단말이 받았다';
     say('--', 'ok', '통화 연결됨');
 
-    say('--', 'info', '미디어 6초 관찰…');
-    await wait(6000);
+    const observeMs = cfg.observeMs || 6000;
+    say('--', 'info', `미디어 ${observeMs / 1000}초 관찰…`);
+    await wait(observeMs);
     const s = await A.stats();
     verdict.stats = s;
     say('--', 'info', JSON.stringify(s));

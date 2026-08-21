@@ -212,18 +212,34 @@ class Peer {
     if (!pc) return { error: 'PeerConnection 이 없음' };
     const s = { ice: pc.iceConnectionState, dtls: pc.connectionState };
     const report = await pc.getStats();
+    /*
+     * 코덱은 **종류별로** 담는다. 예전에는 codec 항목을 만나는 대로 s.codec 에
+     * 덮어썼더니, 영상이 함께 있는 통화에서 음성 코덱이 video/H264 로 가려져
+     * "PCMU 로 붙었는가" 판정이 거짓으로 실패했다.
+     */
+    const codecById = {};
+    report.forEach((r) => { if (r.type === 'codec' && r.mimeType) codecById[r.id] = r.mimeType; });
     report.forEach((r) => {
       if (r.type === 'inbound-rtp' && r.kind === 'audio') {
         s.inPackets = r.packetsReceived; s.inBytes = r.bytesReceived; s.inLost = r.packetsLost;
+        if (r.codecId && codecById[r.codecId]) s.codec = codecById[r.codecId];
       }
       if (r.type === 'outbound-rtp' && r.kind === 'audio') {
         s.outPackets = r.packetsSent; s.outBytes = r.bytesSent;
       }
+      if (r.type === 'inbound-rtp' && r.kind === 'video') {
+        s.videoInPackets = r.packetsReceived; s.videoInBytes = r.bytesReceived;
+        if (r.codecId && codecById[r.codecId]) s.videoCodec = codecById[r.codecId];
+      }
+      if (r.type === 'outbound-rtp' && r.kind === 'video') {
+        s.videoOutPackets = r.packetsSent; s.videoOutBytes = r.bytesSent;
+      }
       if (r.type === 'candidate-pair' && r.state === 'succeeded' && r.nominated) {
         s.pair = `${r.localCandidateId}→${r.remoteCandidateId}`;
       }
-      if (r.type === 'codec' && r.mimeType) s.codec = r.mimeType;
     });
+    // 음성 코덱을 못 찾았을 때만 아무거나 채운다 (진단에 도움이 되도록).
+    if (!s.codec) s.codec = Object.values(codecById)[0] || null;
     return s;
   }
 }
