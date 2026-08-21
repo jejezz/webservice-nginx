@@ -37,5 +37,6 @@ async function request(path, options = {}) {
 
 export const api = {
   overview: () => request('/overview'),
+  sessions: () => request('/sessions'),
   testCallConfig: () => request('/testcall-config'),
 };

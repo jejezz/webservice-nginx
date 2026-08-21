@@ -12,7 +12,8 @@ services/janus/
 ├── setup-dashboard.sh      대시보드 점검 · 빌드            (sudo 불필요)
 ├── verify-call.sh          시험 통화를 사람 없이 돌린다     (sudo 불필요)
 ├── verify-bridge.sh        WebRTC ↔ 평문 RTP 브리징 확인   (sudo 불필요)
-├── test-harness/           verify-call.sh 가 쓰는 헤드리스 하니스
+├── test-harness/           verify-call.sh · verify-bridge.sh 가 쓰는 하니스
+│                          (sipua.js 평문 SIP 단말 · probe-peer.js rtpproxy 관찰)
 ├── janus.jcfg              ↘
 ├── janus.transport.http.jcfg        ↘  /opt/janus/etc/janus/ 로 설치될 원본
 ├── janus.transport.websockets.jcfg  ↗  (install.sh --apply 가 설치)

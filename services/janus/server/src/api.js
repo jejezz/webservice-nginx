@@ -1,11 +1,12 @@
 /**
  * 대시보드가 부르는 API. 모두 manager 세션이 있어야 한다.
  *
- * 3단계에서는 개요와 시험 클라이언트 설정 둘뿐입니다. 세션·핸들·미디어 화면은
- * 8단계에서 Admin API 로 채웁니다 (docs/plan.md).
+ * 개요·시험 클라이언트(3단계)에 더해 세션·핸들·SIP·미디어(8단계)를 냅니다.
+ * 모두 **읽기 전용**입니다 — 세션을 끊거나 설정을 바꾸는 길은 두지 않습니다.
  */
 const express = require('express');
 const janus = require('./janus');
+const sessions = require('./sessions');
 const config = require('./config');
 const { requireAuth } = require('./auth/session');
 
@@ -59,6 +60,16 @@ function createApiRouter() {
       transports: Object.keys(d.transports || {}).sort(),
       admin: { ok: adminPing.ok, error: adminPing.error || null },
     });
+  });
+
+  /**
+   * 세션 · 핸들 · SIP 상태 · 미디어 (8-2 ~ 8-4).
+   *
+   * Janus 가 죽어 있어도 200 으로 답하고 ok:false 로 알린다 — /overview 와 같은
+   * 자세다. 화면이 오류 대신 "Janus 가 떠 있지 않습니다" 를 그릴 수 있어야 한다.
+   */
+  router.get('/sessions', async (req, res) => {
+    res.json(await sessions.snapshot());
   });
 
   /**
