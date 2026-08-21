@@ -191,6 +191,25 @@ router.post('/setup/check/:stepId', requireAuth, async (req, res, next) => {
   }
 });
 
+// 그 단계의 파라미터를 서비스의 settings.ini 에 쓴다. **값만 쓴다** — 설정
+// 파일을 만지지도, 서비스를 재기동하지도 않는다. 반영은 사람이 --apply 로 한다.
+router.put('/setup/settings/:stepId', requireAuth, (req, res, next) => {
+  const step = setup.find(req.params.stepId);
+  if (!step) return res.status(404).json({ error: 'unknown_step' });
+  if (!step.settings) {
+    return res.status(400).json({ error: 'no_settings', message: '파라미터를 받는 단계가 아닙니다.' });
+  }
+
+  try {
+    const result = setup.saveSettings(step, req.body || {});
+    // 형식이 틀리면 아무것도 쓰지 않고 어느 항목이 왜 틀렸는지 돌려준다.
+    if (!result.ok) return res.status(400).json({ error: 'invalid_settings', errors: result.errors });
+    res.json({ stepId: step.id, ...result });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // 사람의 확인을 기록한다. **통과로 바꾸는 것이 아니라 기록하는 것이다** —
 // 점검이 problem 이면 확인 기록이 있어도 problem 으로 남는다 (services/setup.js).
 router.post('/setup/attest/:stepId', requireAuth, (req, res) => {

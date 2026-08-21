@@ -60,7 +60,8 @@ services/manager/
 │   │   │   ├── pm2.js        # pm2 jlist
 │   │   │   ├── nginx.js      # systemctl 상태
 │   │   │   ├── setup.js      # 구축 마법사 단계 표 + 점검 스크립트 실행기
-│   │   │   └── setup-attest.js # 사람의 확인 기록 (setup-attest.json)
+│   │   │   ├── setup-attest.js # 사람의 확인 기록 (setup-attest.json)
+│   │   │   └── setup-settings.js # 파라미터 폼 ↔ 서비스의 settings.ini
 │   │   └── routes/
 │   │       ├── api.js        # REST API
 │   │       └── admin.js      # 관리자 콘솔 API (administrator CRUD)
@@ -294,6 +295,7 @@ pm2 restart manager
 | `GET` | `/manager/api/services/:name/health` | 필요 | 개별 서비스 재확인 |
 | `GET` | `/manager/api/setup` | 필요 | 구축 단계 정의 + 각 단계의 마지막 점검 결과 |
 | `POST` | `/manager/api/setup/check/:stepId` | 필요 | 그 단계의 점검 스크립트를 돌리고 판정을 반환 |
+| `PUT` | `/manager/api/setup/settings/:stepId` | 필요 | 그 단계의 파라미터를 서비스의 `settings.ini` 에 저장 |
 | `POST` | `/manager/api/setup/attest/:stepId` | 필요 | 사람의 확인을 기록 (기계가 확인할 수 없는 단계) |
 | `DELETE` | `/manager/api/setup/attest/:stepId` | 필요 | 그 확인 기록을 지움 |
 | `POST` | `/manager/api/admin/login` | — | 관리자 콘솔 로그인 (IP당 5회 실패 시 10분 차단) |
@@ -403,6 +405,37 @@ env: {
 기록은 `services/manager/setup-attest.json` 에 남습니다 (커밋하지 않습니다).
 DB 가 아니라 파일인 이유는 **MariaDB 를 세우는 것이 이 마법사의 1단계**이기
 때문입니다 — DB 에 두면 DB 가 없는 동안 아무것도 기록할 수 없습니다.
+
+### 파라미터 입력 (장비마다 다른 값)
+
+단계에 `settings` 가 붙어 있으면 그 서비스의 `settings-schema.json` 을 읽어 폼을
+그리고, 사람이 넣은 값을 그 서비스의 `settings.ini` 에 씁니다. 규약은
+[docs/settings-contract.md](../../docs/settings-contract.md) 입니다.
+
+| 단계 | 받는 값 |
+|---|---|
+| `kamailio.config` | `sip_domain` · `sip_listen_addr` · `sip_push_url` |
+| `janus.config` | `public_ip` · `rtp_port_range` |
+
+**저장과 반영은 다릅니다.** 저장은 파일에 적는 것뿐이고, 반영은 사람이 그
+단계의 `--apply` 를 돌려야 일어납니다. 그 사이의 상태는 **점검 스크립트가**
+`[--] … 가 아직 반영되지 않았습니다` 로 보고하므로, 값을 바꾸면 그 단계가 곧바로
+'통과' 에서 '아직' 으로 내려갑니다. 마법사가 따로 계산하지 않습니다 — 규칙을 한
+곳에 두기 위해서입니다.
+
+### 파일 쓰기 경계
+
+마법사가 파일을 쓰는 곳은 둘뿐입니다.
+
+| 무엇 | 어디에 |
+|---|---|
+| 사람의 확인 기록 | `services/manager/setup-attest.json` |
+| 파라미터 | `services/<서비스>/settings.ini` |
+
+경로는 `STEPS` 가 정합니다 — 사람 입력에서 만들지 않고, 저장소 밖으로 나가면
+거부합니다. 설정 파일 자체(`.jcfg` · `kamailio-local.cfg`)는 건드리지 않고,
+서비스를 재기동하지도 않습니다. 값은 저장 전에 검증하고, root 로 도는 적용
+스크립트가 **한 번 더** 검증합니다.
 
 ### 자식 프로세스 경계
 

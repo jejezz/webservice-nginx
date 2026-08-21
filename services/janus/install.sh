@@ -462,6 +462,29 @@ report() {
         pending=$((pending + 1))
     fi
 
+    # --- 배포 설정: 저장한 값이 실제로 설치돼 있는가 ---
+    #
+    # 적용 기록이 아예 없으면 비교할 대상이 없다. 그때는 "다르다" 가 아니라
+    # "모른다" 이므로 대기로 보고하지 않는다 (lib/settings.js 와 같은 규칙).
+    info ""
+    info "배포 설정 (settings.ini)"
+    if [[ -r "$APPLIED_FILE" ]]; then
+        local key saved applied
+        for key in public_ip rtp_port_range; do
+            saved="$(settings_get "$key" '')"
+            applied="$(sed -n "s/^[[:space:]]*${key}[[:space:]]*=[[:space:]]*\(.*\)$/\1/p" "$APPLIED_FILE" | tail -1)"
+            applied="${applied//[[:space:]]/}"
+            if [[ "$saved" == "$applied" ]]; then
+                ok "${key} = ${saved:-(비어 있음)}"
+            else
+                pend "${key} 가 아직 반영되지 않았습니다: 설치본 '${applied:-(비어 있음)}' → 저장한 값 '${saved:-(비어 있음)}' (sudo $0 --apply)"
+                pending=$((pending + 1))
+            fi
+        done
+    else
+        info "  (적용 기록이 아직 없습니다 — --apply 를 한 번 돌리면 이후로는 어긋남을 알 수 있습니다)"
+    fi
+
     info ""
     if [[ $problems -eq 0 && $pending -eq 0 ]]; then
         info "모두 준비됐습니다."

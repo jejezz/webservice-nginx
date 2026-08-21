@@ -286,6 +286,30 @@ sudo mariadb -e "SELECT * FROM kamailio.version;"
 
 ### 3. 인증 설정 설치
 
+**3-0. 이 장비의 값을 먼저 정합니다** — `settings.ini`
+
+장비마다 다른 값 셋은 스크립트가 아니라 `settings.ini` 에 있습니다. 구축
+마법사(`/manager/setup` 의 4단계)의 폼에서 넣거나, 편집기로 직접 적습니다.
+
+```ini
+sip_domain      = pluto.org
+sip_listen_addr = 192.168.0.252          ; 이 장비의 LAN 주소 — 기본값이 없다
+sip_push_url    = https://127.0.0.1:28099/sip-push
+```
+
+| 키 | 어디로 가는가 |
+|---|---|
+| `sip_domain` | `kamctlrc` 의 `SIP_DOMAIN` 과 `kamailio-local.cfg` 의 `alias`. 둘이 어긋나면 계정은 만들어지는데 등록이 안 됩니다 |
+| `sip_listen_addr` | `listen=udp/tcp:<주소>:5060`. **이 장비에 없는 주소를 적으면 기동에서 죽습니다** — `install.sh` 가 실제 주소 목록과 맞춰 보고 막습니다 |
+| `sip_push_url` | 착신 푸시를 요청할 곳 (`docs/incoming-call.md` ⑤) |
+
+항목 정의는 `settings-schema.json` 에 있고(커밋합니다), 값 파일과 적용 기록
+(`.applied-settings`)은 커밋하지 않습니다. 규약은
+[docs/settings-contract.md](../../docs/settings-contract.md) 입니다.
+
+`./install.sh` (점검)이 지금 값과 **설치된 값이 다른지**도 알려 줍니다 —
+저장만 하고 `--apply` 를 잊으면 그 자리에서 `[--]` 로 보입니다.
+
 **3-1.** 한 번에 적용합니다. 아래 3-2 의 모든 항목이 이 명령 안에서 실행됩니다.
 
 ```bash
@@ -297,12 +321,14 @@ sudo ./install.sh --apply
 
 | | 내용 |
 |---|---|
+| 3-2-0 | `settings.ini` 검증 — 형식과 **그 주소가 이 장비에 있는지**. 실패하면 아무것도 건드리지 않음 |
 | 3-2-1 | 스키마 존재 및 `secrets/kamailio.pw` 로 **실제 DB 로그인** 확인 — 실패하면 아무것도 건드리지 않음 |
 | 3-2-2 | 기존 파일 백업 (`*.bak.<타임스탬프>`) |
 | 3-2-3 | `kamailio-local.cfg` 설치 — `__DBURL__` 자리를 비밀번호로 치환, `root:kamailio` 0640 |
-| 3-2-4 | `kamctlrc` 생성 — `SIP_DOMAIN=192.168.0.252`, DB 접속 정보, `STORE_PLAINTEXT_PW=0`, 0640 |
+| 3-2-4 | `kamctlrc` 생성 — `SIP_DOMAIN=<settings.ini 의 sip_domain>`, DB 접속 정보, `STORE_PLAINTEXT_PW=1`, 0640 |
 | 3-2-5 | `kamailio -c` 문법·모듈 검사 — **실패하면 설치 파일을 지우고 재시작하지 않음** |
 | 3-2-6 | `systemctl restart kamailio` 후 5초 대기 뒤 판정 — **실패하면 자동 롤백 + 로그 15줄 출력** |
+| 3-2-7 | 성공했을 때만 `.applied-settings` 에 설치한 값을 남김 (되돌렸으면 남기지 않음) |
 
 > `kamailio -c` 는 문법과 모듈만 봅니다. DB 접속은 fork 이후 `child_init` 에서 일어나므로
 > 3-2-5 로는 자격 증명 오류를 잡을 수 없습니다. 그래서 3-2-1 이 먼저 있습니다.

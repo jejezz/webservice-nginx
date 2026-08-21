@@ -2,11 +2,13 @@
 const API_BASE = `${import.meta.env.BASE_URL.replace(/\/+$/, '')}/api`;
 
 export class ApiError extends Error {
-  constructor(message, status, code) {
+  constructor(message, status, code, data) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.code = code;
+    // 항목별 오류처럼 본문에 더 실려 오는 것이 있다 (설정 폼).
+    this.data = data;
   }
 }
 
@@ -28,7 +30,7 @@ async function request(path, options = {}) {
   }
 
   if (!res.ok) {
-    throw new ApiError(data?.message || data?.error || `HTTP ${res.status}`, res.status, data?.error);
+    throw new ApiError(data?.message || data?.error || `HTTP ${res.status}`, res.status, data?.error, data);
   }
 
   return data;
@@ -46,6 +48,13 @@ export const api = {
   setup: {
     overview: () => request('/setup'),
     check: (stepId) => request(`/setup/check/${encodeURIComponent(stepId)}`, { method: 'POST' }),
+    // 파라미터를 서비스의 settings.ini 에 쓴다. 반영은 사람이 --apply 로 한다.
+    saveSettings: (stepId, values) =>
+      request(`/setup/settings/${encodeURIComponent(stepId)}`, {
+        method: 'PUT',
+        body: JSON.stringify(values),
+      }),
+
     // 사람만 확인할 수 있는 것의 기록. 통과로 바꾸는 것이 아니라 적어 두는 것이다.
     attest: (stepId, note) =>
       request(`/setup/attest/${encodeURIComponent(stepId)}`, {

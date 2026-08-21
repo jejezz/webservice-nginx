@@ -138,6 +138,11 @@ sudo ./install.sh --remove        # 걷어내기 (secrets/ 는 남긴다)
 값은 `settings.ini` 에 저장되고 커밋되지 않습니다. **대시보드는 sudo 를 부르지
 않습니다** — 명령을 보여 줄 뿐이고 실행은 사람이 합니다.
 
+항목 정의는 `settings-schema.json` 에 있습니다(커밋합니다). 구축 마법사
+(`/manager/setup`)의 8단계도 같은 파일을 읽어 같은 폼을 그리므로, 항목을 늘릴
+때는 그 파일 하나만 고치면 양쪽에 반영됩니다 —
+[docs/settings-contract.md](../../docs/settings-contract.md).
+
 `verify-call.sh --run` 은 헤드리스 크롬에서 janus.js 세션 둘을 띄워 **등록 ·
 발신 · 수락 · 미디어 · 끊기 · 재발신**을 한 번에 확인합니다. 협상이 됐는지가
 아니라 RTP 가 실제로 양방향으로 흘렀는지까지 봅니다 — 이 게이트웨이에서 가장

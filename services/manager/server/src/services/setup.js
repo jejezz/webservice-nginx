@@ -3,6 +3,7 @@ const { execFile } = require('child_process');
 const config = require('../config');
 const log = require('../logger');
 const attest = require('./setup-attest');
+const settings = require('./setup-settings');
 
 /**
  * 구축 마법사의 단계 정의와 점검 실행기.
@@ -92,6 +93,8 @@ const STEPS = [
       '배포본 설정은 digest 인증도, SIP 도메인도, 착신 푸시 훅도 갖고 있지 않습니다. ' +
       '이 저장소의 포크를 설치해야 인터폰과 모바일이 같은 도메인에서 만납니다.',
     requires: ['kamailio.deps'],
+    // 장비마다 다른 값 — SIP 도메인·수신 주소·푸시 주소 (settings-schema.json)
+    settings: { dir: 'services/kamailio' },
     command: { cwd: 'services/kamailio', run: 'sudo ./install.sh --apply', sudo: true },
     check: { cwd: 'services/kamailio', file: './install.sh', args: ['--check', '--json'] },
   },
@@ -154,6 +157,8 @@ const STEPS = [
       'Janus 는 배포본 설정 그대로면 SIP 플러그인도 /janus-api 도 뜨지 않습니다. ' +
       'Kamailio 가 먼저 떠 있어야 SIP 쪽이 붙을 상대가 생깁니다.',
     requires: ['janus.build', 'kamailio.config'],
+    // 장비마다 다른 값 — 공인 IP·미디어 포트 범위 (settings-schema.json)
+    settings: { dir: 'services/janus' },
     command: { cwd: 'services/janus', run: 'sudo ./install.sh --apply', sudo: true },
     check: { cwd: 'services/janus', file: './install.sh', args: ['--check', '--json'] },
   },
@@ -485,6 +490,9 @@ function overview() {
       attestation,
       checkCommand: checkCommandText(step),
       checkCwd: step.check ? step.check.cwd : null,
+      // 파라미터 폼. 판정에는 들어가지 않는다 — '저장했는데 아직 반영 안 됨' 은
+      // 점검 스크립트가 직접 보고 pending 으로 낸다 (규칙을 한 곳에 둔다).
+      settings: settings.read(step),
       state,
       result,
     };
@@ -509,4 +517,4 @@ function overview() {
   };
 }
 
-module.exports = { STEPS, find, check, overview, deriveState, parseReport, stepState, isPassed };
+module.exports = { STEPS, find, check, overview, deriveState, parseReport, stepState, isPassed, saveSettings: settings.save };

@@ -3,16 +3,18 @@
 서비스를 **어떤 순서로 무엇을 채워야 하는지** 화면이 안내하고, 사람이 한 일을
 **실제로 됐는지 확인한 뒤** 다음으로 넘기는 웹 화면의 설계입니다.
 
-> 상태: **1·2·3단계 구현됨.** 점검 규약(`--json`)이 진입점 12곳에 붙었고
+> 상태: **네 단계 모두 구현됨.** 점검 규약(`--json`)이 진입점 12곳에 붙었고
 > ([check-contract.md](check-contract.md)), manager 의 `/manager/setup` 이
 > **13단계 전부**를 돌립니다. 기계가 확인할 수 없는 것은 사람의 확인을 기록하되
-> `attested` 로 따로 표시합니다. 남은 것은 4단계(파라미터 입력 폼)입니다.
+> `attested` 로 따로 표시하고, 장비마다 다른 값은 단계 안의 폼에서 받아 그
+> 서비스의 `settings.ini` 에 씁니다 ([settings-contract.md](settings-contract.md)).
 >
 > 초안을 쓰면서 전제 하나가 실측으로 뒤집혔습니다 — 점검 스크립트의 종료
 > 코드를 판정에 쓸 수 없습니다. 그 결과 만드는 순서가 바뀌었습니다
 > (아래 '종료 코드는 쓸 수 없습니다').
 
-관련: [health-contract.md](health-contract.md) · [nginx-conf.md](nginx-conf.md) ·
+관련: [check-contract.md](check-contract.md) · [settings-contract.md](settings-contract.md) ·
+[health-contract.md](health-contract.md) · [nginx-conf.md](nginx-conf.md) ·
 [pm2-conf.md](pm2-conf.md) · [migration-plan.md](migration-plan.md)
 
 ## 왜 필요한가
@@ -89,7 +91,7 @@ rtc-relay-server 가 한 흐름 안에 들어옵니다. 어느 한 서비스의 
   title: 'Janus 설정과 systemd 유닛 설치',
   why: 'Janus 는 배포본 설정 그대로면 SIP 플러그인도 /janus-api 도 뜨지 않습니다.',
   requires: ['kamailio.running', 'janus.build'],   // 선행 단계
-  inputs: [],                                       // 파라미터 폼 (선택)
+  settings: { dir: 'services/janus' },              // 파라미터 폼 (선택)
   command: { cwd: 'services/janus', run: 'sudo ./install.sh --apply', sudo: true },
   // 점검은 셸을 거치지 않고 돌리므로 파일과 인자를 나눠 적습니다 (아래 '점검 계약')
   check:   { cwd: 'services/janus', file: './install.sh', args: ['--check', '--json'] },
@@ -276,6 +278,7 @@ database ─┬─────────────────────�
 |---|---|---|
 | `GET /manager/api/setup` | 단계 정의 + 각 단계의 마지막 점검 결과 | ✅ |
 | `POST /manager/api/setup/check/:stepId` | 그 단계의 점검 스크립트를 돌리고 `{state, checks[], exitCode, …}` 반환 | ✅ |
+| `PUT /manager/api/setup/settings/:stepId` | 그 단계의 파라미터를 서비스의 `settings.ini` 에 씀 | ✅ |
 | `POST /manager/api/setup/attest/:stepId` | 사람의 확인 기록 | ✅ |
 | `DELETE /manager/api/setup/attest/:stepId` | 그 기록을 지움 (되돌렸을 때) | ✅ |
 | 상태 저장 | 확인 기록만 파일 하나에. 나머지는 매번 점검해서 얻습니다 | ✅ |
@@ -452,6 +455,85 @@ sudo 명령을 다루는 방식과 같습니다 — **오래 걸리고 되돌리
 `/manager/setup?step=janus.config` — "이 단계를 보세요" 를 링크 하나로 건네기
 위해서입니다.
 
+## 4단계에서 정한 것 — 파라미터를 받으면서
+
+### 스키마를 데이터로 내렸습니다 — 화면이 둘이 됐기 때문입니다
+
+열린 질문 3의 답입니다. 값을 받는 화면이 janus 대시보드 하나였을 때는 항목
+정의가 그 서비스의 코드 안에 있어도 괜찮았습니다. 마법사가 같은 값을 받게
+되면서 화면이 둘이 됐고, 둘이 각자 정의를 들면 언젠가 어긋납니다.
+
+```
+services/<서비스>/settings-schema.json   무엇을 받을 것인가   (커밋한다)
+services/<서비스>/settings.ini           사람이 정한 값       (커밋하지 않는다)
+services/<서비스>/.applied-settings      실제로 설치된 값     (--apply 가 쓴다)
+```
+
+읽고 쓰고 검증하는 코드는 `lib/settings.js` 한 곳입니다. janus 대시보드의
+설정 화면도 이제 그것을 씁니다 — 그 서비스의 `settings.js` 는 껍데기만
+남았습니다. 규약은 [settings-contract.md](settings-contract.md) 입니다.
+
+### kamailio 에도 붙였습니다 — 거기 이 장비의 주소가 박혀 있었습니다
+
+`services/kamailio/install.sh` 안에 이렇게 적혀 있었습니다.
+
+```bash
+SIP_LISTEN_ADDR="192.168.0.252"      # ← 이 장비의 LAN 주소
+```
+
+새 장비에서 이 마법사를 쓰는 사람은 **13단계를 다 통과하고도 SIP 가 안 뜹니다.**
+`listen=` 에 자기 것이 아닌 주소가 들어가기 때문입니다. 마법사를 만드는 이유가
+"새 장비에서 다시 세울 수 있게" 인데, 그 장비의 주소가 스크립트에 박혀 있으면
+앞의 노력이 거기서 무너집니다.
+
+세 값(`sip_domain` · `sip_listen_addr` · `sip_push_url`)을 `settings.ini` 로
+옮겼습니다. `sip_listen_addr` 만 **기본값을 두지 않았습니다** — 한 장비의
+주소를 다른 장비가 물려받을 수 없기 때문입니다. 없으면 점검이 "아직 정하지
+않았다" 로 보고합니다.
+
+### 형식은 화면이, 현실은 스크립트가 봅니다
+
+`sip_listen_addr = 10.9.9.9` 는 IPv4 로는 멀쩡합니다. 그런데 그 주소가 이
+장비에 없으면 Kamailio 는 바인딩에 실패해 죽고, 문법 검사(`kamailio -c`)는
+통과하므로 **재시작에서야** 드러납니다.
+
+이런 검사는 장비를 아는 쪽이 합니다 — `install.sh` 의 `validate_settings` 가
+`ip -o -4 addr` 로 실제 주소 목록과 맞춰 봅니다. 스키마에는 형식만 적습니다.
+
+### 저장과 반영은 다릅니다 — 그리고 점검이 그것을 말합니다
+
+폼에서 값을 저장하는 것은 **파일에 적는 것뿐**입니다. 반영은 사람이 `--apply`
+를 돌려야 일어납니다. 그 사이의 상태를 화면이 조용히 넘기면, 값을 입력한 사람은
+적용했다고 착각합니다.
+
+그래서 두 `install.sh` 의 **점검**이 저장된 값과 `.applied-settings` 를 비교해
+`[--]` 로 보고하게 했습니다. 판정을 마법사가 따로 계산하지 않는 이유이기도
+합니다 — 규칙이 두 곳이 되지 않습니다.
+
+    [--]  public_ip 가 아직 반영되지 않았습니다:
+          설치본 '125.242.8.15' → 저장한 값 '203.0.113.9' (sudo ./install.sh --apply)
+
+폼에서 값을 바꾸면 그 단계가 곧바로 '통과' 에서 '아직' 으로 내려갑니다.
+
+### 마법사가 파일을 쓰는 곳은 둘뿐입니다
+
+| 무엇 | 어디에 |
+|---|---|
+| 사람의 확인 기록 | `services/manager/setup-attest.json` |
+| 파라미터 | `services/<서비스>/settings.ini` |
+
+둘 다 **값 파일**이고, 경로는 단계 표가 정합니다(사람 입력에서 만들지 않고,
+저장소 밖으로 나가면 거부합니다). 설정 파일 자체(`.jcfg`·`kamailio-local.cfg`)
+는 건드리지 않고, 서비스를 재기동하지도 않습니다.
+
+### 곁다리 — 1단계에서 놓친 호출 하나
+
+`kamailio/install.sh` 에 `no "WITH_AUTH 없음"` 이 남아 있었습니다. `no()` 는
+1단계에서 `skip`/`pend` 로 쪼개며 없앤 함수인데 호출만 살아 있었습니다.
+`WITH_AUTH` 가 **없을 때만** 실행되는 자리라 지금까지 아무도 밟지 않았습니다 —
+점검이 문제를 보고해야 하는 바로 그 순간에 스크립트가 죽었을 것입니다.
+`warn` 으로 고쳤습니다.
+
 ## 만들지 않는 것
 
 - **sudo 대행.** 명령을 보여 줄 뿐입니다.
@@ -466,7 +548,7 @@ sudo 명령을 다루는 방식과 같습니다 — **오래 걸리고 되돌리
 | 1 | **점검 스크립트에 `--json` 추가** + `check-contract.md` — 판정 근거를 먼저 만든다 | ✅ 진입점 10곳 |
 | 2 | manager 가 점검을 실행하고 결과를 보여 줌. 단계 3개(kamailio·janus·nginx)로 뼈대 확인 | ✅ |
 | 3 | 13단계 전부 + `manualOnly` 확인 기록 | ✅ |
-| 4 | 파라미터 입력 폼 (janus `settings.ini` 방식을 다른 서비스로) | |
+| 4 | 파라미터 입력 폼 (janus `settings.ini` 방식을 다른 서비스로) | ✅ |
 
 **1단계를 앞으로 당긴 것이 이번 설계의 가장 큰 변경입니다.** 판정 근거 없이 화면을
 먼저 만들면, 마법사가 "완료" 라고 말하는데 실제로는 안 된 상태를 만들어 냅니다.
@@ -481,9 +563,10 @@ sudo 명령을 다루는 방식과 같습니다 — **오래 걸리고 되돌리
    `--run` 은 사람이 돌립니다 (위 '90초짜리 시험 통화').
 2. ~~**`manualOnly` 확인 기록을 어디에 둘지**~~ — 답했습니다. 파일입니다.
    DB 를 세우는 것이 1단계이기 때문입니다 (위 '확인 기록은 파일에').
-3. **다른 서비스의 설정도 `settings.ini` 방식으로 옮길지** — 지금은 janus 만
-   그렇습니다. 마법사가 파라미터를 받으려면 kamailio·rtc-relay 도 같은 모양이
-   되는 편이 좋습니다. **4단계의 첫 질문입니다.**
+3. ~~**다른 서비스의 설정도 `settings.ini` 방식으로 옮길지**~~ — 답했습니다.
+   스키마를 데이터로 내리고 kamailio 에도 붙였습니다 (위 '스키마를 데이터로').
+   `rtc-relay-server` 는 아직 두었습니다 — 자기 `.env` 로 값을 받고 있고,
+   13단계 어디에서도 파라미터를 묻지 않습니다.
 4. **설치본이 저장소보다 낡은 것을 어떻게 알아챌지** — `wt_timer` 가 그렇게
    걸렸습니다. 지금은 점검마다 자기 방식으로 보고 있어, 설정 파일 단위로
    "저장소와 같은가" 를 보는 공통 방법이 있으면 더 일찍 잡힙니다.

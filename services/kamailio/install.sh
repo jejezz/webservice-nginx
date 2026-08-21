@@ -30,23 +30,55 @@ KAMCTLRC="${KAM_ETC}/kamctlrc"
 DB_NAME="kamailio"
 DB_USER="kamailio"
 DB_HOST="localhost"
+
+# ═══ 배포 설정 ═══════════════════════════════════════════════════════
+#
+# 장비마다 다른 값은 settings.ini 에 있습니다. 구축 마법사(/manager/setup)의
+# 폼과 사람의 편집기가 그 파일을 쓰고, 이 스크립트가 읽습니다. 항목의 뜻은
+# settings-schema.json 에, 규약은 docs/settings-contract.md 에 있습니다.
+#
+#   sip_domain        SIP 도메인
+#   sip_listen_addr   SIP 를 받을 이 장비의 주소 — **장비마다 다릅니다**
+#   sip_push_url      착신 푸시를 요청할 곳 (rtc-relay-server)
+#
+# 값이 형식에 맞지 않으면 --apply 가 아무것도 바꾸지 않고 멈춥니다.
+SETTINGS_FILE="${SCRIPT_DIR}/settings.ini"
+# 마지막으로 설치한 값. 화면이 '적용 대기' 를 이걸로 가른다.
+APPLIED_FILE="${SCRIPT_DIR}/.applied-settings"
+
+# settings.ini 에서 `키 = 값` 하나를 읽는다. 없으면 기본값.
+# 절(section)은 쓰지 않는다 — node 쪽(lib/settings.js)도 같은 파일을 파싱한다.
+settings_get() {
+    local key="$1" fallback="${2:-}" v=""
+    if [[ -r "$SETTINGS_FILE" ]]; then
+        v="$(sed -n "s/^[[:space:]]*${key}[[:space:]]*=[[:space:]]*\\(.*\\)$/\\1/p" "$SETTINGS_FILE" | tail -1)"
+        v="${v%%[;#]*}"
+    fi
+    v="${v//[[:space:]]/}"
+    echo "${v:-$fallback}"
+}
+# ═════════════════════════════════════════════════════════════════════
+
 # SIP 도메인 — 이 값이 두 곳으로 흘러간다.
 #   kamctlrc 의 SIP_DOMAIN   → kamctl add 가 subscriber.domain 에 넣는 값
 #   kamailio-local.cfg 의 alias → Kamailio 가 이 도메인을 "내 것" 으로 인식
 #
 # 둘이 어긋나면 계정은 만들어지는데 등록이 안 된다. 그래서 한 곳에서 정한다.
-SIP_DOMAIN="pluto.org"
+SIP_DOMAIN="$(settings_get sip_domain 'pluto.org')"
 
 # SIP 를 받을 주소. listen= 을 하나라도 명시하면 Kamailio 는 **자동 바인딩을
 # 멈추므로**, WS 용 5080 만 적으면 5060 이 통째로 닫힌다. 실제로 그렇게 만들었다가
 # 인터폰이 쓰는 SIP 가 사라졌다. 그래서 여기서 함께 명시한다.
 #
 # 자동 바인딩은 docker0·virbr0 까지 잡았는데 SIP 에는 필요 없다. LAN 과 루프백만 연다.
-SIP_LISTEN_ADDR="192.168.0.252"
+#
+# **기본값을 두지 않는다.** 이 장비의 주소를 다른 장비가 물려받을 수는 없다.
+# 없으면 점검이 "아직 정하지 않았다" 로 보고하고, --apply 는 멈춘다.
+SIP_LISTEN_ADDR="$(settings_get sip_listen_addr '')"
 
 # 착신 푸시를 요청할 곳. rtc-relay-server 가 FCM 자격 증명과 토큰 테이블을 갖고
 # 있으므로 그쪽에 맡긴다. 루프백 전용이라 같은 호스트에서만 부를 수 있다.
-SIP_PUSH_URL="https://127.0.0.1:28099/sip-push"
+SIP_PUSH_URL="$(settings_get sip_push_url 'https://127.0.0.1:28099/sip-push')"
 
 # shellcheck source=../../database/lib_mariadb.sh
 source "${PROJECT_ROOT}/database/lib_mariadb.sh"
@@ -109,6 +141,61 @@ running_binary() {
     raw="$(sed -n 's/.*path=\([^ ;]*\).*/\1/p' <<<"$raw")"
     first="${raw%%$'\n'*}"
     printf '%s' "$first"
+}
+
+# settings.ini 의 값이 쓸 만한지 본다.
+#
+# 화면(lib/settings.js)이 이미 한 번 걸렀지만, 파일은 손으로도 고칠 수 있으므로
+# **root 로 도는 이쪽에서 다시 본다.** 둘 다 통과해야 설치된다.
+#
+# 결과를 바로 찍지 않고 배열에 담는 이유: 점검 모드에서는 규약대로 pend/warn 으로
+# 내야 하고, --apply 에서는 die 로 멈춰야 하기 때문이다.
+SETTINGS_PROBLEMS=()
+SETTINGS_PENDING=()
+validate_settings() {
+    SETTINGS_PROBLEMS=()
+    SETTINGS_PENDING=()
+
+    [[ -r "$SETTINGS_FILE" ]] \
+        || SETTINGS_PENDING+=("settings.ini 가 없습니다: ${SETTINGS_FILE} — 마법사의 설정 폼이나 편집기로 만드세요")
+
+    [[ "$SIP_DOMAIN" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ ]] \
+        || SETTINGS_PROBLEMS+=("sip_domain 이 도메인으로 보이지 않습니다: ${SIP_DOMAIN}")
+
+    if [[ -z "$SIP_LISTEN_ADDR" ]]; then
+        SETTINGS_PENDING+=("sip_listen_addr 를 아직 정하지 않았습니다 — 이 장비의 LAN 주소가 필요합니다")
+    elif [[ ! "$SIP_LISTEN_ADDR" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]]; then
+        SETTINGS_PROBLEMS+=("sip_listen_addr 가 IPv4 로 보이지 않습니다: ${SIP_LISTEN_ADDR}")
+    elif ! ip -o -4 addr show 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | grep -qxF "$SIP_LISTEN_ADDR"; then
+        # 이 장비에 없는 주소를 listen 에 적으면 kamailio 는 바인딩에 실패해 죽는다.
+        # 문법 검사(-c)는 통과하므로 여기서 잡지 않으면 재시작에서야 드러난다.
+        SETTINGS_PROBLEMS+=("sip_listen_addr ${SIP_LISTEN_ADDR} 는 이 장비의 주소가 아닙니다 — kamailio 가 바인딩에 실패합니다")
+    fi
+
+    [[ "$SIP_PUSH_URL" =~ ^https?://.+ ]] \
+        || SETTINGS_PROBLEMS+=("sip_push_url 이 http(s) 주소가 아닙니다: ${SIP_PUSH_URL}")
+
+    [[ ${#SETTINGS_PROBLEMS[@]} -eq 0 && ${#SETTINGS_PENDING[@]} -eq 0 ]]
+}
+
+# 저장한 값과 마지막으로 설치한 값이 다른가 = 사람이 --apply 를 해야 하는가.
+#
+# 적용 기록이 아예 없으면 비교할 대상이 없다. 그때는 "다르다" 가 아니라 "모른다"
+# 이므로 대기로 보고하지 않는다 (lib/settings.js 와 같은 규칙이다).
+report_settings_pending() {
+    [[ -r "$APPLIED_FILE" ]] || {
+        info "  (적용 기록이 아직 없습니다 — --apply 를 한 번 돌리면 이후로는 어긋남을 알 수 있습니다)"
+        return 0
+    }
+
+    local key saved applied
+    for key in sip_domain sip_listen_addr sip_push_url; do
+        saved="$(settings_get "$key" '')"
+        applied="$(sed -n "s/^[[:space:]]*${key}[[:space:]]*=[[:space:]]*\(.*\)$/\1/p" "$APPLIED_FILE" | tail -1)"
+        applied="${applied//[[:space:]]/}"
+        [[ "$saved" == "$applied" ]] && continue
+        pend "${key} 가 아직 반영되지 않았습니다: 설치본 '${applied}' → 저장한 값 '${saved}' (sudo $0 --apply)"
+    done
 }
 
 # ---------- 점검 ----------
@@ -178,12 +265,31 @@ report() {
         # 0640 root:kamailio 이므로 일반 사용자는 읽을 수 없다.
         # 읽지 못한 것을 "꺼져 있다"로 보고하면 안 된다.
         if [[ -r "$LOCAL_CFG" ]]; then
-            grep -q '^#!define WITH_AUTH' "$LOCAL_CFG" && ok "WITH_AUTH 활성" || no "WITH_AUTH 없음"
+            grep -q '^#!define WITH_AUTH' "$LOCAL_CFG" && ok "WITH_AUTH 활성" \
+                || warn "WITH_AUTH 없음 — 인증 없이 REGISTER 를 받게 됩니다"
         else
             skip "내용 확인 불가 (root 권한 필요) — sudo $0 로 다시 실행하세요"
         fi
     else
         pend "설치되지 않음 — 지금은 인증 없이 REGISTER 를 받습니다"
+    fi
+
+    info ""
+    info "배포 설정 (settings.ini)"
+    validate_settings || true
+
+    if [[ ${#SETTINGS_PROBLEMS[@]} -eq 0 && ${#SETTINGS_PENDING[@]} -eq 0 ]]; then
+        ok "SIP 도메인: ${SIP_DOMAIN}"
+        ok "SIP 수신 주소: ${SIP_LISTEN_ADDR}:5060 (udp+tcp)"
+        ok "착신 푸시 요청: ${SIP_PUSH_URL}"
+        report_settings_pending
+    else
+        # 빈 배열도 그대로 편다 (bash 5, set -u 에서 안전하다). 따옴표를 빼면
+        # 문구가 공백에서 잘려 여러 줄로 흩어진다.
+        local line
+        for line in "${SETTINGS_PENDING[@]}"; do pend "$line"; done
+        for line in "${SETTINGS_PROBLEMS[@]}"; do warn "$line"; done
+        problems=$((problems + ${#SETTINGS_PROBLEMS[@]} + ${#SETTINGS_PENDING[@]}))
     fi
 
     info ""
@@ -338,6 +444,14 @@ database_ready() {
 apply() {
     require_root
 
+    # 값 검증을 **가장 먼저** 한다. 되돌릴 것이 생기기 전에 멈추기 위해서다.
+    if ! validate_settings; then
+        local line
+        for line in "${SETTINGS_PENDING[@]}"; do echo "  [--]   $line" >&2; done
+        for line in "${SETTINGS_PROBLEMS[@]}"; do echo "  [!!]   $line" >&2; done
+        die "settings.ini 의 값으로는 설치할 수 없습니다 (위 목록). 아무것도 바꾸지 않았습니다."
+    fi
+
     [[ -f "$TEMPLATE" ]] || die "템플릿이 없습니다: ${TEMPLATE}"
 
     grep -q 'import_file "kamailio-local.cfg"' "$MAIN_CFG" \
@@ -401,6 +515,20 @@ apply() {
 
     if systemctl is-active --quiet kamailio; then
         ok "kamailio 재시작 완료"
+
+        # 무엇을 실제로 설치했는지 남긴다. 화면은 settings.ini 와 이것을 비교해
+        # '저장은 됐지만 아직 반영 안 됨' 을 알린다. 설치된 kamailio-local.cfg 는
+        # 0640 root:kamailio 라 화면이 읽을 수 없어, 대신 이 파일을 남기는 것이다.
+        #
+        # **되돌린 경우에는 남기지 않는다** — 그때 설치된 것은 옛 값이다.
+        {
+            echo "; install.sh --apply 가 마지막으로 설치한 값. 손으로 고치지 마세요."
+            echo "sip_domain = ${SIP_DOMAIN}"
+            echo "sip_listen_addr = ${SIP_LISTEN_ADDR}"
+            echo "sip_push_url = ${SIP_PUSH_URL}"
+        } > "$APPLIED_FILE"
+        chmod 644 "$APPLIED_FILE"
+        info "  적용 기록: ${APPLIED_FILE}"
     else
         warn "기동에 실패했습니다. 설치한 설정을 되돌립니다."
         restore_backups

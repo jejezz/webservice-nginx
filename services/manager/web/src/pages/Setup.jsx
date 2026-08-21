@@ -4,6 +4,7 @@ import {
   AlertCircle,
   ArrowLeft,
   Check,
+  Save,
   CheckCircle2,
   Circle,
   Copy,
@@ -23,6 +24,8 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
@@ -136,6 +139,96 @@ function CheckLines({ result }) {
   );
 }
 
+/**
+ * 파라미터 입력 — 장비마다 다른 값을 서비스의 settings.ini 에 쓴다.
+ *
+ * **값을 쓰는 것과 반영하는 것은 다릅니다.** 저장은 파일에 적는 것뿐이고,
+ * 반영은 위의 `--apply` 를 사람이 돌려야 일어납니다. 그래서 저장한 값과
+ * 설치된 값이 다르면 점검이 그것을 [--] 로 보고합니다.
+ */
+function SettingsForm({ step, onSave, busy }) {
+  const settings = step.settings;
+  const [form, setForm] = useState(() => ({ ...settings.values }));
+  const [errors, setErrors] = useState({});
+  const [saved, setSaved] = useState(false);
+
+  // 다른 단계로 옮겨 가거나 저장 결과가 돌아오면 서버 값으로 다시 맞춘다.
+  useEffect(() => {
+    setForm({ ...settings.values });
+    setErrors({});
+    setSaved(false);
+  }, [step.id, JSON.stringify(settings.values)]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const dirty = settings.fields.some((f) => (form[f.key] ?? '') !== (settings.values[f.key] ?? ''));
+
+  const submit = async () => {
+    setErrors({});
+    const fieldErrors = await onSave(step.id, form);
+    if (fieldErrors) setErrors(fieldErrors);
+    else setSaved(true);
+  };
+
+  return (
+    <section className="space-y-3">
+      <h3 className="text-xs font-semibold text-muted-foreground">
+        이 장비의 값 — <span className="font-mono">{settings.settingsPath}</span> 에 저장됩니다
+      </h3>
+
+      {settings.fields.map((field) => (
+        <div key={field.key} className="space-y-1 rounded-md border p-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <Label htmlFor={field.key} className="text-sm font-medium">
+              {field.label}
+            </Label>
+            <span className="font-mono text-[10px] text-muted-foreground">{field.key}</span>
+            {field.optional && <Badge variant="secondary">선택</Badge>}
+            {settings.pending.includes(field.key) && <Badge variant="warning">적용 대기</Badge>}
+          </div>
+
+          <p className="text-xs text-muted-foreground">{field.help}</p>
+
+          <Input
+            id={field.key}
+            value={form[field.key] ?? ''}
+            placeholder={field.placeholder}
+            onChange={(e) => setForm((prev) => ({ ...prev, [field.key]: e.target.value }))}
+            className="font-mono text-sm"
+          />
+
+          {errors[field.key] ? (
+            <p className="text-xs text-destructive">{errors[field.key]}</p>
+          ) : (
+            <p className="text-xs text-muted-foreground">{field.effect}</p>
+          )}
+
+          {settings.everApplied && (
+            <p className="text-[11px] text-muted-foreground">
+              설치된 값: <span className="font-mono">{settings.applied[field.key] || '(비어 있음)'}</span>
+            </p>
+          )}
+        </div>
+      ))}
+
+      <div className="flex flex-wrap items-center gap-3">
+        <Button variant="secondary" size="sm" onClick={submit} disabled={busy || !dirty}>
+          {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}
+          값 저장
+        </Button>
+        {saved && !dirty && (
+          <span className="text-xs text-warning">
+            저장했습니다. <strong>아직 반영되지 않았습니다</strong> — 아래 명령을 돌리세요.
+          </span>
+        )}
+        {!settings.everApplied && (
+          <span className="text-xs text-muted-foreground">
+            아직 한 번도 적용한 적이 없습니다 (<code className="font-mono">{settings.appliedPath}</code> 없음).
+          </span>
+        )}
+      </div>
+    </section>
+  );
+}
+
 /** 사람만 확인할 수 있는 것. 기록이지 판정이 아니다. */
 function AttestBox({ step, onAttest, onUnattest, busy }) {
   if (!step.attest) return null;
@@ -174,7 +267,7 @@ function AttestBox({ step, onAttest, onUnattest, busy }) {
   );
 }
 
-function StepDetail({ step, index, onCheck, onAttest, onUnattest, busy }) {
+function StepDetail({ step, index, onCheck, onAttest, onUnattest, onSaveSettings, busy }) {
   const style = styleOf(step);
   const blocked = step.blockedBy.length > 0;
   const result = step.result;
@@ -215,6 +308,8 @@ function StepDetail({ step, index, onCheck, onAttest, onUnattest, busy }) {
             </AlertDescription>
           </Alert>
         )}
+
+        {step.settings && <SettingsForm step={step} onSave={onSaveSettings} busy={busy} />}
 
         {step.command && (
           <section>
@@ -409,6 +504,29 @@ export default function Setup() {
     [handleError, refresh]
   );
 
+  /**
+   * 값 저장. 형식 오류는 화면 위쪽 경고가 아니라 **그 칸 밑에** 붙여야 하므로,
+   * 오류를 폼에게 돌려주고 여기서는 삼킨다.
+   */
+  const saveSettings = useCallback(
+    async (stepId, values) => {
+      setRunning(stepId);
+      try {
+        await api.setup.saveSettings(stepId, values);
+        await refresh();
+        setError('');
+        return null;
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 400 && err.data?.errors) return err.data.errors;
+        await handleError(err);
+        return null;
+      } finally {
+        if (mounted.current) setRunning(null);
+      }
+    },
+    [handleError, refresh]
+  );
+
   const checkOne = useCallback((stepId) => withRefresh(stepId, () => api.setup.check(stepId)), [withRefresh]);
   const attestOne = useCallback((stepId) => withRefresh(stepId, () => api.setup.attest(stepId)), [withRefresh]);
   const unattestOne = useCallback((stepId) => withRefresh(stepId, () => api.setup.unattest(stepId)), [withRefresh]);
@@ -506,6 +624,7 @@ export default function Setup() {
                   onCheck={checkOne}
                   onAttest={attestOne}
                   onUnattest={unattestOne}
+                  onSaveSettings={saveSettings}
                   busy={busy}
                 />
               )}
