@@ -7,6 +7,7 @@ const { loadServices } = require('../services/registry');
 const health = require('../services/health');
 const pm2 = require('../services/pm2');
 const nginx = require('../services/nginx');
+const setup = require('../services/setup');
 const { router: adminRouter } = require('./admin');
 
 const userStore = createUserStore(config.auth);
@@ -158,6 +159,32 @@ router.get('/overview', requireAuth, async (req, res, next) => {
       source,
       updatedAt: new Date().toISOString(),
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// --- 구축 마법사 (docs/setup-wizard.md) ---
+
+// 단계 정의 + 각 단계의 마지막 점검 결과. 결과는 메모리에만 있으므로 재기동
+// 뒤에는 비어 있고, 화면이 들어오면서 다시 점검한다.
+router.get('/setup', requireAuth, (req, res) => {
+  res.json(setup.overview());
+});
+
+// 그 단계의 점검 스크립트를 돌린다. 무엇을 돌릴지는 services/setup.js 의 표가
+// 정한다 — :stepId 는 그 표에서 한 줄을 고르는 데만 쓴다.
+router.post('/setup/check/:stepId', requireAuth, async (req, res, next) => {
+  const step = setup.find(req.params.stepId);
+  if (!step) return res.status(404).json({ error: 'unknown_step' });
+
+  // manualOnly 단계는 돌릴 점검이 없다 (3단계에서 attest 로 받는다).
+  if (step.manualOnly) {
+    return res.status(400).json({ error: 'manual_only', message: '사람이 확인하는 단계입니다.' });
+  }
+
+  try {
+    res.json(await setup.check(step.id));
   } catch (err) {
     next(err);
   }

@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
   Activity,
   AlertCircle,
   CheckCircle2,
+  ListChecks,
   LogOut,
   RefreshCw,
   Server,
@@ -166,6 +168,13 @@ export default function Dashboard() {
                 자동 갱신 {REFRESH_INTERVAL_MS / 1000}초
               </Label>
             </div>
+
+            <Button variant="outline" size="sm" asChild title="구축 마법사">
+              <Link to="/setup">
+                <ListChecks className="size-3.5" />
+                <span className="hidden sm:inline">구축</span>
+              </Link>
+            </Button>
 
             <Button variant="outline" size="sm" onClick={load} disabled={refreshing}>
               <RefreshCw className={cn('size-3.5', refreshing && 'animate-spin')} />

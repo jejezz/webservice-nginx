@@ -5,6 +5,7 @@ import { useAuth } from '@/context/auth';
 import { api } from '@/lib/api';
 import Login from '@/pages/Login';
 import Dashboard from '@/pages/Dashboard';
+import Setup from '@/pages/Setup';
 import AdminConsole from '@/pages/AdminConsole';
 
 function FullPageSpinner() {
@@ -76,6 +77,14 @@ export default function App() {
         element={
           <RequireAuth>
             <Dashboard />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/setup"
+        element={
+          <RequireAuth>
+            <Setup />
           </RequireAuth>
         }
       />

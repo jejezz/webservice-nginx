@@ -5,6 +5,9 @@ const log = require('./logger');
 
 const SERVER_DIR = path.resolve(__dirname, '..');
 const MANAGER_DIR = path.resolve(SERVER_DIR, '..');
+// 저장소 뿌리(services/manager 의 두 단계 위). 구축 마법사가 점검 스크립트를
+// 여기 기준으로 찾고, 이 밖으로 나가는 경로는 실행하지 않는다.
+const REPO_ROOT = path.resolve(MANAGER_DIR, '..', '..');
 
 const DEFAULTS = {
   port: 28084,
@@ -137,6 +140,7 @@ module.exports = Object.freeze({
   configPath,
   managerDir: MANAGER_DIR,
   serverDir: SERVER_DIR,
+  repoRoot: REPO_ROOT,
   publicDir: path.join(SERVER_DIR, 'public'),
 
   port,

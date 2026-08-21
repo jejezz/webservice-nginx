@@ -58,7 +58,8 @@ services/manager/
 │   │   │   ├── registry.js   # nginx.ini + ecosystem.config.js 서비스 목록 병합
 │   │   │   ├── health.js     # /health 체크 (HTTPS 자체 서명 인증서 지원)
 │   │   │   ├── pm2.js        # pm2 jlist
-│   │   │   └── nginx.js      # systemctl 상태
+│   │   │   ├── nginx.js      # systemctl 상태
+│   │   │   └── setup.js      # 구축 마법사 단계 표 + 점검 스크립트 실행기
 │   │   └── routes/
 │   │       ├── api.js        # REST API
 │   │       └── admin.js      # 관리자 콘솔 API (administrator CRUD)
@@ -68,7 +69,7 @@ services/manager/
 │   └── public/               # web 빌드 결과 (vite build 시 생성)
 └── web/                  # React SPA (Vite)
     └── src/
-        ├── pages/{Login,Dashboard,AdminConsole}.jsx
+        ├── pages/{Login,Dashboard,Setup,AdminConsole}.jsx
         ├── components/AdminLoginDialog.jsx  # 로그인 화면의 설정 버튼 모달
         ├── components/ui/    # shadcn/ui 컴포넌트
         └── lib/api.js
@@ -290,6 +291,8 @@ pm2 restart manager
 | `GET` | `/manager/api/me` | 필요 | 현재 세션 |
 | `GET` | `/manager/api/overview` | 필요 | 서비스·Nginx 전체 상태 |
 | `GET` | `/manager/api/services/:name/health` | 필요 | 개별 서비스 재확인 |
+| `GET` | `/manager/api/setup` | 필요 | 구축 단계 정의 + 각 단계의 마지막 점검 결과 |
+| `POST` | `/manager/api/setup/check/:stepId` | 필요 | 그 단계의 점검 스크립트를 돌리고 판정을 반환 |
 | `POST` | `/manager/api/admin/login` | — | 관리자 콘솔 로그인 (IP당 5회 실패 시 10분 차단) |
 | `POST` | `/manager/api/admin/logout` | — | 관리자 콘솔 로그아웃 |
 | `GET` | `/manager/api/admin/me` | 콘솔 | 콘솔 세션 확인 |
@@ -343,6 +346,48 @@ env: {
   HEALTH_INSECURE_TLS: 'true',   // 자체 서명 인증서일 때
 }
 ```
+
+## 구축 마법사 (`/manager/setup`)
+
+서비스를 **어떤 순서로 무엇을 채워야 하는지** 안내하고, 사람이 한 일을 실제로
+됐는지 확인한 뒤 다음으로 넘기는 화면입니다. 설계는
+[docs/setup-wizard.md](../../docs/setup-wizard.md), 점검 출력의 형식은
+[docs/check-contract.md](../../docs/check-contract.md) 에 있습니다.
+
+대시보드 헤더의 **구축** 버튼으로 들어갑니다. 지금 도는 단계는 셋입니다.
+
+| 단계 | 점검 |
+|---|---|
+| `kamailio.deps` | `services/kamailio/bootstrap.sh --check --json` |
+| `janus.config` | `services/janus/install.sh --check --json` |
+| `nginx.routes` | `nginx/install_nginx_stack.sh --check --json` |
+
+- **진행은 점검 결과로만 정해집니다.** 사람이 누른 "했습니다" 는 점검을 부르는
+  방아쇠일 뿐입니다. 앞 단계가 `complete` 가 아니면 다음 단계는 잠깁니다.
+- **마법사는 sudo 를 부르지 않습니다.** 바꾸는 명령(`--apply` · `--install`)은
+  화면이 보여 주기만 하고 사람이 터미널에서 돌립니다.
+- **진행률을 저장하지 않습니다.** 마지막 결과는 프로세스 메모리에만 있고,
+  화면에 들어올 때마다 다시 점검합니다. 터미널에서 되돌린 것이 "완료" 로 남지
+  않게 하기 위해서입니다.
+
+단계를 늘릴 때는 `server/src/services/setup.js` 의 `STEPS` 에 한 줄을 더합니다.
+화면 코드는 손대지 않습니다.
+
+### 자식 프로세스 경계
+
+manager 가 셸 스크립트를 돌리는 곳은 여기뿐입니다. 경계를 좁게 잡았습니다.
+
+| | |
+|---|---|
+| 무엇을 돌리는가 | `STEPS` 에 박힌 것만. `:stepId` 는 그 표에서 한 줄을 고르는 데만 쓴다 |
+| 어떻게 | `execFile` — 셸을 거치지 않는다. 사람 입력으로 인자를 만들지 않는다 |
+| 어디까지 | 실행 파일이 저장소 밖으로 나가면 거부한다 |
+| 얼마나 | 타임아웃 30초, 출력 상한 1MB, 같은 단계는 겹쳐 돌지 않는다 |
+| 무엇을 안 하는가 | 바꾸는 모드와 sudo |
+
+점검을 마치지 못하면(스크립트 없음·타임아웃·출력을 읽지 못함·다른 `step` 을
+보고함) `unknown` 이 되고, **통과로도 실패로도 치지 않습니다.** 다음 단계는
+열리지 않습니다.
 
 ## 개발 모드
 

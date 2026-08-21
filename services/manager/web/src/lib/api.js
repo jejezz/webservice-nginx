@@ -42,6 +42,12 @@ export const api = {
   overview: () => request('/overview'),
   serviceHealth: (name) => request(`/services/${encodeURIComponent(name)}/health`),
 
+  // 구축 마법사 — 단계 정의와 점검 실행.
+  setup: {
+    overview: () => request('/setup'),
+    check: (stepId) => request(`/setup/check/${encodeURIComponent(stepId)}`, { method: 'POST' }),
+  },
+
   // 관리자 콘솔 — 일반 로그인과 별개의 세션을 쓴다.
   admin: {
     login: (username, password) =>
