@@ -65,6 +65,28 @@
 `pending` 과 `problem` 의 차이는 **순서 때문인가, 고장인가** 입니다.
 아직 차례가 안 온 것은 `pending`, 차례가 지났는데 어긋난 것은 `problem` 입니다.
 
+### ⚠️ "확인할 수 없음" 은 `problem` 이 아니라 `skip` 입니다
+
+**마법사는 sudo 없이 돕니다.** 그래서 root 만 읽을 수 있는 것을 확인하지 못하는
+일이 자주 생깁니다.
+
+```
+[!!]  MariaDB 에 접속할 수 없어 확인을 건너뜁니다 (sudo 로 실행해 보세요)
+```
+
+이것을 `problem` 으로 두면 **그 단계가 영원히 막힙니다.** 실제로 잘못된 것이
+아니라 우리가 못 본 것뿐입니다. 이런 줄은 `skip` 이어야 합니다.
+
+가르는 기준:
+
+| 문구가 말하는 것 | 레벨 |
+|---|---|
+| "…을 확인할 수 없습니다 / 읽지 못했습니다 (권한)" | `skip` |
+| "…이 잘못돼 있습니다 / 없습니다 / 어긋납니다" | `problem` |
+
+`kamailio/install.sh` 를 변환하면서 실제로 이 오분류가 하나 있었습니다 —
+그 한 줄 때문에 `kamailio.config` 단계가 sudo 없이는 절대 통과하지 못했습니다.
+
 ### `state`
 
 `checks` 에서 기계적으로 나옵니다.
@@ -128,6 +150,6 @@ check_finish                  # JSON 이면 여기서 출력하고 종료
 | `services/janus/verify-bridge.sh` | `janus.verify.bridge` | ⬜ |
 | `services/janus/check-public-ip.sh` | `janus.publicip` | ⬜ |
 | `services/kamailio/bootstrap.sh` | `kamailio.deps` | ⬜ |
-| `services/kamailio/install.sh` | `kamailio.config` | ⬜ |
+| `services/kamailio/install.sh` | `kamailio.config` | ✅ |
 | `nginx/install_nginx_stack.sh` | `nginx.routes` | ⬜ |
 | `pm2/ecosystem.config.js` | `pm2.apps` | ⬜ (node — 같은 형식을 직접 낸다) |

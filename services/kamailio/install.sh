@@ -51,6 +51,14 @@ SIP_PUSH_URL="https://127.0.0.1:28099/sip-push"
 # shellcheck source=../../database/lib_mariadb.sh
 source "${PROJECT_ROOT}/database/lib_mariadb.sh"
 
+# 점검 출력은 공용 규약을 따른다 (docs/check-contract.md).
+source "${SCRIPT_DIR}/../../lib/check-report.sh"
+
+# --json 은 아래 인자 파싱보다 **먼저** 걸러낸다.
+check_init "kamailio.config"    # docs/check-contract.md 의 step id
+check_args "$@"
+set -- "${CHECK_REST[@]:-}"
+
 MODE="check"
 ASSUME_YES=false
 
@@ -60,14 +68,11 @@ for arg in "$@"; do
         --remove)   MODE="remove" ;;
         --check)    MODE="check" ;;
         --yes|-y)   ASSUME_YES=true ;;
-        *) echo "Unknown option: $arg"; echo "Usage: $0 [--apply|--remove|--check] [--yes]"; exit 1 ;;
+        "") ;;                  # check_args 가 비운 자리
+        *) echo "Unknown option: $arg"; echo "Usage: $0 [--apply|--remove|--check] [--yes] [--json]"; exit 1 ;;
     esac
 done
 
-ok()   { echo "  [ok]   $*"; }
-no()   { echo "  [--]   $*"; }
-warn() { echo "  [!!]   $*"; }
-info() { echo "$*"; }
 die()  { echo "오류: $*" >&2; exit 1; }
 
 confirm() {
@@ -138,11 +143,13 @@ report() {
             subscribers="$(mdb_query "SELECT COUNT(*) FROM ${DB_NAME}.subscriber;")"
             ok "등록된 SIP 계정: ${subscribers:-0}개"
         else
-            no "${DB_NAME} 스키마 없음 → sudo database/setup_mariadb.sh 를 먼저 실행하세요"
+            pend "${DB_NAME} 스키마 없음 → sudo database/setup_mariadb.sh 를 먼저 실행하세요"
             problems=$((problems + 1))
         fi
     else
-        warn "MariaDB 에 접속할 수 없어 확인을 건너뜁니다 (sudo 로 실행해 보세요)"
+        # 확인을 못 한 것이지 잘못된 것이 아니다. problem 으로 두면 sudo 없이 도는
+        # 마법사에서 이 단계가 영원히 막힌다 (docs/check-contract.md).
+        skip "MariaDB 에 접속할 수 없어 확인을 건너뜁니다 (sudo 로 실행해 보세요)"
     fi
 
     if [[ -r "$SECRET_FILE" ]]; then
@@ -160,7 +167,7 @@ report() {
             problems=$((problems + 1))
         fi
     else
-        no "DB 비밀번호 파일 없음: ${SECRET_FILE} → setup_mariadb.sh 가 만들어 줍니다"
+        pend "DB 비밀번호 파일 없음: ${SECRET_FILE} → setup_mariadb.sh 가 만들어 줍니다"
         problems=$((problems + 1))
     fi
 
@@ -173,10 +180,10 @@ report() {
         if [[ -r "$LOCAL_CFG" ]]; then
             grep -q '^#!define WITH_AUTH' "$LOCAL_CFG" && ok "WITH_AUTH 활성" || no "WITH_AUTH 없음"
         else
-            no "내용 확인 불가 (root 권한 필요) — sudo $0 로 다시 실행하세요"
+            skip "내용 확인 불가 (root 권한 필요) — sudo $0 로 다시 실행하세요"
         fi
     else
-        no "설치되지 않음 — 지금은 인증 없이 REGISTER 를 받습니다"
+        pend "설치되지 않음 — 지금은 인증 없이 REGISTER 를 받습니다"
     fi
 
     info ""
@@ -457,7 +464,7 @@ remove() {
 }
 
 case "$MODE" in
-    check)  report ;;
+    check)  report; check_finish ;;
     apply)  apply ;;
     remove) remove ;;
 esac
