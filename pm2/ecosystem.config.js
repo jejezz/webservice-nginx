@@ -197,7 +197,26 @@ function nginxPorts(serviceDir) {
  * 프로세스가 여는 포트와 nginx 가 보내는 포트가 어긋나면 그 경로는 502 인데,
  * 어느 쪽 선언도 혼자서는 그걸 알 수 없다. 그래서 여기서 맞춰 본다.
  */
-function check(entries) {
+/*
+ * 점검 규약 (docs/check-contract.md) 의 항목들.
+ *
+ * 이 파일은 node 라 lib/check-report.sh 를 쓸 수 없어 같은 형식을 직접 낸다.
+ *
+ * ⚠️ 플래그가 --json 이 아니라 --check-json 이다. --check --json 은 이미
+ *    "pm2 에 넘어가는 앱 객체를 덤프한다" 는 뜻으로 README 에 문서화돼 있어서,
+ *    그것을 빼앗으면 쓰던 사람이 깨진다.
+ */
+const CHECK_ENTRIES = [];
+const judge = (level, text) => CHECK_ENTRIES.push({ level, text });
+
+function checkState() {
+  const levels = new Set(CHECK_ENTRIES.map((e) => e.level));
+  if (levels.has('problem')) return 'problem';
+  if (levels.has('pending')) return 'incomplete';
+  return 'complete';
+}
+
+function check(entries, quiet = false) {
   let problems = 0;
 
   for (const { app, serviceDir, enabled } of entries) {
@@ -221,19 +240,36 @@ function check(entries) {
       problems += 1;
     }
 
-    console.log(
-      `  ${status.padEnd(6)}  ${app.name.padEnd(16)} ${(port || '-').padEnd(7)} ${where.padEnd(22)} ${note}`
-    );
+    judge(status === 'ok' ? 'ok' : status === 'skip' ? 'skip' : 'problem',
+          `${app.name} — ${note}`);
+
+    if (!quiet) {
+      console.log(
+        `  ${status.padEnd(6)}  ${app.name.padEnd(16)} ${(port || '-').padEnd(7)} ${where.padEnd(22)} ${note}`
+      );
+    }
   }
 
   const enabledCount = entries.filter((e) => e.enabled).length;
-  console.log(`\n${enabledCount} apps${problems ? `, ${problems} problem(s)` : ', no problems'}.`);
+  if (!quiet) {
+    console.log(`\n${enabledCount} apps${problems ? `, ${problems} problem(s)` : ', no problems'}.`);
+  }
   return problems;
 }
 
 const entries = loadApps();
 
 if (require.main === module) {
+  // 규약 모드 — stdout 에 JSON 한 덩어리만 낸다.
+  if (process.argv.includes('--check-json')) {
+    check(entries, true);
+    const state = checkState();
+    process.stdout.write(
+      JSON.stringify({ step: 'pm2.apps', state, checks: CHECK_ENTRIES }, null, 2) + '\n'
+    );
+    process.exit(state === 'complete' ? 0 : 1);
+  }
+
   console.log(`Scanning ${SERVICES_DIR}/*/pm2-conf/*.ini\n`);
   const problems = check(entries);
 

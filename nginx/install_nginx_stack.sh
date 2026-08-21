@@ -28,6 +28,7 @@ usage() {
 Usage: install_nginx_stack.sh [옵션]
 
   --check          파싱·충돌 검사만. 아무것도 쓰지 않음 (sudo 불필요)
+  --json           같은 검사를 기계가 읽는 형식으로 (docs/check-contract.md)
   --dry-run        만들어질 설정을 표준 출력으로. 아무것도 쓰지 않음
   --skip-install   apt 설치 단계를 건너뜀 (이미 설치된 서버에서 상시 사용)
   --skip-reload    설정만 쓰고 reload 하지 않음
@@ -38,6 +39,7 @@ USAGE
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --check)        CHECK_ONLY=1 ;;
+        --json)         CHECK_ONLY=1; AS_JSON=1 ;;   # docs/check-contract.md
         --dry-run)      DRY_RUN=1 ;;
         --skip-install) SKIP_INSTALL=1 ;;
         --skip-reload)  SKIP_RELOAD=1 ;;
@@ -58,6 +60,9 @@ run_root() {
 }
 
 if [[ $CHECK_ONLY -eq 1 ]]; then
+    if [[ ${AS_JSON:-0} -eq 1 ]]; then
+        exec python3 "$GENERATOR" --json
+    fi
     exec python3 "$GENERATOR" --check
 fi
 

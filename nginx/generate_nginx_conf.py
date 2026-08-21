@@ -16,6 +16,7 @@ nginx-stack.conf 가 가진다.
 
 import argparse
 import configparser
+import json
 import glob
 import os
 import re
@@ -41,7 +42,44 @@ class ConfigError(Exception):
     """설정이 잘못됐을 때. 조용히 넘어가지 않고 여기서 멈춘다."""
 
 
+# ── 점검 규약 (docs/check-contract.md) ────────────────────────────────
+#
+# 셸 쪽은 lib/check-report.sh 를 쓰지만 이 파일은 파이썬이라 같은 형식을 직접
+# 낸다. 사람용 출력은 전부 stderr 로 가므로 JSON 은 stdout 으로 깨끗이 나간다.
+CHECK_JSON = False
+CHECK_ENTRIES = []
+
+
+def judge(level, text):
+    CHECK_ENTRIES.append({"level": level, "text": text})
+
+
+def check_state():
+    levels = {e["level"] for e in CHECK_ENTRIES}
+    if "problem" in levels:
+        return "problem"
+    if "pending" in levels:
+        return "incomplete"
+    return "complete"
+
+
+def check_finish():
+    """JSON 모드면 결과를 찍고 그 자리에서 끝낸다."""
+    if not CHECK_JSON:
+        return
+    state = check_state()
+    json.dump({"step": "nginx.routes", "state": state, "checks": CHECK_ENTRIES},
+              sys.stdout, ensure_ascii=False, indent=2)
+    sys.stdout.write("\n")
+    sys.exit(0 if state == "complete" else 1)
+
+
 def die(message):
+    # JSON 모드에서는 멈추는 대신 문제로 기록하고 정상적으로 끝낸다 —
+    # 마법사가 그 이유를 화면에 보여 줄 수 있어야 한다.
+    if CHECK_JSON:
+        judge("problem", message.replace("\n", " ").strip())
+        check_finish()
     print(f"ERROR: {message}", file=sys.stderr)
     sys.exit(1)
 
@@ -207,6 +245,7 @@ def load_services(services_dir):
             die(f"{ini_path}: {err}")
 
         if not service.enabled:
+            judge("skip", f"{service.name} — 선언이 꺼져 있습니다 (enabled = false)")
             print(f"  skip    {service.name:18} (enabled = false)", file=sys.stderr)
             continue
 
@@ -395,7 +434,12 @@ def main():
     parser.add_argument("--template", default=os.path.join(HERE, "server.conf.template"))
     parser.add_argument("--output", help="쓸 파일 경로. 없으면 표준 출력")
     parser.add_argument("--check", action="store_true", help="파싱과 충돌 검사만 하고 끝낸다")
+    parser.add_argument("--json", action="store_true",
+                        help="점검 결과를 기계가 읽는 형식으로 낸다 (docs/check-contract.md)")
     args = parser.parse_args()
+
+    global CHECK_JSON
+    CHECK_JSON = args.json
 
     stack = Stack(args.config)
 
@@ -414,7 +458,10 @@ def main():
     for service in services:
         ports = " ".join(str(p) for p in service.ports)
         routes = ", ".join(r.match_key for r in service.routes) or "(라우트 없음)"
+        judge("ok", f"{service.name} — {ports} {routes}")
         print(f"  ok      {service.name:18} {ports:12} {routes}", file=sys.stderr)
+
+    check_finish()      # --json 이면 여기서 끝난다
 
     if args.check:
         print(f"{len(services)} services, no conflicts.", file=sys.stderr)

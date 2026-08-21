@@ -129,6 +129,23 @@ check_finish                  # JSON 이면 여기서 출력하고 종료
 `ok` · `warn` · `info` 는 이름과 동작이 예전과 같습니다. **바꿔야 하는 것은
 기존 `no()` 호출뿐입니다** — 각 자리에서 `skip` 인지 `pend` 인지 판단해 나눕니다.
 
+## ⚠️ 예외 하나 — pm2 는 `--check-json` 입니다
+
+`pm2/ecosystem.config.js` 는 **`--json` 을 이미 다른 뜻으로 쓰고 있습니다.**
+`--check --json` 이 "pm2 에 실제로 넘어가는 앱 객체를 덤프한다" 는 뜻으로
+`pm2/README.md` 에 문서화돼 있습니다.
+
+그것을 빼앗으면 쓰던 사람이 깨지므로, 이 파일에서만 규약 플래그를
+**`--check-json`** 으로 둡니다.
+
+```bash
+node pm2/ecosystem.config.js --check-json
+```
+
+셸이 아니라 node 라 `lib/check-report.sh` 를 쓸 수 없어 같은 형식을 직접 냅니다.
+`nginx` 도 마찬가지로 파이썬 생성기가 직접 냅니다 (래퍼는 `--json` 을 그쪽으로
+넘기기만 합니다).
+
 ## 지켜야 할 것
 
 - **`--json` 일 때 다른 출력을 내지 마세요.** JSON 한 덩어리만 stdout 으로 나가야
@@ -154,5 +171,5 @@ check_finish                  # JSON 이면 여기서 출력하고 종료
 | `services/janus/check-public-ip.sh` | `janus.publicip` | ✅ |
 | `services/kamailio/bootstrap.sh` | `kamailio.deps` | ✅ |
 | `services/kamailio/install.sh` | `kamailio.config` | ✅ |
-| `nginx/install_nginx_stack.sh` | `nginx.routes` | ⬜ |
-| `pm2/ecosystem.config.js` | `pm2.apps` | ⬜ (node — 같은 형식을 직접 낸다) |
+| `nginx/install_nginx_stack.sh` | `nginx.routes` | ✅ (생성기가 낸다) |
+| `pm2/ecosystem.config.js` | `pm2.apps` | ✅ **`--check-json`** (아래 예외) |
