@@ -3,11 +3,15 @@
 서비스를 **어떤 순서로 무엇을 채워야 하는지** 화면이 안내하고, 사람이 한 일을
 **실제로 됐는지 확인한 뒤** 다음으로 넘기는 웹 화면의 설계입니다.
 
-> 상태: **네 단계 모두 구현됨.** 점검 규약(`--json`)이 진입점 12곳에 붙었고
-> ([check-contract.md](check-contract.md)), manager 의 `/manager/setup` 이
-> **13단계 전부**를 돌립니다. 기계가 확인할 수 없는 것은 사람의 확인을 기록하되
-> `attested` 로 따로 표시하고, 장비마다 다른 값은 단계 안의 폼에서 받아 그
-> 서비스의 `settings.ini` 에 씁니다 ([settings-contract.md](settings-contract.md)).
+> 상태: **네 단계 모두 구현됨. 열린 질문 다섯도 닫혔습니다.**
+> 점검 규약(`--json`)이 진입점 13곳에 붙었고 ([check-contract.md](check-contract.md)),
+> manager 의 `/manager/setup` 이 **13단계 전부**를 돌립니다. 기계가 확인할 수
+> 없는 것은 사람의 확인을 기록하되 `attested` 로 따로 표시하고, 장비마다 다른
+> 값은 단계 안의 폼에서 받아 그 서비스의 `settings.ini` 에 씁니다
+> ([settings-contract.md](settings-contract.md)). 설치본이 저장소보다 낡은 것도
+> 잡습니다 (아래 '설치본이 낡은 것을 잡는다').
+>
+> 이 장비의 현황과 다시 볼 때의 순서는 맨 아래 '지금 어디까지 왔나' 에 있습니다.
 >
 > 초안을 쓰면서 전제 하나가 실측으로 뒤집혔습니다 — 점검 스크립트의 종료
 > 코드를 판정에 쓸 수 없습니다. 그 결과 만드는 순서가 바뀌었습니다
@@ -624,6 +628,60 @@ DB 비밀번호가 박히고 있었습니다.
 
 2단계도 위험합니다 — manager 가 자식 프로세스를 돌리는 것이 처음이라, 거기서
 경계를 잘못 잡으면 나머지가 다 그 위에 쌓입니다.
+
+## 지금 어디까지 왔나 (2026-08-22 확인)
+
+이 장비에서 마법사를 한 바퀴 돌린 결과입니다. **필수 11단계 중 9 통과.**
+
+| # | 단계 | 상태 |
+|---|---|---|
+| 1 | `database.schema` | ✅ |
+| 2 | `pm2.apps` | ✅ 선언 · 실행 중 · 재부팅 목록 셋이 같음 |
+| 3 | `kamailio.deps` | ✅ |
+| 4 | `kamailio.config` | ✅ |
+| 5 | `sip.accounts` | 계정 8개 확인 — **사람의 확인만 남음** |
+| 6 | `janus.deps` | ✅ |
+| 7 | `janus.build` | 1.4.1 설치됨 — **사람의 확인만 남음** |
+| 8 | `janus.config` | ✅ |
+| 9 | `janus.dashboard` | ✅ |
+| 10 | `nginx.routes` | ✅ |
+| 11 | `janus.verify.call` | ✅ 실제 통화 통과 (양방향 297패킷, opus) |
+| 12 | `janus.publicip` (선택) | 공인 IP 일치 — **포워딩 확인만 남음** |
+| 13 | `push.incoming` (선택) | 서버 쪽 네 자리 다 붙음 — **단말이 `sipUser` 를 보내면 채워짐** |
+
+### 마법사를 만들면서 실제로 잡은 것
+
+만들어 두니 곧바로 세 가지가 걸렸습니다. 셋 다 **어디에도 오류로 보이지 않던**
+것들입니다.
+
+| 무엇 | 어떤 상태였나 |
+|---|---|
+| `wt_timer` 가 설치본에 없음 | 착신 푸시로 붙들어 둔 INVITE 가 5초에 사라져 FCM 왕복(2~8초)을 못 기다림 |
+| `/sip/` 라우트가 nginx 에 남아 있음 | 저장소에서 끈 지 오래인데 계속 서비스 중 |
+| `kamailio-local.cfg` 주석에 DB 비밀번호 | 주석에 자리표시자를 적어 둬 치환이 그것까지 채움 |
+
+### 다시 볼 때
+
+화면으로 보려면 `/manager/setup` 에서 **전체 점검**을 누릅니다. 들어올 때마다
+전부 다시 돌리므로(11개에 1.3초) 저장된 진행률과 실물이 어긋날 일이 없습니다.
+단계 하나를 가리키려면 `?step=<id>` 를 붙입니다.
+
+터미널로 보려면 각 점검을 그대로 돌리면 됩니다. 모두 sudo 가 필요 없습니다.
+
+```bash
+database/check-database.sh
+node pm2/ecosystem.config.js --check
+services/kamailio/bootstrap.sh
+services/kamailio/install.sh
+services/kamailio/check-accounts.sh
+services/janus/bootstrap.sh
+services/janus/install.sh
+services/janus/setup-dashboard.sh
+nginx/install_nginx_stack.sh --check
+services/janus/verify-call.sh            # --run 은 실제로 90초 걸린다
+services/janus/check-public-ip.sh
+services/kamailio/check-push.sh
+```
 
 ## 열린 질문
 
