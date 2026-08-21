@@ -133,6 +133,9 @@ check_finish                  # JSON 이면 여기서 출력하고 종료
 
 - **`--json` 일 때 다른 출력을 내지 마세요.** JSON 한 덩어리만 stdout 으로 나가야
   합니다. 오류·진단은 stderr 로 보내세요.
+- **제목·빈 줄에 생 `echo` 를 쓰지 마세요 — `info` 를 쓰세요.** `echo` 는 JSON
+  모드에서도 그대로 나가 출력을 오염시킵니다. 변환한 다섯 스크립트 중 둘이 실제로
+  이것 때문에 파싱이 깨졌습니다.
 - **`check_finish` 를 빠뜨리지 마세요.** 없으면 `--json` 이 조용히 무시됩니다.
 - **`step` 은 마법사의 단계 id 와 같아야 합니다.** 화면이 그것으로 결과를
   붙입니다.
@@ -143,13 +146,13 @@ check_finish                  # JSON 이면 여기서 출력하고 종료
 
 | 진입점 | `step` | 상태 |
 |---|---|---|
-| `services/janus/bootstrap.sh` | `janus.deps` | ⬜ |
+| `services/janus/bootstrap.sh` | `janus.deps` | ✅ |
 | `services/janus/install.sh` | `janus.config` | ✅ |
-| `services/janus/setup-dashboard.sh` | `janus.dashboard` | ⬜ |
+| `services/janus/setup-dashboard.sh` | `janus.dashboard` | ✅ |
 | `services/janus/verify-call.sh` | `janus.verify.call` | ⬜ |
 | `services/janus/verify-bridge.sh` | `janus.verify.bridge` | ⬜ |
 | `services/janus/check-public-ip.sh` | `janus.publicip` | ⬜ |
-| `services/kamailio/bootstrap.sh` | `kamailio.deps` | ⬜ |
+| `services/kamailio/bootstrap.sh` | `kamailio.deps` | ✅ |
 | `services/kamailio/install.sh` | `kamailio.config` | ✅ |
 | `nginx/install_nginx_stack.sh` | `nginx.routes` | ⬜ |
 | `pm2/ecosystem.config.js` | `pm2.apps` | ⬜ (node — 같은 형식을 직접 낸다) |

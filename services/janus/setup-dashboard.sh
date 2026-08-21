@@ -17,19 +17,25 @@ JANUS_PREFIX="/opt/janus"
 JANUS_JS_SRC="${JANUS_PREFIX}/share/janus/javascript/janus.js"
 JANUS_JS_DST="${SCRIPT_DIR}/web/public/janus.js"
 DASHBOARD_PORT=28087
+# 점검 출력은 공용 규약을 따른다 (docs/check-contract.md).
+source "${SCRIPT_DIR}/../../lib/check-report.sh"
+
+# --json 은 아래 인자 파싱보다 **먼저** 걸러낸다.
+check_init "janus.dashboard"
+check_args "$@"
+set -- "${CHECK_REST[@]:-}"
+
 
 MODE="check"
 for arg in "$@"; do
     case "$arg" in
         --build) MODE="build" ;;
         --check) MODE="check" ;;
+        "") ;;                  # check_args 가 비운 자리
         *) echo "Unknown option: $arg"; echo "Usage: $0 [--check|--build]"; exit 1 ;;
     esac
 done
 
-ok()   { echo "  [ok]   $*"; }
-no()   { echo "  [--]   $*"; }
-warn() { echo "  [!!]   $*"; }
 die()  { echo "오류: $*" >&2; exit 1; }
 
 # curl 은 연결 실패에도 %{http_code} 로 "000" 을 찍고 종료 코드만 0 이 아니다.
@@ -73,20 +79,20 @@ build() {
 report() {
     local problems=0
 
-    echo "대시보드 (janus-dashboard)"
+    info "대시보드 (janus-dashboard)"
 
     [[ -d "${SCRIPT_DIR}/server/node_modules" ]] \
         && ok "server 의존성 설치됨" \
-        || { no "server 의존성 없음 → $0 --build"; problems=$((problems + 1)); }
+        || { pend "server 의존성 없음 → $0 --build"; problems=$((problems + 1)); }
 
     [[ -d "${SCRIPT_DIR}/web/node_modules" ]] \
         && ok "web 의존성 설치됨" \
-        || { no "web 의존성 없음 → $0 --build"; problems=$((problems + 1)); }
+        || { pend "web 의존성 없음 → $0 --build"; problems=$((problems + 1)); }
 
     if [[ -f "${SCRIPT_DIR}/web/dist/index.html" ]]; then
         ok "프런트 빌드 있음 (web/dist)"
     else
-        no "프런트 빌드 없음 → $0 --build"
+        pend "프런트 빌드 없음 → $0 --build"
         problems=$((problems + 1))
     fi
 
@@ -100,24 +106,24 @@ report() {
             problems=$((problems + 1))
         fi
     else
-        no "janus.js 없음 (web/public/janus.js) → $0 --build"
+        pend "janus.js 없음 (web/public/janus.js) → $0 --build"
         problems=$((problems + 1))
     fi
 
-    echo
-    echo "프로세스"
+    info
+    info "프로세스"
     if command -v pm2 >/dev/null && pm2 pid janus-dashboard >/dev/null 2>&1 \
        && [[ -n "$(pm2 pid janus-dashboard 2>/dev/null | tr -d '[:space:]')" ]]; then
         ok "pm2 에 떠 있습니다 (pid $(pm2 pid janus-dashboard | tr -d '[:space:]'))"
     else
-        no "pm2 에 떠 있지 않습니다"
+        pend "pm2 에 떠 있지 않습니다"
         # 선언이 꺼져 있는 것과 아직 안 띄운 것은 할 일이 다르다.
         if grep -qE '^[[:space:]]*enabled[[:space:]]*=[[:space:]]*false' "${SCRIPT_DIR}/pm2-conf/dashboard.ini"; then
-            echo "         pm2-conf/dashboard.ini 의 enabled 를 true 로 바꾼 뒤:"
+            info "         pm2-conf/dashboard.ini 의 enabled 를 true 로 바꾼 뒤:"
         else
-            echo "         선언은 켜져 있습니다. 띄우려면:"
+            info "         선언은 켜져 있습니다. 띄우려면:"
         fi
-        echo "         cd pm2 && pm2 start ecosystem.config.js --only janus-dashboard && pm2 save"
+        info "         cd pm2 && pm2 start ecosystem.config.js --only janus-dashboard && pm2 save"
     fi
 
     local code
@@ -125,19 +131,19 @@ report() {
     if [[ "$code" == "200" ]]; then
         ok "/health → 200 (127.0.0.1:${DASHBOARD_PORT})"
     else
-        no "/health 응답 없음 (HTTP ${code})"
+        pend "/health 응답 없음 (HTTP ${code})"
     fi
 
-    echo
+    info
     if [[ $problems -eq 0 ]]; then
-        echo "빌드는 준비됐습니다."
+        info "빌드는 준비됐습니다."
     else
-        echo "해결할 항목 ${problems}개."
+        info "해결할 항목 ${problems}개."
     fi
     return 0
 }
 
 case "$MODE" in
-    check) report ;;
+    check) report; check_finish ;;
     build) build ;;
 esac

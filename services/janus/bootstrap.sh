@@ -71,6 +71,14 @@ TEST_TOOLS=(
     "npm|대시보드 빌드"
     "google-chrome|헤드리스 시험 통화 (verify-call.sh · verify-bridge.sh)"
 )
+# 점검 출력은 공용 규약을 따른다 (docs/check-contract.md).
+source "${SCRIPT_DIR}/../../lib/check-report.sh"
+
+# --json 은 아래 인자 파싱보다 **먼저** 걸러낸다.
+check_init "janus.deps"
+check_args "$@"
+set -- "${CHECK_REST[@]:-}"
+
 
 MODE="check"
 for a in "${@:-}"; do
@@ -78,13 +86,13 @@ for a in "${@:-}"; do
         --install) MODE="install" ;;
         --check|"") MODE="check" ;;
         -h|--help) sed -n '2,26p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        "") ;;                  # check_args 가 비운 자리
         *) echo "Unknown option: $a" >&2; exit 1 ;;
     esac
 done
 
-ok()   { echo "  [ok]   $*"; }
-no()   { echo "  [--]   $*"; }
-warn() { echo "  [!!]   $*"; PROBLEMS=$((PROBLEMS + 1)); }
+# warn 은 공용 규약의 것을 쓰고, 이 스크립트의 카운터도 함께 올린다.
+_warn_lib=$(declare -f warn); warn() { _check_add problem "$*"; [[ $CHECK_JSON -eq 1 ]] || echo "  [!!]   $*"; PROBLEMS=$((PROBLEMS + 1)); }
 die()  { echo "오류: $*" >&2; exit 1; }
 PROBLEMS=0
 
@@ -101,29 +109,29 @@ missing_from() {
 
 # ── 점검 ────────────────────────────────────────────────────────────────
 report() {
-    echo "Janus 본체"
+    info "Janus 본체"
     if [[ -x "$JANUS_BIN" ]]; then
         ok "설치됨: ${JANUS_BIN} ($("$JANUS_BIN" --version 2>/dev/null | sed -n 's/^Janus version: //p'))"
     else
         warn "없습니다: ${JANUS_BIN}"
-        echo "         소스에서 빌드해야 합니다 (아래 '순서' 참고)"
+        info "         소스에서 빌드해야 합니다 (아래 '순서' 참고)"
     fi
     for m in plugins/libjanus_sip.so transports/libjanus_http.so; do
         [[ -f "${JANUS_PREFIX}/lib/janus/${m}" ]] && ok "$(basename "$m")" || warn "$(basename "$m") 가 없습니다"
     done
 
-    echo
-    echo "빌드 의존성"
+    info
+    info "빌드 의존성"
     local miss; miss="$(missing_from BUILD_DEPS)"
     if [[ -z "$miss" ]]; then
         ok "${#BUILD_DEPS[@]}개 모두 설치됨"
     else
         warn "빠진 것: ${miss}"
-        echo "         sudo ./bootstrap.sh --install"
+        info "         sudo ./bootstrap.sh --install"
     fi
 
-    echo
-    echo "시험 도구"
+    info
+    info "시험 도구"
     local entry tool tmiss=()
     for entry in "${TEST_TOOLS[@]}"; do
         tool="${entry%%|*}"
@@ -134,11 +142,11 @@ report() {
     if [[ ${#tmiss[@]} -eq 0 ]]; then
         ok "node $(node --version 2>/dev/null) · npm · 크롬"
     else
-        no "빠진 것: ${tmiss[*]} — Janus 는 돌지만 verify-*.sh 가 못 돕니다"
+        skip "빠진 것: ${tmiss[*]} — Janus 는 돌지만 verify-*.sh 가 못 돕니다"
     fi
 
-    echo
-    echo "연동 대상"
+    info
+    info "연동 대상"
     systemctl is-active --quiet kamailio && ok "Kamailio 구동 중" \
         || warn "Kamailio 가 떠 있지 않습니다 — services/kamailio/bootstrap.sh"
     if pgrep -x rtpproxy >/dev/null 2>&1; then
@@ -147,14 +155,14 @@ report() {
         warn "rtpproxy 가 없습니다 — Kamailio 가 NAT 로 판정한 통화의 미디어를 중계합니다"
     fi
 
-    echo
-    echo "이 저장소가 만드는 것"
+    info
+    info "이 저장소가 만드는 것"
     [[ -f "${SCRIPT_DIR}/secrets/admin-secret" ]] && ok "secrets/ (install.sh --apply 가 만듭니다)" \
-        || no "secrets/ 없음 — 아직 install.sh --apply 를 안 돌렸습니다"
+        || pend "secrets/ 없음 — 아직 install.sh --apply 를 안 돌렸습니다"
     [[ -d "${SCRIPT_DIR}/web/dist" ]] && ok "web/dist (setup-dashboard.sh --build)" \
-        || no "web/dist 없음 — 대시보드 경로가 503 이 됩니다"
+        || pend "web/dist 없음 — 대시보드 경로가 503 이 됩니다"
     [[ -f "${SCRIPT_DIR}/settings.ini" ]] && ok "settings.ini (대시보드 '설정' 화면)" \
-        || no "settings.ini 없음 — LAN 전용으로 설치됩니다 (9단계)"
+        || skip "settings.ini 없음 — LAN 전용으로 설치됩니다 (9단계)"
 }
 
 print_order() {
@@ -230,6 +238,7 @@ if [[ "$MODE" == "install" ]]; then
 fi
 
 report
+check_finish            # --json 이면 여기서 끝난다 (순서 안내는 사람용이다)
 print_order
 echo
 if [[ $PROBLEMS -gt 0 ]]; then

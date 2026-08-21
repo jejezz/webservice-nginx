@@ -36,6 +36,14 @@ FEATURES=(
 
 # 배포판 kamailio 패키지에 이미 들어 있어 따로 설치할 것이 없는 모듈.
 BUILTIN=(xhttp tsilo nathelper rtpengine dispatcher)
+# 점검 출력은 공용 규약을 따른다 (docs/check-contract.md).
+source "${SCRIPT_DIR}/../../lib/check-report.sh"
+
+# --json 은 아래 인자 파싱보다 **먼저** 걸러낸다.
+check_init "kamailio.deps"
+check_args "$@"
+set -- "${CHECK_REST[@]:-}"
+
 
 MODE="check"
 ASSUME_YES=false
@@ -44,14 +52,11 @@ for arg in "$@"; do
         --install) MODE="install" ;;
         --check)   MODE="check" ;;
         --yes|-y)  ASSUME_YES=true ;;
+        "") ;;                  # check_args 가 비운 자리
         *) echo "Unknown option: $arg"; echo "Usage: $0 [--check|--install] [--yes]"; exit 1 ;;
     esac
 done
 
-ok()   { echo "  [ok]   $*"; }
-no()   { echo "  [--]   $*"; }
-warn() { echo "  [!!]   $*"; }
-info() { echo "$*"; }
 die()  { echo "오류: $*" >&2; exit 1; }
 
 confirm() {
@@ -96,7 +101,7 @@ report() {
         if have_module "$mod"; then
             ok "$(printf '%-30s' "$pkg") ${why}"
         else
-            no "$(printf '%-30s' "$pkg") ${why}"
+            pend "$(printf '%-30s' "$pkg") ${why}"
             problems=$((problems + 1))
         fi
     done
@@ -110,14 +115,14 @@ report() {
     local gid; gid="$(getent group kamailio 2>/dev/null | cut -d: -f3)"
     local target="${SUDO_USER:-$(id -un)}"
     if [[ -z "$gid" ]]; then
-        no "kamailio 그룹이 없습니다 (패키지 설치 전)"
+        pend "kamailio 그룹이 없습니다 (패키지 설치 전)"
         problems=$((problems + 1))
     else
         local members; members="$(getent group kamailio | cut -d: -f4 | tr ',' '\n')"
         if grep -qx "$target" <<<"$members"; then
             ok "${target} 가 kamailio 그룹에 있습니다"
         else
-            no "${target} 가 kamailio 그룹에 없습니다"
+            pend "${target} 가 kamailio 그룹에 없습니다"
             info "         sudo usermod -aG kamailio ${target}   (또는 이 스크립트 --install)"
             problems=$((problems + 1))
         fi
@@ -128,7 +133,7 @@ report() {
     if [[ -r "${PROJECT_ROOT}/database/secrets/kamailio.pw" ]]; then
         ok "kamailio DB 비밀번호 파일 있음"
     else
-        no "없음 — cd ${PROJECT_ROOT}/database && sudo ./setup_mariadb.sh"
+        pend "없음 — cd ${PROJECT_ROOT}/database && sudo ./setup_mariadb.sh"
         problems=$((problems + 1))
     fi
 
@@ -137,13 +142,13 @@ report() {
     if grep -q "KAMAILIO-FORK" /etc/kamailio/kamailio.cfg 2>/dev/null; then
         ok "kamailio.cfg — 포크 설치됨 (착신 푸시 훅 포함)"
     else
-        no "kamailio.cfg — 배포판 그대로.  sudo ./install.sh --apply"
+        pend "kamailio.cfg — 배포판 그대로.  sudo ./install.sh --apply"
         problems=$((problems + 1))
     fi
     if [[ -f /etc/kamailio/kamailio-websocket.cfg ]]; then
         ok "kamailio-websocket.cfg — WS 전송 설치됨"
     else
-        no "WS 설정 없음.  sudo ./setup-websocket.sh --enable"
+        skip "WS 설정 없음.  sudo ./setup-websocket.sh --enable"
         problems=$((problems + 1))
     fi
 
@@ -152,14 +157,14 @@ report() {
     if systemctl is-active --quiet kamailio; then
         ok "kamailio 실행 중"
     else
-        no "kamailio 가 실행 중이 아닙니다"
+        pend "kamailio 가 실행 중이 아닙니다"
         info "         sudo systemctl reset-failed kamailio && sudo systemctl start kamailio"
         problems=$((problems + 1))
     fi
     local code
     code="$(curl -s -m 3 -o /dev/null -w '%{http_code}' http://127.0.0.1:5080/health 2>/dev/null)"
     [[ "${code:-000}" == "200" ]] && ok "WS 포트의 /health → 200" \
-        || { no "WS /health 응답 없음 (code=${code:-000})"; problems=$((problems + 1)); }
+        || { skip "WS /health 응답 없음 (code=${code:-000})"; problems=$((problems + 1)); }
 
     info ""
     if [[ $problems -eq 0 ]]; then
@@ -260,6 +265,6 @@ install_all() {
 }
 
 case "$MODE" in
-    check)   report ;;
+    check)   report; check_finish ;;
     install) install_all ;;
 esac
