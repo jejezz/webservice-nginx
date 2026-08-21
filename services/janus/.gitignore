@@ -26,3 +26,6 @@ Thumbs.db
 # 로그
 *.log
 logs/
+
+# verify-call.sh 가 남기는 마지막 실행 기록 (결과 · 로그)
+test-harness/last-run/

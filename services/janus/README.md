@@ -10,6 +10,8 @@ services/janus/
 │   └── plan.md             ★ 계획서 — 결정 사항과 진행 순서. 여기부터 읽으세요
 ├── install.sh              점검 / 설정 설치 / 되돌리기  (sudo)
 ├── setup-dashboard.sh      대시보드 점검 · 빌드            (sudo 불필요)
+├── verify-call.sh          시험 통화를 사람 없이 돌린다     (sudo 불필요)
+├── test-harness/           verify-call.sh 가 쓰는 헤드리스 하니스
 ├── janus.jcfg              ↘
 ├── janus.transport.http.jcfg        ↘  /opt/janus/etc/janus/ 로 설치될 원본
 ├── janus.transport.websockets.jcfg  ↗  (install.sh --apply 가 설치)
@@ -94,7 +96,19 @@ sudo ./install.sh --remove        # 걷어내기 (secrets/ 는 남긴다)
 
 ./setup-dashboard.sh              # 대시보드 점검
 ./setup-dashboard.sh --build      # 의존성 · janus.js 복사 · 프런트 빌드
+
+./verify-call.sh                  # 시험 통화 점검 (전화를 걸지 않는다)
+./verify-call.sh --run            # 2001 → 2003 으로 실제로 걸어 본다
 ```
+
+`verify-call.sh --run` 은 헤드리스 크롬에서 janus.js 세션 둘을 띄워 **등록 ·
+발신 · 수락 · 미디어 · 끊기 · 재발신**을 한 번에 확인합니다. 협상이 됐는지가
+아니라 RTP 가 실제로 양방향으로 흘렀는지까지 봅니다 — 이 게이트웨이에서 가장
+자주 만나는 실패는 "연결됨인데 소리가 안 난다" 이기 때문입니다.
+
+종료 코드는 `0` 통과 · `1` 실패 · `2` 브라우저 무응답이고, 마지막 실행 기록은
+`test-harness/last-run/` 에 남습니다. 계정 비밀번호는 `secrets/sip-<사용자>.pw`
+에서 읽습니다 — 계정 자체는 사람이 만듭니다 (`../kamailio/accounts.md`).
 
 `node_modules/` 와 `web/dist/` 는 커밋하지 않으므로, 이 저장소를 처음 받은
 곳에서는 `setup-dashboard.sh --build` 를 한 번 돌려야 합니다.
