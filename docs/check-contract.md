@@ -87,6 +87,23 @@
 `kamailio/install.sh` 를 변환하면서 실제로 이 오분류가 하나 있었습니다 —
 그 한 줄 때문에 `kamailio.config` 단계가 sudo 없이는 절대 통과하지 못했습니다.
 
+#### 같은 점검이 터미널과 화면에서 다르게 나올 수 있습니다
+
+권한은 사용자가 아니라 **프로세스의 그룹 목록**이 정합니다. 마법사를 돌리는
+manager 는 pm2 데몬이 띄운 프로세스라, 그 데몬이 뜨던 시점의 그룹을 갖고
+있습니다. 사람이 뒤에 `usermod -aG` 로 그룹을 더해도 **이미 로그인해 있던
+셸에는 반영되지 않습니다.**
+
+실제로 이 저장소에서 갈렸습니다.
+
+```
+[--]  kamailio-local.cfg 는 root 만 읽을 수 있어 확인을 건너뜁니다   ← 터미널 (kamailio 그룹 없음)
+[ok]  푸시 요청 주소(SIP_PUSH_URL)가 설정에 있습니다                 ← 마법사 (kamailio 그룹 있음)
+```
+
+둘 다 맞는 출력입니다. 그래서 "확인 불가" 를 `problem` 으로 두면 안 되는
+이유가 하나 더 늘어납니다 — 그 판정은 **누가 돌렸느냐에 따라 달라집니다.**
+
 ### `state`
 
 `checks` 에서 기계적으로 나옵니다.
@@ -176,5 +193,15 @@ node pm2/ecosystem.config.js --check-json
 | `services/janus/check-public-ip.sh` | `janus.publicip` | ✅ |
 | `services/kamailio/bootstrap.sh` | `kamailio.deps` | ✅ |
 | `services/kamailio/install.sh` | `kamailio.config` | ✅ |
+| `services/kamailio/check-push.sh` | `push.incoming` | ✅ 확인 전용 |
+| `database/check-database.sh` | `database.schema` | ✅ 확인 전용 |
 | `nginx/install_nginx_stack.sh` | `nginx.routes` | ✅ (생성기가 낸다) |
 | `pm2/ecosystem.config.js` | `pm2.apps` | ✅ **`--check-json`** (아래 예외) |
+
+**"확인 전용"** 은 적용 기능이 없는 스크립트라는 뜻입니다. 나머지는 원래
+적용도 하는 스크립트에 점검 모드가 함께 있는 것들입니다.
+
+`database` 와 착신 푸시에는 붙일 곳이 아예 없어 새로 썼습니다 —
+`setup_mariadb.sh` 는 root 로 도는 적용 스크립트고, 착신 푸시는 네 조각이
+서로 다른 서비스에 흩어져 있어 주인이 없었습니다
+([setup-wizard.md](setup-wizard.md) 의 '점검이 없던 두 자리').

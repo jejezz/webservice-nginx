@@ -5,6 +5,13 @@ NAT 안의 인터폰이 Kamailio 를 통해 모바일로 걸 때, 자고 있는 
 
 관련 문서: [websocket-plan.md](websocket-plan.md) (전체 구조·단계)
 
+네 조각이 다 붙었는지 한 번에 보려면:
+
+```bash
+services/kamailio/check-push.sh          # tsilo 훅 · wt_timer · 릴레이 · sip_user 매핑
+services/kamailio/check-push.sh --json   # 구축 마법사가 읽는 형식
+```
+
 ## 문제
 
 모바일은 배터리 때문에 WebSocket 을 계속 붙들고 있지 않습니다. 그래서 걸려올 때

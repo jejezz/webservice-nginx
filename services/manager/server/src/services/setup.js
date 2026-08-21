@@ -2,6 +2,7 @@ const path = require('path');
 const { execFile } = require('child_process');
 const config = require('../config');
 const log = require('../logger');
+const attest = require('./setup-attest');
 
 /**
  * 구축 마법사의 단계 정의와 점검 실행기.
@@ -20,8 +21,7 @@ const log = require('../logger');
  *   4. 실행 파일은 저장소 안에 있어야 합니다 (아래 resolveCheck).
  */
 
-// 점검이 매달리면 화면이 매달린다. 지금 붙인 것들은 모두 0.2초 안에 끝나지만,
-// verify-call.sh 처럼 오래 걸리는 것이 3단계에서 들어온다 (열린 질문 1).
+// 점검이 매달리면 화면이 매달린다.
 const DEFAULT_TIMEOUT_MS = 30000;
 const MAX_OUTPUT_BYTES = 1024 * 1024;
 
@@ -31,10 +31,48 @@ const LEVELS = new Set(['ok', 'skip', 'pending', 'problem']);
 /**
  * 단계 정의. 화면에 순서를 박지 않고 여기에 적는다 — 순서는 requires 에서 나온다.
  *
- * 2단계 범위: 뼈대를 확인하는 세 단계만 둔다 (kamailio · janus · nginx).
- * 13단계 전부와 manualOnly 는 3단계에서 붙인다.
+ *   check       점검 스크립트. 셸을 거치지 않으므로 file 과 args 를 나눠 적는다.
+ *               interpreter: 'node' 면 node 로 돌린다 (pm2 선언은 셸 스크립트가 아니다).
+ *   attest      사람만 확인할 수 있는 것. 있으면 사람의 확인까지 있어야 문이 열린다.
+ *   manualOnly  자동 점검이 아예 불가능한 단계 (check 가 없다).
+ *   optional    선택 기능. 아무 단계도 이것을 requires 로 걸지 않는다.
  */
 const STEPS = [
+  {
+    id: 'database.schema',
+    service: 'database',
+    title: 'MariaDB 설치와 스키마 적용',
+    why:
+      '모든 서비스가 여기에 기댑니다. 특히 Kamailio 는 DB 가 없어도 기동은 되고 ' +
+      '인증만 실패합니다 — child_init 에서 붙기 때문에, 화면에는 아무 오류 없이 ' +
+      '등록만 안 되는 모양이 됩니다.',
+    requires: [],
+    command: { cwd: 'database', run: 'sudo ./setup_mariadb.sh', sudo: true },
+    check: { cwd: 'database', file: './check-database.sh', args: ['--check', '--json'] },
+  },
+  {
+    id: 'pm2.apps',
+    service: 'pm2',
+    title: 'pm2 설치와 부팅 등록',
+    why:
+      'node 서비스들이 여기서 뜹니다. 선언은 services/*/pm2-conf/app.ini 에 있고 ' +
+      'ecosystem.config.js 가 그것을 모읍니다. pm2 를 kamailio 그룹 없이 재기동하면 ' +
+      '대시보드가 RPC FIFO 를 읽지 못합니다.',
+    requires: [],
+    command: {
+      cwd: 'pm2',
+      run: './install_pm2.sh install\npm2 start ecosystem.config.js\npm2 save',
+      sudo: true,
+    },
+    // pm2 선언은 셸 스크립트가 아니라 node 모듈이고, --json 은 이미 다른 뜻으로
+    // 쓰이고 있다 (docs/check-contract.md 의 예외).
+    check: {
+      cwd: 'pm2',
+      file: './ecosystem.config.js',
+      args: ['--check-json'],
+      interpreter: 'node',
+    },
+  },
   {
     id: 'kamailio.deps',
     service: 'kamailio',
@@ -42,9 +80,71 @@ const STEPS = [
     why:
       'SIP 코어가 없으면 Janus 는 할 일이 없습니다. 대시보드가 RPC FIFO 를 읽으려면 ' +
       '실행 계정이 kamailio 그룹에 있어야 하고, 계정 인증에는 DB 비밀번호 파일이 필요합니다.',
-    requires: [],
+    requires: ['database.schema'],
     command: { cwd: 'services/kamailio', run: 'sudo ./bootstrap.sh --install', sudo: true },
     check: { cwd: 'services/kamailio', file: './bootstrap.sh', args: ['--check', '--json'] },
+  },
+  {
+    id: 'kamailio.config',
+    service: 'kamailio',
+    title: 'Kamailio 설정 포크 설치',
+    why:
+      '배포본 설정은 digest 인증도, SIP 도메인도, 착신 푸시 훅도 갖고 있지 않습니다. ' +
+      '이 저장소의 포크를 설치해야 인터폰과 모바일이 같은 도메인에서 만납니다.',
+    requires: ['kamailio.deps'],
+    command: { cwd: 'services/kamailio', run: 'sudo ./install.sh --apply', sudo: true },
+    check: { cwd: 'services/kamailio', file: './install.sh', args: ['--check', '--json'] },
+  },
+  {
+    id: 'sip.accounts',
+    service: 'kamailio',
+    title: 'SIP 계정 만들기',
+    why:
+      '인터폰과 단말이 쓸 내선을 만듭니다. **비밀번호는 사람이 정합니다** — ' +
+      '기계가 대신 정할 수 없고, 만들었는지도 기계가 대신 판단하지 않습니다.',
+    requires: ['kamailio.config'],
+    manualOnly: true,
+    command: {
+      cwd: 'services/kamailio',
+      run: "sudo /usr/sbin/kamctl add 1001 '내선1001비밀번호'\nsudo /usr/sbin/kamctl show",
+      sudo: true,
+    },
+    guide: { text: 'kamailio 대시보드에서도 만들 수 있습니다', href: '/kamailio/' },
+    attest: { question: '쓸 내선 계정을 모두 만들었습니까? (인터폰·모바일 각각)' },
+  },
+  {
+    id: 'janus.deps',
+    service: 'janus',
+    title: 'Janus 빌드 의존성',
+    why:
+      '소스 빌드에 필요한 패키지를 깝니다. 여기서 libsofia-sip-ua-dev 나 ' +
+      'libmicrohttpd-dev 가 빠지면 빌드는 성공하는데 SIP 플러그인과 HTTP 트랜스포트가 ' +
+      '없는 Janus 가 나옵니다.',
+    requires: [],
+    command: { cwd: 'services/janus', run: 'sudo ./bootstrap.sh --install', sudo: true },
+    check: { cwd: 'services/janus', file: './bootstrap.sh', args: ['--check', '--json'] },
+  },
+  {
+    id: 'janus.build',
+    service: 'janus',
+    title: 'Janus 소스 빌드',
+    why:
+      '오래 걸리고 실패 지점이 많아 사람이 보면서 해야 합니다. configure 끝의 요약에서 ' +
+      '**SIP plugin 과 REST(HTTP) transport 가 yes** 인지 꼭 보세요 — 아니면 의존성이 ' +
+      '빠진 것이고, 그대로 진행하면 다음 단계에서 모듈이 없다고 나옵니다.',
+    requires: ['janus.deps'],
+    manualOnly: true,
+    command: {
+      cwd: '~/Public/RetroLink',
+      run:
+        'git clone https://github.com/meetecho/janus-gateway\n' +
+        'cd janus-gateway\n' +
+        'sh autogen.sh\n' +
+        './configure --prefix=/opt/janus --enable-post-processing --enable-data-channels\n' +
+        'make && sudo make install && sudo make configs',
+      sudo: true,
+    },
+    attest: { question: 'configure 요약에서 SIP plugin 과 REST transport 가 yes 였고, make install 이 끝났습니까?' },
   },
   {
     id: 'janus.config',
@@ -53,9 +153,20 @@ const STEPS = [
     why:
       'Janus 는 배포본 설정 그대로면 SIP 플러그인도 /janus-api 도 뜨지 않습니다. ' +
       'Kamailio 가 먼저 떠 있어야 SIP 쪽이 붙을 상대가 생깁니다.',
-    requires: ['kamailio.deps'],
+    requires: ['janus.build', 'kamailio.config'],
     command: { cwd: 'services/janus', run: 'sudo ./install.sh --apply', sudo: true },
     check: { cwd: 'services/janus', file: './install.sh', args: ['--check', '--json'] },
+  },
+  {
+    id: 'janus.dashboard',
+    service: 'janus',
+    title: 'Janus 대시보드 빌드',
+    why:
+      'janus.js 는 커밋하지 않고 설치된 Janus 것을 복사합니다 — 버전이 어긋나면 ' +
+      '조용히 실패하기 때문입니다. 그래서 Janus 를 세운 뒤에 빌드해야 합니다.',
+    requires: ['janus.config'],
+    command: { cwd: 'services/janus', run: './setup-dashboard.sh --build', sudo: false },
+    check: { cwd: 'services/janus', file: './setup-dashboard.sh', args: ['--json'] },
   },
   {
     id: 'nginx.routes',
@@ -64,9 +175,48 @@ const STEPS = [
     why:
       '라우트는 서비스가 뜬 뒤에 반영합니다. 뒤집으면 /janus-api 가 502 로 뜨고 ' +
       '대시보드에는 "중단" 으로 보입니다.',
-    requires: ['janus.config'],
+    requires: ['janus.config', 'pm2.apps'],
     command: { cwd: 'nginx', run: 'sudo ./install_nginx_stack.sh --skip-install', sudo: true },
     check: { cwd: 'nginx', file: './install_nginx_stack.sh', args: ['--check', '--json'] },
+  },
+  {
+    id: 'janus.verify.call',
+    service: 'janus',
+    title: '시험 통화',
+    why:
+      '"연결됨인데 소리가 안 난다" 가 이 게이트웨이에서 가장 자주 만나는 실패 모양입니다. ' +
+      'verify-call.sh 는 헤드리스 크롬으로 실제 통화를 걸어 **RTP 가 양방향으로 왔는지** ' +
+      '패킷 수로 판정합니다.',
+    requires: ['janus.config', 'sip.accounts'],
+    command: { cwd: 'services/janus', run: './verify-call.sh --run', sudo: false },
+    // 마법사는 준비 상태까지만 본다. 90초짜리 통화는 사람이 돌린다 (아래 attest).
+    check: { cwd: 'services/janus', file: './verify-call.sh', args: ['--check', '--json'] },
+    attest: { question: '--run 이 4단계(등록·발신·RTP·재통화)를 모두 통과했습니까?' },
+  },
+  {
+    id: 'janus.publicip',
+    service: 'janus',
+    title: '외부 브라우저에서 붙기 (선택)',
+    why:
+      '집 밖에서 붙으려면 광고하는 공인 IP 가 실제 값과 같아야 하고, 공유기에 미디어 ' +
+      '포트가 열려 있어야 합니다. 앞의 것은 기계가 보고, 포워딩은 사람이 확인합니다.',
+    requires: ['nginx.routes'],
+    optional: true,
+    command: { cwd: 'services/janus', run: './check-public-ip.sh', sudo: false },
+    check: { cwd: 'services/janus', file: './check-public-ip.sh', args: ['--json'] },
+    attest: { question: '공유기에 UDP 20000-20200 · 30000-30200 포워딩을 열었습니까?' },
+  },
+  {
+    id: 'push.incoming',
+    service: 'kamailio',
+    title: '인터폰 착신 푸시 (선택)',
+    why:
+      '자고 있는 모바일로 인터폰이 걸 때, INVITE 를 붙들어 두고(tsilo) FCM 으로 단말을 ' +
+      '깨워 그 연결로 흘려보냅니다. 네 자리 중 하나만 비어도 아무 일도 일어나지 않습니다.',
+    requires: ['sip.accounts', 'nginx.routes'],
+    optional: true,
+    command: { cwd: 'services/kamailio', run: 'sudo ./install.sh --apply', sudo: true },
+    check: { cwd: 'services/kamailio', file: './check-push.sh', args: ['--check', '--json'] },
   },
 ];
 
@@ -75,10 +225,12 @@ const byId = new Map(STEPS.map((s) => [s.id, s]));
 // 마지막 점검 결과. **메모리에만 둡니다** — 진행률을 저장하면 실물과 어긋나기
 // 시작합니다 (docs/setup-wizard.md '상태를 최소로 둡니다'). 재기동하면 비고,
 // 화면이 들어올 때 다시 점검합니다.
+//
+// 사람의 확인 기록만 파일에 남습니다 (setup-attest.js) — 그것은 매번 다시
+// 물어볼 수 없는 것이기 때문입니다.
 const lastResults = new Map();
 
-// 같은 단계를 두 번 겹쳐 돌리지 않는다. 화면 여럿이 동시에 열려 있어도
-// 자식 프로세스는 하나만 뜬다.
+// 같은 단계를 두 번 겹쳐 돌리지 않는다.
 const inFlight = new Map();
 
 function find(stepId) {
@@ -88,13 +240,26 @@ function find(stepId) {
 /** 실행할 파일과 작업 디렉터리를 저장소 안으로 한정해 만든다. */
 function resolveCheck(step) {
   const cwd = path.resolve(config.repoRoot, step.check.cwd);
-  const file = path.resolve(cwd, step.check.file);
+  const script = path.resolve(cwd, step.check.file);
 
   const root = config.repoRoot.endsWith(path.sep) ? config.repoRoot : `${config.repoRoot}${path.sep}`;
-  if (!file.startsWith(root) || !cwd.startsWith(root)) {
-    throw new Error(`check path escapes repo root: ${file}`);
+  if (!script.startsWith(root) || !cwd.startsWith(root)) {
+    throw new Error(`check path escapes repo root: ${script}`);
   }
-  return { cwd, file };
+
+  // node 로 도는 것은 인터프리터를 앞에 세운다. 지금 도는 node 를 그대로 쓴다
+  // (PATH 의 node 가 다른 판일 수 있다).
+  if (step.check.interpreter === 'node') {
+    return { cwd, file: process.execPath, args: [script, ...step.check.args] };
+  }
+  return { cwd, file: script, args: step.check.args };
+}
+
+/** 화면에 보여 줄 점검 명령. 실행은 위 정의로만 한다. */
+function checkCommandText(step) {
+  if (!step.check) return null;
+  const prefix = step.check.interpreter === 'node' ? 'node ' : '';
+  return `${prefix}${path.join(step.check.cwd, step.check.file)} ${step.check.args.join(' ')}`;
 }
 
 /**
@@ -136,14 +301,14 @@ function parseReport(stdout) {
 }
 
 function runScript(step) {
-  const { cwd, file } = resolveCheck(step);
+  const { cwd, file, args } = resolveCheck(step);
 
   return new Promise((resolve) => {
     const startedAt = Date.now();
 
     execFile(
       file,
-      step.check.args,
+      args,
       {
         cwd,
         timeout: step.check.timeoutMs || DEFAULT_TIMEOUT_MS,
@@ -178,6 +343,7 @@ function runScript(step) {
 async function check(stepId) {
   const step = find(stepId);
   if (!step) throw new Error(`unknown step: ${stepId}`);
+  if (!step.check) throw new Error(`step has no check: ${stepId}`);
 
   if (inFlight.has(stepId)) return inFlight.get(stepId);
 
@@ -264,16 +430,46 @@ function record(stepId, result) {
 }
 
 /**
- * 단계 정의 + 마지막 점검 결과. 결과가 없으면 result 는 null 이고, 화면은
- * "아직 점검하지 않음" 으로 그린다.
+ * 한 단계의 상태. 점검 결과와 사람의 확인을 합친다.
  *
- * 잠금(blockedBy)은 **점검 결과에서만** 나온다. 앞 단계가 complete 가 아니면
- * 다음 단계는 열리지 않는다 — 사람이 누른 것은 판정에 들어가지 않는다.
+ *   complete    기계가 다 됐다고 본 것
+ *   attested    **사람이 확인한 것.** 기계로는 확인되지 않았다 — 통과로 위장하지
+ *               않되, 다음 단계는 열어 준다 (아니면 마법사가 여기서 멈춘다)
+ *   incomplete  아직 남은 것이 있다 (사람의 확인이 아직 없는 경우 포함)
+ *   problem     어긋난 것이 있다
+ *   unknown     점검을 마치지 못했다
+ *   null        아직 점검하지 않았다
+ *
+ * 사람의 확인이 점검을 이기지 못한다는 것이 중요하다 — 점검이 problem 이면
+ * 확인 기록이 있어도 problem 이다.
+ */
+function stepState(step, result, attestation) {
+  if (step.manualOnly) return attestation ? 'attested' : null;
+  if (!result) return null;
+  if (result.state !== 'complete') return result.state;
+  if (step.attest) return attestation ? 'attested' : 'incomplete';
+  return 'complete';
+}
+
+function isPassed(state) {
+  return state === 'complete' || state === 'attested';
+}
+
+/**
+ * 단계 정의 + 마지막 점검 결과 + 사람의 확인 기록.
+ *
+ * 잠금(blockedBy)은 **여기 한 곳에서만** 계산한다. 화면이 따로 계산하면 규칙이
+ * 두 곳이 된다.
  */
 function overview() {
+  const attestations = attest.readAll();
+  const states = new Map();
+
   const steps = STEPS.map((step) => {
     const result = lastResults.get(step.id) || null;
-    const blockedBy = step.requires.filter((id) => lastResults.get(id)?.state !== 'complete');
+    const attestation = attestations[step.id] || null;
+    const state = stepState(step, result, attestation);
+    states.set(step.id, state);
 
     return {
       id: step.id,
@@ -281,22 +477,36 @@ function overview() {
       title: step.title,
       why: step.why,
       requires: step.requires,
+      optional: Boolean(step.optional),
       manualOnly: Boolean(step.manualOnly),
-      command: step.command,
-      // 무엇을 돌리는지 화면에서도 보이게 한다. 실행은 위 정의로만 한다.
-      checkCommand: `${step.check.file} ${step.check.args.join(' ')}`,
-      checkCwd: step.check.cwd,
-      blockedBy,
+      command: step.command || null,
+      guide: step.guide || null,
+      attest: step.attest || null,
+      attestation,
+      checkCommand: checkCommandText(step),
+      checkCwd: step.check ? step.check.cwd : null,
+      state,
       result,
     };
   });
 
+  for (const step of steps) {
+    step.blockedBy = step.requires.filter((id) => !isPassed(states.get(id)));
+  }
+
+  const passed = steps.filter((s) => isPassed(s.state));
+
   return {
     steps,
     total: steps.length,
-    complete: steps.filter((s) => s.result?.state === 'complete').length,
+    complete: passed.length,
+    required: {
+      total: steps.filter((s) => !s.optional).length,
+      complete: passed.filter((s) => !s.optional).length,
+    },
+    attestFile: attest.file,
     updatedAt: new Date().toISOString(),
   };
 }
 
-module.exports = { STEPS, find, check, overview, deriveState, parseReport };
+module.exports = { STEPS, find, check, overview, deriveState, parseReport, stepState, isPassed };

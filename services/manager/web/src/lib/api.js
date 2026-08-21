@@ -46,6 +46,14 @@ export const api = {
   setup: {
     overview: () => request('/setup'),
     check: (stepId) => request(`/setup/check/${encodeURIComponent(stepId)}`, { method: 'POST' }),
+    // 사람만 확인할 수 있는 것의 기록. 통과로 바꾸는 것이 아니라 적어 두는 것이다.
+    attest: (stepId, note) =>
+      request(`/setup/attest/${encodeURIComponent(stepId)}`, {
+        method: 'POST',
+        body: JSON.stringify({ note: note || '' }),
+      }),
+    unattest: (stepId) =>
+      request(`/setup/attest/${encodeURIComponent(stepId)}`, { method: 'DELETE' }),
   },
 
   // 관리자 콘솔 — 일반 로그인과 별개의 세션을 쓴다.

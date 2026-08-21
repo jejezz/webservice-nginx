@@ -3,10 +3,10 @@
 서비스를 **어떤 순서로 무엇을 채워야 하는지** 화면이 안내하고, 사람이 한 일을
 **실제로 됐는지 확인한 뒤** 다음으로 넘기는 웹 화면의 설계입니다.
 
-> 상태: **1·2단계 구현됨.** 점검 규약(`--json`)이 진입점 10곳에 붙었고
-> ([check-contract.md](check-contract.md)), manager 에 `/manager/setup` 화면과
-> 점검 실행기가 들어갔습니다. 지금 도는 단계는 셋입니다 — kamailio · janus ·
-> nginx. 13단계 전부와 `manualOnly` 는 3단계입니다.
+> 상태: **1·2·3단계 구현됨.** 점검 규약(`--json`)이 진입점 12곳에 붙었고
+> ([check-contract.md](check-contract.md)), manager 의 `/manager/setup` 이
+> **13단계 전부**를 돌립니다. 기계가 확인할 수 없는 것은 사람의 확인을 기록하되
+> `attested` 로 따로 표시합니다. 남은 것은 4단계(파라미터 입력 폼)입니다.
 >
 > 초안을 쓰면서 전제 하나가 실측으로 뒤집혔습니다 — 점검 스크립트의 종료
 > 코드를 판정에 쓸 수 없습니다. 그 결과 만드는 순서가 바뀌었습니다
@@ -217,21 +217,25 @@ database ─┬─────────────────────�
   nginx ──────────────────▶ (모든 라우트)   ※ 서비스가 뜬 뒤에 반영
 ```
 
-| # | 단계 | sudo | 자동 점검 |
-|---|---|---|---|
-| 1 | MariaDB 설치·스키마 | ✅ | `database/setup_mariadb.sh` |
-| 2 | pm2 설치·부팅 등록 | ✅ | `node pm2/ecosystem.config.js --check` |
-| 3 | Kamailio 패키지·그룹·DB | ✅ | `services/kamailio/bootstrap.sh` |
-| 4 | Kamailio 설정 포크 설치 | ✅ | `services/kamailio/install.sh` |
-| 5 | SIP 계정 만들기 | ❌ 사람 | `manualOnly` — 대시보드로 유도 |
-| 6 | Janus 빌드 의존성 | ✅ | `services/janus/bootstrap.sh` |
-| 7 | **Janus 소스 빌드** | ✅ 사람 | `manualOnly` — 오래 걸리고 실패 지점이 많음 |
-| 8 | Janus 설정·유닛 | ✅ | `services/janus/install.sh` |
-| 9 | 대시보드 빌드 | ❌ | `services/janus/setup-dashboard.sh` |
-| 10 | nginx 라우트 반영 | ✅ | `nginx/install_nginx_stack.sh --check` |
-| 11 | 시험 통화 | ❌ | `services/janus/verify-call.sh --run` |
-| 12 | 외부 브라우저 (선택) | ✅+사람 | `check-public-ip.sh` + 포워딩은 `manualOnly` |
-| 13 | 착신 푸시 (선택) | ✅ | `sip_user` 매핑 + `wt_timer` 확인 |
+| # | 단계 | id | sudo | 점검 |
+|---|---|---|---|---|
+| 1 | MariaDB 설치·스키마 | `database.schema` | ✅ | `database/check-database.sh` ⭐ |
+| 2 | pm2 설치·부팅 등록 | `pm2.apps` | ✅ | `pm2/ecosystem.config.js --check-json` |
+| 3 | Kamailio 패키지·그룹·DB | `kamailio.deps` | ✅ | `services/kamailio/bootstrap.sh` |
+| 4 | Kamailio 설정 포크 설치 | `kamailio.config` | ✅ | `services/kamailio/install.sh` |
+| 5 | SIP 계정 만들기 | `sip.accounts` | ❌ 사람 | **사람의 확인만** — 대시보드로 유도 |
+| 6 | Janus 빌드 의존성 | `janus.deps` | ✅ | `services/janus/bootstrap.sh` |
+| 7 | **Janus 소스 빌드** | `janus.build` | ✅ 사람 | **사람의 확인만** — 오래 걸리고 실패 지점이 많음 |
+| 8 | Janus 설정·유닛 | `janus.config` | ✅ | `services/janus/install.sh` |
+| 9 | 대시보드 빌드 | `janus.dashboard` | ❌ | `services/janus/setup-dashboard.sh` |
+| 10 | nginx 라우트 반영 | `nginx.routes` | ✅ | `nginx/install_nginx_stack.sh` |
+| 11 | 시험 통화 | `janus.verify.call` | ❌ | `verify-call.sh --check` + **통화 결과는 사람의 확인** |
+| 12 | 외부 브라우저 (선택) | `janus.publicip` | ❌ | `check-public-ip.sh` + **포워딩은 사람의 확인** |
+| 13 | 착신 푸시 (선택) | `push.incoming` | ✅ | `services/kamailio/check-push.sh` ⭐ |
+
+⭐ 는 3단계에서 새로 쓴 점검입니다. 1·13 은 붙일 곳이 없었습니다 —
+`setup_mariadb.sh` 는 root 로 도는 적용 스크립트고, 착신 푸시는 네 조각이
+서로 다른 서비스에 흩어져 있어 주인이 없었습니다.
 
 ## 화면
 
@@ -272,8 +276,9 @@ database ─┬─────────────────────�
 |---|---|---|
 | `GET /manager/api/setup` | 단계 정의 + 각 단계의 마지막 점검 결과 | ✅ |
 | `POST /manager/api/setup/check/:stepId` | 그 단계의 점검 스크립트를 돌리고 `{state, checks[], exitCode, …}` 반환 | ✅ |
-| `POST /manager/api/setup/attest/:stepId` | `manualOnly` 단계의 사람 확인 기록 | 3단계 |
-| 상태 저장 | `manualOnly` 확인 기록만 보관하면 됩니다. 나머지는 매번 점검해서 얻습니다 | 3단계 |
+| `POST /manager/api/setup/attest/:stepId` | 사람의 확인 기록 | ✅ |
+| `DELETE /manager/api/setup/attest/:stepId` | 그 기록을 지움 (되돌렸을 때) | ✅ |
+| 상태 저장 | 확인 기록만 파일 하나에. 나머지는 매번 점검해서 얻습니다 | ✅ |
 
 구현은 [`services/manager/server/src/services/setup.js`](../services/manager/server/src/services/setup.js)
 (단계 표 + 점검 실행기)와 [`web/src/pages/Setup.jsx`](../services/manager/web/src/pages/Setup.jsx)
@@ -364,6 +369,89 @@ manager 가 셸 스크립트를 실행하게 됩니다. 지금까지 이 대시�
 마지막 점검 결과는 manager 프로세스 안에만 있습니다. 재기동하면 비고, 화면이
 들어오면서 다시 점검합니다. 느리지만 실물과 어긋나지 않습니다.
 
+## 3단계에서 정한 것 — 13단계를 다 붙이면서
+
+### 확인 기록은 파일에 둡니다 — DB 가 1단계이기 때문입니다
+
+열린 질문 2의 답입니다. manager 는 MariaDB 를 씁니다. 그런데 **MariaDB 를
+세우는 것이 이 마법사의 1단계입니다.** 확인 기록을 DB 에 두면 DB 가 아직 없는
+동안에는 아무것도 기록할 수 없습니다 — 마법사가 자기 자신을 기다리는 모양이
+됩니다.
+
+`services/manager/setup-attest.json` 하나에 둡니다. 이 장비 한 대의 구축
+이력이고 크기도 열댓 줄입니다. 커밋하지 않습니다.
+
+### 90초짜리 시험 통화는 마법사가 돌리지 않습니다
+
+열린 질문 1의 답입니다. `verify-call.sh` 는 이미 두 모드를 갖고 있습니다 —
+`--check` 는 준비 상태만 보고 끝나고, `--run` 이 실제로 겁니다. 마법사는
+`--check --json` 만 돌립니다. 통화 자체는 사람이 터미널에서 돌리고, 그 결과를
+확인으로 기록합니다.
+
+sudo 명령을 다루는 방식과 같습니다 — **오래 걸리고 되돌리기 어려운 일은 사람의
+손에 둡니다.** 작업 큐와 폴링은 만들지 않았습니다. 그것이 필요한 점검이 이
+하나뿐이라, 하나 때문에 구조를 늘리지 않습니다.
+
+### 상태가 하나 더 늘었습니다 — `attested`
+
+"확인되지 않음" 으로만 표시하고 문을 열지 않으면 마법사는 5단계(SIP 계정)에서
+영원히 멈춥니다. 그렇다고 `complete` 로 두면 거짓말입니다.
+
+그래서 `attested` 를 둡니다. 다음 단계는 열어 주되 초록색 "통과" 가 아니라
+**"사람이 확인함"** 으로 그리고, 누가 언제 눌렀는지를 함께 보여 줍니다.
+
+**사람의 확인이 점검을 이기지 못합니다.** 점검이 `problem` 이면 확인 기록이
+있어도 `problem` 입니다. 확인은 기계가 볼 수 없는 자리를 메우는 것이지, 기계가
+본 것을 덮는 것이 아닙니다.
+
+| 단계 | 점검 | 확인 | 결과 |
+|---|---|---|---|
+| 5 · 7 (사람만) | 없음 | 있음 | `attested` |
+| 11 · 12 (둘 다) | `complete` | 없음 | `incomplete` — "남은 것은 사람의 확인입니다" |
+| 11 · 12 (둘 다) | `complete` | 있음 | `attested` |
+| 11 · 12 (둘 다) | `problem` | 있음 | `problem` — **확인이 덮지 못합니다** |
+
+### 점검이 없던 두 자리를 새로 썼습니다
+
+1단계에서 진입점 10곳에 `--json` 을 붙였지만, 13단계 표의 두 자리는 붙일 곳이
+아예 없었습니다.
+
+- **1단계(MariaDB).** `setup_mariadb.sh` 는 root 로 도는 적용 스크립트입니다
+  (`--dry-run` 도 "무엇이 바뀔지" 를 보여 줄 뿐입니다). 확인만 하는 입구를
+  `database/check-database.sh` 로 따로 뒀습니다. **공용 계정(jyahn)으로**
+  확인합니다 — root 소켓 인증을 쓰면 sudo 없이 도는 마법사에서 늘 "확인 불가"
+  가 되기 때문입니다.
+- **13단계(착신 푸시).** 네 조각(tsilo 훅 · `wt_timer` · rtc-relay-server ·
+  `sip_user` 매핑)이 서로 다른 서비스에 흩어져 있어 주인이 없었습니다.
+  `services/kamailio/check-push.sh` 가 그 넷을 한 줄씩 봅니다.
+
+**그리고 이것을 붙이자마자 하나가 걸렸습니다.** 설치본
+`/etc/kamailio/kamailio.cfg` 에 `wt_timer` 가 없었습니다 — 저장소에는 있는데
+설치가 그보다 이틀 앞선 것이었습니다. 붙들어 둔 INVITE 가 기본값 5초에
+사라지는 상태였고, FCM 왕복이 2~8초이므로 **실제로는 못 받습니다.** 화면
+어디에도 오류로 보이지 않는 종류의 어긋남입니다.
+
+    [--]  wt_timer 가 설치본에 없습니다 — 붙들어 둔 INVITE 가 기본값 5초에
+          사라져 FCM 왕복(2~8초)을 못 기다립니다 → sudo services/kamailio/install.sh --apply
+
+마법사가 처음으로 잡아낸 실물 문제입니다. 만든 이유가 이것입니다.
+
+### 13단계를 다 돌리는 데 1.3초
+
+| | |
+|---|---|
+| 점검 11개 (사람 확인 2개 제외) | 합계 **1.3초** |
+| 가장 느린 것 | `janus.dashboard` 0.36초 · `janus.deps` 0.34초 |
+| 가장 빠른 것 | `nginx.routes` 0.03초 |
+
+화면에 들어올 때마다 전부 돌려도 됩니다. 진행률을 저장하지 않는 값이 이만큼
+싸다는 뜻입니다.
+
+### 단계 하나를 주소로 가리킬 수 있습니다
+
+`/manager/setup?step=janus.config` — "이 단계를 보세요" 를 링크 하나로 건네기
+위해서입니다.
+
 ## 만들지 않는 것
 
 - **sudo 대행.** 명령을 보여 줄 뿐입니다.
@@ -377,7 +465,7 @@ manager 가 셸 스크립트를 실행하게 됩니다. 지금까지 이 대시�
 |---|---|---|
 | 1 | **점검 스크립트에 `--json` 추가** + `check-contract.md` — 판정 근거를 먼저 만든다 | ✅ 진입점 10곳 |
 | 2 | manager 가 점검을 실행하고 결과를 보여 줌. 단계 3개(kamailio·janus·nginx)로 뼈대 확인 | ✅ |
-| 3 | 13단계 전부 + `manualOnly` 확인 기록 | |
+| 3 | 13단계 전부 + `manualOnly` 확인 기록 | ✅ |
 | 4 | 파라미터 입력 폼 (janus `settings.ini` 방식을 다른 서비스로) | |
 
 **1단계를 앞으로 당긴 것이 이번 설계의 가장 큰 변경입니다.** 판정 근거 없이 화면을
@@ -389,10 +477,13 @@ manager 가 셸 스크립트를 실행하게 됩니다. 지금까지 이 대시�
 
 ## 열린 질문
 
-1. **점검이 오래 걸리는 것들** — `verify-call.sh --run` 은 헤드리스 크롬을 띄워
-   90초쯤 걸립니다. 마법사가 그걸 동기로 기다릴지, 작업으로 띄우고 폴링할지.
-2. **`manualOnly` 확인 기록을 어디에 둘지** — 파일 하나면 충분해 보이지만
-   manager 는 DB 도 씁니다.
+1. ~~**점검이 오래 걸리는 것들**~~ — 답했습니다. 마법사는 `--check` 만 돌리고
+   `--run` 은 사람이 돌립니다 (위 '90초짜리 시험 통화').
+2. ~~**`manualOnly` 확인 기록을 어디에 둘지**~~ — 답했습니다. 파일입니다.
+   DB 를 세우는 것이 1단계이기 때문입니다 (위 '확인 기록은 파일에').
 3. **다른 서비스의 설정도 `settings.ini` 방식으로 옮길지** — 지금은 janus 만
    그렇습니다. 마법사가 파라미터를 받으려면 kamailio·rtc-relay 도 같은 모양이
-   되는 편이 좋습니다.
+   되는 편이 좋습니다. **4단계의 첫 질문입니다.**
+4. **설치본이 저장소보다 낡은 것을 어떻게 알아챌지** — `wt_timer` 가 그렇게
+   걸렸습니다. 지금은 점검마다 자기 방식으로 보고 있어, 설정 파일 단위로
+   "저장소와 같은가" 를 보는 공통 방법이 있으면 더 일찍 잡힙니다.

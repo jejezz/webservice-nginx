@@ -42,6 +42,19 @@ root 계정은 `unix_socket` 인증을 쓰므로 비밀번호 없이 `sudo maria
 > 저장소 추가는 외부 스크립트를 받아 실행하는 과정이라 이 스크립트에 넣지 않았습니다.
 > 자세한 절차는 <https://mariadb.org/download/> 의 "Repositories"를 참고하세요.
 
+## 점검 — 무엇이 반영됐는지만 본다
+
+`setup_mariadb.sh` 는 root 로 도는 적용 스크립트입니다. 확인만 하려면 이쪽을
+쓰세요 — **sudo 가 필요 없습니다.**
+
+```bash
+./check-database.sh          # 서비스·서버 설정·계정 로그인·스키마
+./check-database.sh --json   # 기계가 읽는 판정 (docs/check-contract.md)
+```
+
+접속은 공용 계정(jyahn)으로 합니다. root 소켓 인증을 쓰면 sudo 가 필요해져
+구축 마법사(`/manager/setup`)에서 늘 "확인 불가" 가 되기 때문입니다.
+
 ## 업데이트
 
 ```bash

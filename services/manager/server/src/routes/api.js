@@ -8,6 +8,7 @@ const health = require('../services/health');
 const pm2 = require('../services/pm2');
 const nginx = require('../services/nginx');
 const setup = require('../services/setup');
+const attest = require('../services/setup-attest');
 const { router: adminRouter } = require('./admin');
 
 const userStore = createUserStore(config.auth);
@@ -178,8 +179,8 @@ router.post('/setup/check/:stepId', requireAuth, async (req, res, next) => {
   const step = setup.find(req.params.stepId);
   if (!step) return res.status(404).json({ error: 'unknown_step' });
 
-  // manualOnly 단계는 돌릴 점검이 없다 (3단계에서 attest 로 받는다).
-  if (step.manualOnly) {
+  // manualOnly 단계는 돌릴 점검이 없다. 사람의 확인만 받는다 (아래 attest).
+  if (!step.check) {
     return res.status(400).json({ error: 'manual_only', message: '사람이 확인하는 단계입니다.' });
   }
 
@@ -188,6 +189,28 @@ router.post('/setup/check/:stepId', requireAuth, async (req, res, next) => {
   } catch (err) {
     next(err);
   }
+});
+
+// 사람의 확인을 기록한다. **통과로 바꾸는 것이 아니라 기록하는 것이다** —
+// 점검이 problem 이면 확인 기록이 있어도 problem 으로 남는다 (services/setup.js).
+router.post('/setup/attest/:stepId', requireAuth, (req, res) => {
+  const step = setup.find(req.params.stepId);
+  if (!step) return res.status(404).json({ error: 'unknown_step' });
+  if (!step.attest) {
+    return res.status(400).json({ error: 'not_attestable', message: '사람의 확인을 받는 단계가 아닙니다.' });
+  }
+
+  const record = attest.record(step.id, { by: req.user.username, note: req.body?.note });
+  res.json({ stepId: step.id, attestation: record });
+});
+
+// 확인 기록을 지운다. 되돌렸거나 잘못 눌렀을 때 쓴다.
+router.delete('/setup/attest/:stepId', requireAuth, (req, res) => {
+  const step = setup.find(req.params.stepId);
+  if (!step) return res.status(404).json({ error: 'unknown_step' });
+
+  const removed = attest.remove(step.id);
+  res.json({ stepId: step.id, removed });
 });
 
 router.get('/services/:name/health', requireAuth, async (req, res, next) => {

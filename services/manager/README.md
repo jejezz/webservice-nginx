@@ -59,7 +59,8 @@ services/manager/
 │   │   │   ├── health.js     # /health 체크 (HTTPS 자체 서명 인증서 지원)
 │   │   │   ├── pm2.js        # pm2 jlist
 │   │   │   ├── nginx.js      # systemctl 상태
-│   │   │   └── setup.js      # 구축 마법사 단계 표 + 점검 스크립트 실행기
+│   │   │   ├── setup.js      # 구축 마법사 단계 표 + 점검 스크립트 실행기
+│   │   │   └── setup-attest.js # 사람의 확인 기록 (setup-attest.json)
 │   │   └── routes/
 │   │       ├── api.js        # REST API
 │   │       └── admin.js      # 관리자 콘솔 API (administrator CRUD)
@@ -293,6 +294,8 @@ pm2 restart manager
 | `GET` | `/manager/api/services/:name/health` | 필요 | 개별 서비스 재확인 |
 | `GET` | `/manager/api/setup` | 필요 | 구축 단계 정의 + 각 단계의 마지막 점검 결과 |
 | `POST` | `/manager/api/setup/check/:stepId` | 필요 | 그 단계의 점검 스크립트를 돌리고 판정을 반환 |
+| `POST` | `/manager/api/setup/attest/:stepId` | 필요 | 사람의 확인을 기록 (기계가 확인할 수 없는 단계) |
+| `DELETE` | `/manager/api/setup/attest/:stepId` | 필요 | 그 확인 기록을 지움 |
 | `POST` | `/manager/api/admin/login` | — | 관리자 콘솔 로그인 (IP당 5회 실패 시 10분 차단) |
 | `POST` | `/manager/api/admin/logout` | — | 관리자 콘솔 로그아웃 |
 | `GET` | `/manager/api/admin/me` | 콘솔 | 콘솔 세션 확인 |
@@ -354,24 +357,52 @@ env: {
 [docs/setup-wizard.md](../../docs/setup-wizard.md), 점검 출력의 형식은
 [docs/check-contract.md](../../docs/check-contract.md) 에 있습니다.
 
-대시보드 헤더의 **구축** 버튼으로 들어갑니다. 지금 도는 단계는 셋입니다.
+대시보드 헤더의 **구축** 버튼으로 들어갑니다. 단계 하나를 주소로 가리킬 수도
+있습니다 — `/manager/setup?step=janus.config`.
 
-| 단계 | 점검 |
-|---|---|
-| `kamailio.deps` | `services/kamailio/bootstrap.sh --check --json` |
-| `janus.config` | `services/janus/install.sh --check --json` |
-| `nginx.routes` | `nginx/install_nginx_stack.sh --check --json` |
+| # | 단계 | 점검 |
+|---|---|---|
+| 1 | `database.schema` | `database/check-database.sh` |
+| 2 | `pm2.apps` | `pm2/ecosystem.config.js --check-json` |
+| 3 | `kamailio.deps` | `services/kamailio/bootstrap.sh` |
+| 4 | `kamailio.config` | `services/kamailio/install.sh` |
+| 5 | `sip.accounts` | 사람의 확인만 |
+| 6 | `janus.deps` | `services/janus/bootstrap.sh` |
+| 7 | `janus.build` | 사람의 확인만 |
+| 8 | `janus.config` | `services/janus/install.sh` |
+| 9 | `janus.dashboard` | `services/janus/setup-dashboard.sh` |
+| 10 | `nginx.routes` | `nginx/install_nginx_stack.sh` |
+| 11 | `janus.verify.call` | `verify-call.sh --check` + 통화 결과는 사람의 확인 |
+| 12 | `janus.publicip` (선택) | `check-public-ip.sh` + 포워딩은 사람의 확인 |
+| 13 | `push.incoming` (선택) | `services/kamailio/check-push.sh` |
 
 - **진행은 점검 결과로만 정해집니다.** 사람이 누른 "했습니다" 는 점검을 부르는
-  방아쇠일 뿐입니다. 앞 단계가 `complete` 가 아니면 다음 단계는 잠깁니다.
-- **마법사는 sudo 를 부르지 않습니다.** 바꾸는 명령(`--apply` · `--install`)은
-  화면이 보여 주기만 하고 사람이 터미널에서 돌립니다.
-- **진행률을 저장하지 않습니다.** 마지막 결과는 프로세스 메모리에만 있고,
-  화면에 들어올 때마다 다시 점검합니다. 터미널에서 되돌린 것이 "완료" 로 남지
-  않게 하기 위해서입니다.
+  방아쇠일 뿐입니다. 앞 단계가 통과하지 않으면 다음 단계는 잠깁니다.
+- **마법사는 sudo 를 부르지 않습니다.** 바꾸는 명령(`--apply` · `--install`)과
+  90초짜리 시험 통화(`verify-call.sh --run`)는 화면이 보여 주기만 하고 사람이
+  터미널에서 돌립니다.
+- **진행률을 저장하지 않습니다.** 마지막 점검 결과는 프로세스 메모리에만 있고,
+  화면에 들어올 때마다 전부 다시 점검합니다 (11개에 1.3초). 터미널에서 되돌린
+  것이 "완료" 로 남지 않게 하기 위해서입니다.
 
 단계를 늘릴 때는 `server/src/services/setup.js` 의 `STEPS` 에 한 줄을 더합니다.
 화면 코드는 손대지 않습니다.
+
+### 사람의 확인 (`attested`)
+
+기계가 확인할 수 없는 것들이 있습니다 — 공유기에 포워딩을 열었는가, SIP 계정을
+만들었는가, 시험 통화에서 소리가 났는가.
+
+이런 단계는 사람의 확인을 **누가 언제** 눌렀는지와 함께 기록하고, 통과와 다른
+색으로 그립니다. 다음 단계는 열어 주되 "통과" 로 위장하지 않습니다 — 나중에
+무언가 안 될 때 여기부터 의심할 수 있어야 하기 때문입니다.
+
+**사람의 확인이 점검을 이기지 못합니다.** 점검이 `problem` 이면 확인 기록이
+있어도 `problem` 입니다.
+
+기록은 `services/manager/setup-attest.json` 에 남습니다 (커밋하지 않습니다).
+DB 가 아니라 파일인 이유는 **MariaDB 를 세우는 것이 이 마법사의 1단계**이기
+때문입니다 — DB 에 두면 DB 가 없는 동안 아무것도 기록할 수 없습니다.
 
 ### 자식 프로세스 경계
 
