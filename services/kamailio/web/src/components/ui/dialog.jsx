@@ -11,28 +11,49 @@ import { cn } from '@/lib/utils';
 function Dialog({ open, onOpenChange, children, className, labelledBy }) {
   const contentRef = React.useRef(null);
 
+  /*
+   * 콜백을 ref 로 한 겹 감싼다.
+   *
+   * 이걸 의존성 배열에 직접 넣으면, 부모가 인라인 함수를 넘기는 순간
+   * (Accounts.jsx 의 onOpenChange={reset} 처럼) **글자를 한 자 칠 때마다**
+   * 함수 정체가 바뀌어 아래 효과가 다시 돈다. 그러면 초점이 매번 처음으로
+   * 되돌아가 입력을 이어 갈 수 없다. 실제로 그렇게 깨져 있었다.
+   */
+  const onOpenChangeRef = React.useRef(onOpenChange);
+  React.useEffect(() => {
+    onOpenChangeRef.current = onOpenChange;
+  });
+
   React.useEffect(() => {
     if (!open) return undefined;
 
     function onKeyDown(e) {
-      if (e.key === 'Escape') onOpenChange(false);
+      if (e.key === 'Escape') onOpenChangeRef.current(false);
     }
 
     document.addEventListener('keydown', onKeyDown);
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
 
-    // 열리면 안쪽 첫 입력으로 초점을 옮긴다.
-    const focusable = contentRef.current?.querySelector(
-      'input:not([type=hidden]), select, textarea, button'
-    );
-    focusable?.focus();
+    /*
+     * 열릴 때 한 번만, 안쪽 첫 **입력칸**으로 초점을 옮긴다.
+     *
+     * 예전에는 'input, select, textarea, button' 을 한 번에 찾았는데, 닫기(X)
+     * 버튼이 DOM 에서 폼보다 앞에 있어서 늘 그쪽이 잡혔다. 입력칸을 먼저 찾고
+     * 없을 때만 버튼으로 내려간다 (확인만 있는 대화상자를 위해).
+     */
+    const content = contentRef.current;
+    const initial =
+      content?.querySelector(
+        'input:not([type=hidden]):not([disabled]), select:not([disabled]), textarea:not([disabled])'
+      ) || content?.querySelector('button:not([disabled])');
+    initial?.focus();
 
     return () => {
       document.removeEventListener('keydown', onKeyDown);
       document.body.style.overflow = previousOverflow;
     };
-  }, [open, onOpenChange]);
+  }, [open]);
 
   if (!open) return null;
 

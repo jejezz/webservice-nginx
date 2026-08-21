@@ -19,6 +19,21 @@ sudo /usr/sbin/kamctl ul show                        # 현재 등록(온라인)�
 
 도메인은 `kamctlrc` 의 `SIP_DOMAIN` 이 붙습니다.
 
+## 비밀번호 길이 — Kamailio 는 제한하지 않는다
+
+**Kamailio 쪽에는 최소 길이 규칙이 없습니다.** `subscriber.password` 는
+`varchar(64) NOT NULL` 이고, digest 인증은 그 문자열로 MD5 를 계산할 뿐입니다.
+한 글자짜리 비밀번호도 인증 자체는 성립합니다.
+
+| 어디서 오는 제한 | 값 | 성격 |
+|---|---|---|
+| 대시보드 최소 길이 | **4자** | 우리가 정한 정책. `server/src/subscribers.js` 에서 바꿀 수 있다 |
+| 대시보드 최대 길이 | **64자** | 정책이 아니라 컬럼 크기. 넘기면 `STRICT_TRANS_TABLES` 라 INSERT 가 실패한다 |
+| `kamctl add` | 없음 | 무엇이든 넣는다 |
+
+숫자를 바꾸려면 `MIN_PASSWORD_LENGTH` 한 곳만 고치면 됩니다 — API 가 그 값을
+화면에 내려 주므로 프런트에 같은 숫자가 박혀 있지 않습니다.
+
 ## ⚠️ 어느 컬럼이 실제로 인증에 쓰이는가
 
 이 서버의 `kamailio.cfg` 는 아래와 같습니다.

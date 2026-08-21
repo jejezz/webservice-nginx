@@ -41,7 +41,18 @@ function ha1b(username, domain, password) {
 // SIP 사용자명에 쓸 수 있는 문자. RFC 3261 의 user 부분보다 좁게 잡아 두었다.
 // 넓히더라도 '@' 와 ':' 는 허용하면 안 된다 — URI 와 해시 계산이 모두 깨진다.
 const USERNAME_RE = /^[A-Za-z0-9._-]{1,64}$/;
-const MIN_PASSWORD_LENGTH = 6;
+/*
+ * 비밀번호 길이 — **Kamailio 의 정책이 아니라 이 대시보드의 정책이다.**
+ *
+ * Kamailio 쪽에는 최소 길이 규칙이 없다. subscriber.password 는 varchar(64) 이고
+ * digest 인증(RFC 7616)은 그 문자열로 MD5 를 계산할 뿐이라, 한 글자여도 인증
+ * 자체는 성립한다. 그러니 여기 숫자는 우리가 정하기 나름이다.
+ *
+ * 최대값만은 정책이 아니라 스키마에서 온다 — 64자를 넘기면 STRICT_TRANS_TABLES
+ * 라 INSERT 가 그대로 실패한다. 날것의 500 대신 사람이 읽을 수 있게 잡아 준다.
+ */
+const MIN_PASSWORD_LENGTH = 4;
+const MAX_PASSWORD_LENGTH = 64;
 
 function validateUsername(username) {
   const value = String(username || '').trim();
@@ -55,6 +66,9 @@ function validatePassword(password) {
   const value = String(password || '');
   if (value.length < MIN_PASSWORD_LENGTH) {
     return { error: `비밀번호는 ${MIN_PASSWORD_LENGTH}자 이상이어야 합니다.` };
+  }
+  if (value.length > MAX_PASSWORD_LENGTH) {
+    return { error: `비밀번호는 ${MAX_PASSWORD_LENGTH}자 이내여야 합니다.` };
   }
   return { value };
 }
@@ -180,6 +194,7 @@ module.exports = {
   validateUsername,
   validatePassword,
   MIN_PASSWORD_LENGTH,
+  MAX_PASSWORD_LENGTH,
   // 테스트용
   ha1,
   ha1b,

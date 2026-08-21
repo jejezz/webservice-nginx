@@ -16,7 +16,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 
 /** 계정 추가 · 비밀번호 변경에 함께 쓰는 폼. */
-function AccountDialog({ open, onOpenChange, mode, account, domains, minLength, onSubmit }) {
+function AccountDialog({ open, onOpenChange, mode, account, domains, minLength, maxLength, onSubmit }) {
   const creating = mode === 'create';
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -102,7 +102,10 @@ function AccountDialog({ open, onOpenChange, mode, account, domains, minLength, 
               id="password" type="password" value={password} autoFocus={!creating}
               onChange={(e) => setPassword(e.target.value)}
             />
-            <p className="text-xs text-muted-foreground">{minLength}자 이상</p>
+            <p className="text-xs text-muted-foreground">
+              {minLength}~{maxLength}자. 길이 제한은 Kamailio 가 아니라 이 대시보드의 정책입니다
+              (최대값만 <code>subscriber.password</code> 컬럼 크기에서 옵니다).
+            </p>
           </div>
 
           {error && (
@@ -253,7 +256,8 @@ export default function Accounts() {
         mode={dialog?.mode}
         account={dialog?.account}
         domains={data.aliases}
-        minLength={data.minPasswordLength || 6}
+        minLength={data.minPasswordLength || 4}
+        maxLength={data.maxPasswordLength || 64}
         onSubmit={async (payload) => {
           if (dialog.mode === 'create') await api.createAccount(payload);
           else await api.updateAccount(dialog.account.id, payload);

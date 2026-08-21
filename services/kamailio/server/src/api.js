@@ -258,6 +258,7 @@ function createApiRouter() {
         aliases,
         domains,
         minPasswordLength: subscribers.MIN_PASSWORD_LENGTH,
+        maxPasswordLength: subscribers.MAX_PASSWORD_LENGTH,
         warning: missing.length
           ? `계정 도메인(${missing.join(', ')})이 Kamailio 의 alias 목록에 없습니다`
             + `${aliases.length ? ` (등록된 것: ${aliases.join(', ')})` : ''}. `
