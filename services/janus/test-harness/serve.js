@@ -21,6 +21,7 @@
  *   HARNESS_PORT   이 서버가 들을 포트
  *   HARNESS_RUNDIR accounts.json 을 읽고 result.json 을 쓸 디렉토리
  *   HARNESS_OUTDIR result.json · browser.log 를 남길 디렉토리
+ *   HARNESS_PAGE   띄울 페이지 (기본 test.html). 6단계는 test-bridge-*.html 을 쓴다
  *   JANUS_HTTP_PORT  Janus HTTP 트랜스포트 포트 (기본 8088)
  */
 const http = require('http');
@@ -30,7 +31,7 @@ const path = require('path');
 const HERE = __dirname;
 const SERVICE_DIR = path.resolve(HERE, '..');
 const JANUS_JS = process.env.JANUS_JS_PATH || '/opt/janus/share/janus/javascript/janus.js';
-const ADAPTER_JS = path.join(SERVICE_DIR, 'web/node_modules/webrtc-adapter/out/adapter.js');
+const ADAPTER_JS = process.env.ADAPTER_JS || path.join(SERVICE_DIR, 'web/node_modules/webrtc-adapter/out/adapter.js');
 
 const PORT = parseInt(process.env.HARNESS_PORT, 10) || 28199;
 const RUNDIR = process.env.HARNESS_RUNDIR || HERE;
@@ -93,7 +94,7 @@ const server = http.createServer(async (req, res) => {
   if (url.pathname === '/janus.js') return send(res, 200, 'application/javascript', fs.readFileSync(JANUS_JS));
   if (url.pathname === '/adapter.js') return send(res, 200, 'application/javascript', fs.readFileSync(ADAPTER_JS));
   if (url.pathname === '/' || url.pathname === '/index.html') {
-    return send(res, 200, 'text/html; charset=utf-8', fs.readFileSync(path.join(HERE, 'test.html')));
+    return send(res, 200, 'text/html; charset=utf-8', fs.readFileSync(path.join(HERE, process.env.HARNESS_PAGE || 'test.html')));
   }
   if (url.pathname === '/config') return send(res, 200, 'application/json', JSON.stringify(cfg));
 

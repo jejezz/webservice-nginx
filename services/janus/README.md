@@ -11,6 +11,7 @@ services/janus/
 ├── install.sh              점검 / 설정 설치 / 되돌리기  (sudo)
 ├── setup-dashboard.sh      대시보드 점검 · 빌드            (sudo 불필요)
 ├── verify-call.sh          시험 통화를 사람 없이 돌린다     (sudo 불필요)
+├── verify-bridge.sh        WebRTC ↔ 평문 RTP 브리징 확인   (sudo 불필요)
 ├── test-harness/           verify-call.sh 가 쓰는 헤드리스 하니스
 ├── janus.jcfg              ↘
 ├── janus.transport.http.jcfg        ↘  /opt/janus/etc/janus/ 로 설치될 원본
@@ -99,6 +100,9 @@ sudo ./install.sh --remove        # 걷어내기 (secrets/ 는 남긴다)
 
 ./verify-call.sh                  # 시험 통화 점검 (전화를 걸지 않는다)
 ./verify-call.sh --run            # 2001 → 2003 으로 실제로 걸어 본다
+
+./verify-bridge.sh                # 브리징 점검
+./verify-bridge.sh --run          # 브라우저 ↔ 평문 RTP 단말, 양방향
 ```
 
 `verify-call.sh --run` 은 헤드리스 크롬에서 janus.js 세션 둘을 띄워 **등록 ·
@@ -109,6 +113,12 @@ sudo ./install.sh --remove        # 걷어내기 (secrets/ 는 남긴다)
 종료 코드는 `0` 통과 · `1` 실패 · `2` 브라우저 무응답이고, 마지막 실행 기록은
 `test-harness/last-run/` 에 남습니다. 계정 비밀번호는 `secrets/sip-<사용자>.pw`
 에서 읽습니다 — 계정 자체는 사람이 만듭니다 (`../kamailio/accounts.md`).
+
+`verify-bridge.sh` 는 상대를 **평문 RTP 만 하는 SIP 단말**(`test-harness/sipua.js`,
+WebRTC 미사용)로 두어 `verify-call.sh` 가 못 재는 것을 잽니다. 브라우저 둘은
+언제나 opus 로 붙지만, G.711 만 하는 상대와는 **PCMU 로 내려앉아야** 하고
+그러지 못하면 소리가 나지 않습니다 — Janus 는 트랜스코딩하지 않기 때문입니다.
+기록은 `test-harness/last-run-bridge/` 에 남습니다.
 
 `node_modules/` 와 `web/dist/` 는 커밋하지 않으므로, 이 저장소를 처음 받은
 곳에서는 `setup-dashboard.sh --build` 를 한 번 돌려야 합니다.
