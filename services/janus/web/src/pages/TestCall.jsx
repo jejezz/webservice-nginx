@@ -347,6 +347,14 @@ export default function TestCall() {
      *
      * proxy 는 루프백이 아니라 LAN 주소다. 127.0.0.1 로 붙으면 시그널링은 되는데
      * SDP 에 실리는 주소가 어긋나 소리가 안 난다 (docs/plan.md ③).
+     *
+     * ⚠️ outbound_proxy 를 빠뜨리면 등록은 되는데 **발신만 조용히 실패한다.**
+     *    proxy 는 REGISTER 를 보낼 곳일 뿐이고, INVITE 의 목적지는 요청 URI 의
+     *    도메인으로 정해진다. 그런데 pluto.org 는 실재하는 공인 도메인이라
+     *    sofia-sip 이 DNS 로 풀어 INVITE 를 인터넷으로 보내 버린다. Kamailio 는
+     *    그것을 아예 보지 못하므로 로그도 응답도 없고, 화면에는 'calling' 에서
+     *    멈춘 것으로만 보인다. outbound_proxy 가 NUTAG_PROXY 로 들어가 모든
+     *    요청을 여기로 보낸다 (janus_sip.c 의 nua_invite 호출).
      */
     handleRef.current.send({
       message: {
@@ -356,6 +364,7 @@ export default function TestCall() {
         display_name: user,
         secret,
         proxy,
+        outbound_proxy: proxy,
       },
     });
     push('info', `register 요청: sip:${user}@${config.sipDomain} → ${proxy}`);
