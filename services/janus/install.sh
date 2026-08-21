@@ -41,6 +41,9 @@ CFG_MARKER="OWNED-BY-WEBSERVICES"
 SECRETS_DIR="${SCRIPT_DIR}/secrets"
 ADMIN_SECRET_FILE="${SECRETS_DIR}/admin-secret"
 API_SECRET_FILE="${SECRETS_DIR}/api-secret"
+# 공인 IP (9단계). 비밀이 아니고 환경마다 달라지므로 secrets/ 가 아니라
+# 서비스 루트에 둔다. 없으면 LAN 전용으로 설치된다.
+PUBLIC_IP_FILE="${SCRIPT_DIR}/public-ip"
 
 SERVICE_TEMPLATE="${SCRIPT_DIR}/janus.service"
 SERVICE_UNIT="/etc/systemd/system/janus.service"
@@ -235,7 +238,7 @@ report() {
     done
 
     # 치환이 안 된 채 설치되면 Janus 는 그 문자열을 진짜 비밀번호로 쓴다.
-    if [[ -r "${JANUS_ETC}/janus.jcfg" ]] && grep -q '__ADMIN_SECRET__\|__API_SECRET__' "${JANUS_ETC}/janus.jcfg"; then
+    if [[ -r "${JANUS_ETC}/janus.jcfg" ]] && grep -q '__ADMIN_SECRET__\|__API_SECRET__\|__PUBLIC_IP__' "${JANUS_ETC}/janus.jcfg"; then
         warn "janus.jcfg 에 치환되지 않은 자리표시자가 남아 있습니다"
         problems=$((problems + 1))
     fi
@@ -525,6 +528,19 @@ apply() {
     api_secret="$(head -1 "$API_SECRET_FILE" | tr -d '\r\n')"
     [[ -n "$admin_secret" && -n "$api_secret" ]] || die "비밀 파일이 비어 있습니다"
 
+    # --- 공인 IP (선택) ---
+    local public_ip=""
+    if [[ -r "$PUBLIC_IP_FILE" ]]; then
+        public_ip="$(head -1 "$PUBLIC_IP_FILE" | tr -d '[:space:]')"
+        # 형식을 보고 들어간다. 잘못된 값이 들어가면 외부 통화가 조용히 무음이 된다.
+        if [[ ! "$public_ip" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]]; then
+            die "public-ip 의 값이 IPv4 로 보이지 않습니다: ${public_ip}"
+        fi
+        info "  공인 IP: ${public_ip} (nat_1_1_mapping 을 켭니다)"
+    else
+        info "  공인 IP: 없음 — LAN 전용으로 설치합니다 (nat_1_1_mapping 을 지웁니다)"
+    fi
+
     # --- 설정 ---
     local target mode owner
     for cfg in "${OWNED_CFGS[@]}"; do
@@ -540,6 +556,15 @@ apply() {
 
         install -o "${owner%%:*}" -g "${owner##*:}" -m "$mode" "${SCRIPT_DIR}/${cfg}" "$target"
         sed -i "s/__ADMIN_SECRET__/${admin_secret}/; s/__API_SECRET__/${api_secret}/" "$target"
+
+        # 공인 IP — 있으면 켜고, 없으면 그 두 줄을 지운다 (LAN 전용).
+        # 자리표시자가 남으면 Janus 가 그 문자열을 주소로 알아듣고 외부 통화가
+        # 조용히 무음이 된다. 그래서 '지운다' 쪽을 기본으로 둔다.
+        if [[ -n "$public_ip" ]]; then
+            sed -i "s/__PUBLIC_IP__/${public_ip}/" "$target"
+        else
+            sed -i '/__PUBLIC_IP__/d; /^[[:space:]]*keep_private_host[[:space:]]*=/d' "$target"
+        fi
         info "  설치: ${target} (${mode})"
     done
 

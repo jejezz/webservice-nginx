@@ -12,6 +12,7 @@ services/janus/
 ├── setup-dashboard.sh      대시보드 점검 · 빌드            (sudo 불필요)
 ├── verify-call.sh          시험 통화를 사람 없이 돌린다     (sudo 불필요)
 ├── verify-bridge.sh        WebRTC ↔ 평문 RTP 브리징 확인   (sudo 불필요)
+├── check-public-ip.sh      공인 IP 가 바뀌었는지 본다       (sudo 불필요)
 ├── test-harness/           verify-call.sh · verify-bridge.sh 가 쓰는 하니스
 │                          (sipua.js 평문 SIP 단말 · probe-peer.js rtpproxy 관찰)
 ├── janus.jcfg              ↘
@@ -104,7 +105,14 @@ sudo ./install.sh --remove        # 걷어내기 (secrets/ 는 남긴다)
 
 ./verify-bridge.sh                # 브리징 점검
 ./verify-bridge.sh --run          # 브라우저 ↔ 평문 RTP 단말, 양방향
+
+./check-public-ip.sh              # 공인 IP 가 설정과 같은지 (0 같음 · 1 다름)
+./check-public-ip.sh --write      # 현재 값을 public-ip 에 적는다
 ```
+
+**외부(인터넷) 브라우저를 받으려면** `public-ip` 파일을 만들고 설정을 반영한 뒤,
+공유기에서 UDP `20000-20200` → `192.168.0.252` 를 열어야 합니다. 파일이 없으면
+`nat_1_1_mapping` 없이 LAN 전용으로 설치됩니다 (계획서 9단계).
 
 `verify-call.sh --run` 은 헤드리스 크롬에서 janus.js 세션 둘을 띄워 **등록 ·
 발신 · 수락 · 미디어 · 끊기 · 재발신**을 한 번에 확인합니다. 협상이 됐는지가
