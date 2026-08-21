@@ -85,6 +85,8 @@ source "${PROJECT_ROOT}/database/lib_mariadb.sh"
 
 # 점검 출력은 공용 규약을 따른다 (docs/check-contract.md).
 source "${SCRIPT_DIR}/../../lib/check-report.sh"
+# 설치본이 저장소와 같은지 보는 공용 비교.
+source "${SCRIPT_DIR}/../../lib/config-diff.sh"
 
 # --json 은 아래 인자 파싱보다 **먼저** 걸러낸다.
 check_init "kamailio.config"    # docs/check-contract.md 의 step id
@@ -273,6 +275,27 @@ report() {
     else
         pend "설치되지 않음 — 지금은 인증 없이 REGISTER 를 받습니다"
     fi
+
+    # 설치본이 저장소와 같은가 (docs/check-contract.md).
+    #
+    # 표식이나 특정 줄만 grep 하면 그 줄만 본다. 실제로 이 파일의 형제인
+    # kamailio.cfg 에서 wt_timer 한 줄이 그렇게 빠져 있었고, 훅이 있는지만
+    # 보던 점검은 통과로 나왔다. 파일 전체를 맞춰 보면 한 번에 드러난다.
+    #
+    # 자리표시자가 들어간 자리는 **키를 기준으로** 양쪽을 눌러 비교에서 뺀다.
+    # 값이 맞는지는 여기서 보지 않는다 — 그것은 settings.ini 와
+    # .applied-settings 를 비교하는 쪽의 일이다.
+    info ""
+    info "설치본이 저장소와 같은가"
+    report_config_diff "kamailio.cfg" "sudo $0 --apply" "$MAIN_CFG" "$MAIN_TEMPLATE" \
+        || problems=$((problems + 1))
+    report_config_diff "kamailio-local.cfg" "sudo $0 --apply" \
+        -n 's%^#!define DBURL .*%#!define DBURL «%' \
+        -n 's%^alias=.*%alias=«%' \
+        -n 's%^listen=\(udp\|tcp\):.*%listen=\1:«%' \
+        -n 's%^#!define SIP_PUSH_URL .*%#!define SIP_PUSH_URL «%' \
+        "$LOCAL_CFG" "$TEMPLATE" \
+        || problems=$((problems + 1))
 
     info ""
     info "배포 설정 (settings.ini)"

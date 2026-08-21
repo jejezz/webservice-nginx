@@ -131,6 +131,86 @@ problem 이 하나라도 있으면        → "problem"
 **사람이 보는 모드의 종료 코드는 바꾸지 않습니다.** 기존 습관과 다른 스크립트의
 호출을 깨지 않기 위해서입니다. 판정이 필요하면 `--json` 을 쓰세요.
 
+## 설치본이 저장소와 같은가
+
+점검이 "떠 있다" 고 말하는데 **떠 있는 것이 옛 설정**인 경우가 있습니다.
+저장소에서 설정을 고치고 `--apply` 를 잊으면 그렇게 됩니다. 서비스는 멀쩡히
+돌고 있고, 어디에도 오류로 보이지 않습니다.
+
+실제로 두 번 그랬습니다.
+
+| 무엇 | 어떻게 드러났나 |
+|---|---|
+| `/etc/kamailio/kamailio.cfg` 에 `wt_timer` 가 없었다 | 착신 푸시로 붙들어 둔 INVITE 가 5초에 사라짐. 훅이 있는지만 grep 하던 점검은 **통과**로 보고 |
+| `/etc/nginx/conf.d/path-routing.conf` 에 `/sip/` 라우트가 남아 있었다 | 저장소에서 끈 지 오래인데 nginx 는 계속 서비스 중. 선언만 보던 점검은 **통과**로 보고 |
+
+둘 다 **표식이나 특정 줄만 grep 하는 검사**의 한계입니다. 그 줄만 보기
+때문입니다. 파일 전체를 원본과 맞춰 보면 한 번에 드러납니다.
+
+구현은 [`lib/config-diff.sh`](../lib/config-diff.sh) 에 있습니다 (파이썬인
+nginx 생성기는 같은 규칙을 직접 냅니다).
+
+```bash
+source "${SCRIPT_DIR}/../../lib/config-diff.sh"
+
+report_config_diff "kamailio.cfg" "sudo $0 --apply" "$MAIN_CFG" "$MAIN_TEMPLATE"
+```
+
+### 자리표시자가 들어간 자리는 눌러서 비교합니다
+
+설치본은 대개 템플릿을 치환해 만듭니다. 그대로 비교하면 늘 다릅니다. 그래서
+**키를 기준으로 양쪽을 같은 모양으로 눌러** 비교합니다.
+
+```bash
+report_config_diff "kamailio-local.cfg" "sudo $0 --apply" \
+    -n 's%^#!define DBURL .*%#!define DBURL «%' \
+    -n 's%^alias=.*%alias=«%' \
+    -x 'nat_1_1_mapping' \
+    "$LOCAL_CFG" "$TEMPLATE"
+```
+
+| 옵션 | 뜻 |
+|---|---|
+| `-n <sed식>` | 양쪽에 똑같이 적용해 값 자리를 지웁니다 |
+| `-x <정규식>` | 설치 때 지워질 수 있는 줄을 양쪽에서 뺍니다 |
+| `-s <말+조사>` | 원본을 뭐라고 부를지 (`database.ini 로 만든 것과`) |
+
+**값이 맞는지는 이 비교가 보지 않습니다.** 그것은 `settings.ini` 와
+`.applied-settings` 를 견주는 쪽의 일입니다 ([settings-contract.md](settings-contract.md)).
+여기서 보는 것은 **구조가 낡았는가** 입니다.
+
+### 판정은 `pending` 입니다
+
+고장이 아니라 **아직 반영하지 않은 것**이기 때문입니다. 읽지 못하면 `skip` 이고,
+그것은 문제로 세지 않습니다 — 마법사는 sudo 없이 돌기 때문입니다.
+
+### ⚠️ 다른 줄의 내용을 함부로 찍지 마세요
+
+설치본에는 비밀이 들어 있습니다 (`DBURL` 의 비밀번호, `admin_secret` 따위).
+그 줄을 그대로 찍으면 점검 출력에 비밀이 섞이고, 그 출력은 화면과 JSON 을 타고
+나갑니다.
+
+`report_config_diff` 는 **저장소 쪽 줄만** 보여 주고(커밋된 파일이라 자리표시자만
+들어 있습니다), 설치본에만 있는 줄은 개수만 말합니다.
+
+### 자리표시자를 주석에 적지 마세요
+
+치환이 파일 전체를 훑으므로, 주석에 `__DBURL__` 이라고 적어 두면 **설치본
+주석에 DB 비밀번호가 박힙니다.** 실제로 그랬습니다
+(`services/kamailio/kamailio-local.cfg`).
+
+### 붙인 곳
+
+| 점검 | 견주는 것 |
+|---|---|
+| `services/kamailio/install.sh` | `kamailio.cfg` · `kamailio-local.cfg` |
+| `services/janus/install.sh` | `.jcfg` 넷 · `janus.service` |
+| `nginx/generate_nginx_conf.py` | `/etc/nginx/conf.d/path-routing.conf` (선언대로 만든 것과) |
+| `database/check-database.sh` | `99-project.cnf` (`database.ini` 로 만든 것과) |
+
+`pm2` 는 아직입니다 — 거기서 어긋나는 것은 파일이 아니라 `pm2 save` 가 만든
+`dump.pm2` 라 방식이 다릅니다.
+
 ## 스크립트에 붙이는 법
 
 ```bash

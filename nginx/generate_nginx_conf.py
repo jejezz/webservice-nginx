@@ -17,6 +17,7 @@ nginx-stack.conf 가 가진다.
 import argparse
 import configparser
 import json
+import difflib
 import glob
 import os
 import re
@@ -36,6 +37,9 @@ DEFAULT_PROTOCOL = "http"
 DEFAULT_HEALTH_PATH = "/health"
 DEFAULT_TIMEOUT = 120
 DEFAULT_ORDER = 100
+
+# install_nginx_stack.sh 가 설치하는 곳. 설치본이 지금 선언과 같은지 보는 데 쓴다.
+INSTALLED_CONF = "/etc/nginx/conf.d/path-routing.conf"
 
 
 class ConfigError(Exception):
@@ -426,6 +430,45 @@ def render(stack, services, template_text):
     return output
 
 
+def check_installed(stack, services, template_path, installed_path):
+    """설치본이 **지금 선언대로 만든 것**과 같은가.
+
+    선언(nginx-conf/*.ini)만 보는 검사는 "선언은 고쳤는데 반영을 안 한" 상태를
+    잡지 못한다. 그때 nginx 는 옛 라우트를 그대로 서비스하고 있고, 화면 어디에도
+    오류로 보이지 않는다. 그래서 만들어질 내용과 설치본을 맞춰 본다.
+
+    판정은 pending 이다 — 고장이 아니라 아직 반영하지 않은 것이기 때문이다.
+    (docs/check-contract.md 의 '설치본이 저장소와 같은가')
+    """
+    if not os.path.exists(installed_path):
+        judge("pending", f"{installed_path} 가 없습니다 — 아직 반영한 적이 없습니다")
+        print(f"  --      {installed_path} 없음", file=sys.stderr)
+        return
+
+    try:
+        with open(installed_path, encoding="utf-8") as handle:
+            current = handle.read()
+        with open(template_path, encoding="utf-8") as handle:
+            template_text = handle.read()
+    except OSError as err:
+        # 못 읽은 것을 "다르다" 로 보고하면 안 된다 (권한일 뿐이다).
+        judge("skip", f"{installed_path} 를 읽지 못해 비교를 건너뜁니다 ({err.strerror})")
+        return
+
+    expected = render(stack, services, template_text)
+    if expected == current:
+        judge("ok", f"설치본이 지금 선언과 같습니다: {installed_path}")
+        print(f"  ok      {installed_path} 최신", file=sys.stderr)
+        return
+
+    delta = list(difflib.unified_diff(expected.splitlines(), current.splitlines(), n=0))
+    changed = sum(1 for line in delta if line[:1] in "+-" and line[:3] not in ("+++", "---"))
+    judge("pending",
+          f"설치본이 지금 선언과 다릅니다 ({changed}줄) — 반영하세요: "
+          f"sudo ./install_nginx_stack.sh --skip-install")
+    print(f"  --      {installed_path} 가 선언보다 낡았습니다 ({changed}줄)", file=sys.stderr)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -436,6 +479,8 @@ def main():
     parser.add_argument("--check", action="store_true", help="파싱과 충돌 검사만 하고 끝낸다")
     parser.add_argument("--json", action="store_true",
                         help="점검 결과를 기계가 읽는 형식으로 낸다 (docs/check-contract.md)")
+    parser.add_argument("--installed", default=INSTALLED_CONF,
+                        help="설치본 경로. 지금 선언과 같은지 비교한다")
     args = parser.parse_args()
 
     global CHECK_JSON
@@ -460,6 +505,9 @@ def main():
         routes = ", ".join(r.match_key for r in service.routes) or "(라우트 없음)"
         judge("ok", f"{service.name} — {ports} {routes}")
         print(f"  ok      {service.name:18} {ports:12} {routes}", file=sys.stderr)
+
+    # 선언이 옳은가 다음에, 그것이 실제로 반영돼 있는가를 본다.
+    check_installed(stack, services, args.template, args.installed)
 
     check_finish()      # --json 이면 여기서 끝난다
 

@@ -90,6 +90,8 @@ LAN_IFACE="enp2s0"
 # 점검 출력은 공용 규약을 따른다 (docs/check-contract.md).
 # ok · warn · info 는 예전과 같고, 예전의 no() 는 skip/pend 로 나뉜다.
 source "${SCRIPT_DIR}/../../lib/check-report.sh"
+# 설치본이 저장소와 같은지 보는 공용 비교.
+source "${SCRIPT_DIR}/../../lib/config-diff.sh"
 die()  { echo "오류: $*" >&2; exit 1; }
 
 # --json 은 아래 인자 파싱보다 **먼저** 걸러낸다. 그러지 않으면 "Unknown option"
@@ -256,13 +258,20 @@ report() {
             # (services/kamailio/install.sh 도 같은 이유로 같은 분기를 둔다)
             ok "${cfg} — 설치됨 (내용 확인 불가, root 전용. sudo $0 로 보세요)"
         elif grep -q "$CFG_MARKER" "$target" 2>/dev/null; then
-            if cmp -s <(sed "s/__ADMIN_SECRET__/x/; s/__API_SECRET__/x/" "$tmpl") \
-                      <(sed "s/\(admin_secret = \"\)[^\"]*\"/\1x\"/; s/\(api_secret = \"\)[^\"]*\"/\1x\"/" "$target"); then
-                ok "${cfg} — 설치됨 (저장소 원본과 같음)"
-            else
-                warn "${cfg} — 설치본이 저장소 원본과 다릅니다 → sudo $0 --apply 로 다시 설치하세요"
-                problems=$((problems + 1))
-            fi
+            # 설치할 때 값이 들어가거나(비밀·포트 범위) 아예 지워지는(공인 IP)
+            # 자리는 비교에서 뺀다. 나머지가 다르면 저장소 쪽이 앞서 간 것이다.
+            #
+            # 예전에는 비밀 두 줄만 눌러 비교했다. 그러면 공인 IP 를 쓴 설치에서
+            # nat_1_1_mapping 한 줄 때문에 늘 "다르다" 가 나왔다 — 그 파일은
+            # root 전용이라 일반 사용자에게는 드러나지 않았을 뿐이다.
+            report_config_diff "${cfg}" "sudo $0 --apply" \
+                -n 's%^\([[:space:]]*admin_secret = \).*%\1«%' \
+                -n 's%^\([[:space:]]*api_secret = \).*%\1«%' \
+                -n 's%^\([[:space:]]*rtp_port_range = \).*%\1«%' \
+                -x 'nat_1_1_mapping' \
+                -x 'keep_private_host' \
+                "$target" "$tmpl" \
+                || problems=$((problems + 1))
         elif [[ -f "$sample" ]] && cmp -s "$target" "$sample"; then
             pend "${cfg} — 배포본 그대로 (아직 결정이 반영되지 않음)"
             pending=$((pending + 1))
@@ -319,7 +328,9 @@ report() {
     info ""
     info "systemd"
     if [[ -f "$SERVICE_UNIT" ]]; then
-        ok "유닛 설치됨: ${SERVICE_UNIT}"
+        # 유닛도 저장소가 소유한다. 있는지만 보면 낡은 유닛을 못 잡는다.
+        report_config_diff "유닛 ${SERVICE_UNIT##*/}" "sudo $0 --apply" \
+            "$SERVICE_UNIT" "$SERVICE_TEMPLATE" || problems=$((problems + 1))
         systemctl is-enabled --quiet janus 2>/dev/null \
             && ok "부팅 시 자동 기동 (enabled)" \
             || { warn "enabled 가 아닙니다 — 재부팅하면 뜨지 않습니다"; problems=$((problems + 1)); }

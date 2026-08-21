@@ -28,11 +28,23 @@ nginx 프로세스 자체는 systemd 가 관리합니다 (80/443 바인딩에 ro
 sudo ./install_nginx_stack.sh --skip-install
 ```
 
-반영 전에 선언만 검사합니다. 포트나 location 이 겹치면 설정을 쓰지 않고
-종료하므로, 잘못된 선언이 nginx 까지 가지 않습니다. sudo 가 필요 없습니다.
+반영 전에 선언을 검사하고, **설치본이 지금 선언과 같은지**도 봅니다.
+포트나 location 이 겹치면 설정을 쓰지 않고 종료하므로 잘못된 선언이 nginx 까지
+가지 않습니다. sudo 가 필요 없습니다.
 
 ```bash
 ./install_nginx_stack.sh --check
+```
+
+선언만 보는 검사는 **"선언은 고쳤는데 반영을 안 한"** 상태를 잡지 못합니다.
+그때 nginx 는 옛 라우트를 그대로 서비스하고 있고 어디에도 오류로 보이지
+않습니다. 실제로 `/sip/` 라우트를 끈 뒤에도 한동안 그렇게 남아 있었습니다.
+그래서 만들어질 내용과 설치본을 맞춰 봅니다
+([docs/check-contract.md](../docs/check-contract.md) 의 '설치본이 저장소와 같은가').
+
+```
+[--]  설치본이 지금 선언과 다릅니다 (20줄) — 반영하세요:
+      sudo ./install_nginx_stack.sh --skip-install
 ```
 
 무엇이 만들어질지 미리 봅니다.

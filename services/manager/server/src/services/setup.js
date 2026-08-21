@@ -252,12 +252,18 @@ function resolveCheck(step) {
     throw new Error(`check path escapes repo root: ${script}`);
   }
 
-  // node 로 도는 것은 인터프리터를 앞에 세운다. 지금 도는 node 를 그대로 쓴다
-  // (PATH 의 node 가 다른 판일 수 있다).
+  // 실행은 **상대 경로로** 한다. 경계 검사는 위에서 절대 경로로 했고, 상대
+  // 경로로 돌리면 스크립트가 내는 안내가 사람이 터미널에 치는 모양 그대로
+  // 나온다 ($0 = ./install.sh). 절대 경로로 돌리면 그 안내가
+  // "sudo /home/…/install.sh --apply" 가 되어 읽기 나쁘다.
+  //
+  // POSIX 의 exec 는 슬래시가 든 경로를 **자식의 cwd 기준**으로 푼다.
   if (step.check.interpreter === 'node') {
-    return { cwd, file: process.execPath, args: [script, ...step.check.args] };
+    // node 로 도는 것은 인터프리터를 앞에 세운다. 지금 도는 node 를 그대로 쓴다
+    // (PATH 의 node 가 다른 판일 수 있다).
+    return { cwd, file: process.execPath, args: [step.check.file, ...step.check.args] };
   }
-  return { cwd, file: script, args: step.check.args };
+  return { cwd, file: step.check.file, args: step.check.args };
 }
 
 /** 화면에 보여 줄 점검 명령. 실행은 위 정의로만 한다. */

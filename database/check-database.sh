@@ -17,11 +17,14 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 INI_FILE="${SCRIPT_DIR}/database.ini"
+TEMPLATE="${SCRIPT_DIR}/mariadb.cnf.template"
 SECRETS_DIR="${SCRIPT_DIR}/secrets"
 OUTPUT_CNF="/etc/mysql/mariadb.conf.d/99-project.cnf"
 
 # 점검 출력은 공용 규약을 따른다 (docs/check-contract.md).
 source "${PROJECT_ROOT}/lib/check-report.sh"
+# 설치본이 저장소와 같은지 보는 공용 비교.
+source "${PROJECT_ROOT}/lib/config-diff.sh"
 
 check_init "database.schema"
 check_args "$@"
@@ -84,12 +87,45 @@ else
     warn "MariaDB 가 떠 있지 않습니다 (systemctl status mariadb)"
 fi
 
-if [[ -f "$OUTPUT_CNF" ]]; then
+# 설치본이 지금 database.ini 대로 만든 것과 같은가.
+#
+# 있는지만 보면 "ini 를 고치고 setup_mariadb.sh 를 안 돌린" 상태를 못 잡는다.
+# 그때 MariaDB 는 옛 설정으로 돌고 있고 어디에도 오류로 보이지 않는다.
+# setup_mariadb.sh 가 만드는 방식 그대로 여기서도 만들어 맞춰 본다.
+render_expected_cnf() {
+    local options
+    options="$(sed -n '/^\[server\]/,/^\[/p' "$INI_FILE" \
+        | grep -E '^[A-Za-z0-9_]+[[:space:]]*=' \
+        | sed -E 's/^([A-Za-z0-9_]+)[[:space:]]*=[[:space:]]*(.*)$/\1 = \2/')"
+    [[ -n "$options" ]] || return 1
+
+    awk -v opts="$options" -v ts="(비교에서 뺀다)" -v src="$INI_FILE" \
+        '{gsub(/\{\{SERVER_OPTIONS\}\}/, opts); gsub(/\{\{GENERATED_AT\}\}/, ts); gsub(/\{\{SOURCE_INI\}\}/, src); print}' \
+        "$TEMPLATE"
+}
+
+if [[ ! -f "$OUTPUT_CNF" ]]; then
+    if [[ -d "$(dirname "$OUTPUT_CNF")" ]]; then
+        pend "서버 설정이 아직 없습니다: ${OUTPUT_CNF} → sudo database/setup_mariadb.sh"
+    else
+        skip "설정 디렉토리를 읽을 수 없어 확인을 건너뜁니다: $(dirname "$OUTPUT_CNF")"
+    fi
+elif [[ ! -f "$TEMPLATE" ]]; then
     ok "서버 설정 반영됨: ${OUTPUT_CNF}"
-elif [[ -d "$(dirname "$OUTPUT_CNF")" ]]; then
-    pend "서버 설정이 아직 없습니다: ${OUTPUT_CNF} → sudo database/setup_mariadb.sh"
+    skip "템플릿이 없어 내용 비교를 건너뜁니다: ${TEMPLATE}"
 else
-    skip "설정 디렉토리를 읽을 수 없어 확인을 건너뜁니다: $(dirname "$OUTPUT_CNF")"
+    ok "서버 설정 반영됨: ${OUTPUT_CNF}"
+    EXPECTED_CNF="$(mktemp)"
+    trap 'rm -f "$EXPECTED_CNF"' EXIT
+    if render_expected_cnf > "$EXPECTED_CNF"; then
+        # '생성 시각' 은 매번 달라지므로 양쪽에서 뺀다 (setup_mariadb.sh 도 그렇게 비교한다).
+        report_config_diff "99-project.cnf" "sudo database/setup_mariadb.sh" \
+            -s "database.ini 로 만든 것과" \
+            -x '^# 생성 시각' \
+            "$OUTPUT_CNF" "$EXPECTED_CNF" || true
+    else
+        skip "database.ini 의 [server] 를 읽지 못해 내용 비교를 건너뜁니다"
+    fi
 fi
 
 # ---------- 사용자 ----------
