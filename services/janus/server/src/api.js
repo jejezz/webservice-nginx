@@ -8,6 +8,7 @@ const express = require('express');
 const janus = require('./janus');
 const sessions = require('./sessions');
 const settings = require('./settings');
+const addresses = require('./addresses');
 const config = require('./config');
 const { requireAuth } = require('./auth/session');
 
@@ -61,6 +62,17 @@ function createApiRouter() {
       transports: Object.keys(d.transports || {}).sort(),
       admin: { ok: adminPing.ok, error: adminPing.error || null },
     });
+  });
+
+  /**
+   * 접속 주소 — 이 서비스 디렉터리가 선언한 입구들.
+   *
+   * 클라이언트를 짜는 사람이 가장 먼저 찾는 것이 "어디로 붙는가" 인데, 그 답이
+   * nginx 선언 파일 안에만 있었습니다. 같은 파일을 읽어 화면에 꺼내 놓습니다.
+   * 밖에서 쓸 주소의 오리진은 브라우저가 붙입니다.
+   */
+  router.get('/addresses', async (req, res) => {
+    res.json(await addresses.list());
   });
 
   /**

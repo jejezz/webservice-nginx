@@ -38,6 +38,7 @@ async function request(path, options = {}) {
 export const api = {
   overview: () => request('/overview'),
   sessions: () => request('/sessions'),
+  addresses: () => request('/addresses'),
   settings: () => request('/settings'),
   saveSettings: (values) => request('/settings', { method: 'PUT', body: JSON.stringify(values) }),
   testCallConfig: () => request('/testcall-config'),

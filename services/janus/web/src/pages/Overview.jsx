@@ -1,4 +1,5 @@
 import { AlertCircle, Activity, Cpu, Network, Puzzle, RefreshCw } from 'lucide-react';
+import { AddressCard } from '@/components/AddressCard';
 import { InfoCard, StatTile } from '@/components/InfoCard';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -10,6 +11,8 @@ import { usePolling } from '@/lib/usePolling';
 
 export default function Overview() {
   const { data, error, loading, refreshing, reload } = usePolling(api.overview, 5000);
+  // 주소는 선언에서 오므로 자주 바뀌지 않는다. 개요보다 느리게 본다.
+  const { data: addresses } = usePolling(api.addresses, 30000);
 
   if (loading) {
     return (
@@ -54,6 +57,11 @@ export default function Overview() {
             </pre>
           </AlertDescription>
         </Alert>
+
+        {/* Janus 가 죽어 있을 때야말로 "어디로 붙는 곳이었는지" 를 봐야 한다.
+            포트 배지가 무엇이 안 열렸는지 그대로 보여 준다. */}
+        <AddressCard data={addresses} />
+
         <Button variant="outline" size="sm" onClick={reload} disabled={refreshing}>
           <RefreshCw className={refreshing ? 'size-3.5 animate-spin' : 'size-3.5'} />
           다시 확인
@@ -154,10 +162,13 @@ export default function Overview() {
           </div>
           <p className="text-xs text-muted-foreground">
             안 쓰는 플러그인은 janus.jcfg 의 <span className="font-mono">plugins.disable</span> 로
-            올리지 않습니다. WebSocket 트랜스포트도 꺼 두었습니다 — 계획서 ① 절.
+            올리지 않습니다. 트랜스포트는 REST(8088)와 WebSocket(8188) 둘을 엽니다 — 헬스는 REST 로
+            가고 WebRTC 클라이언트는 WS 로 붙습니다 (계획서 ① 절).
           </p>
         </CardContent>
       </Card>
+
+      <AddressCard data={addresses} />
 
       <div className="flex items-center gap-2">
         <Button variant="outline" size="sm" onClick={reload} disabled={refreshing}>

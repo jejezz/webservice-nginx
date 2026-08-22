@@ -13,36 +13,8 @@ const path = require('path');
  * 스키마: docs/nginx-conf.md
  */
 
-function parseIni(text) {
-  const sections = {};
-  const order = [];
-  let current = null;
-
-  for (const rawLine of text.split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (!line || line.startsWith('#') || line.startsWith(';')) continue;
-
-    const sectionMatch = line.match(/^\[(.+)\]$/);
-    if (sectionMatch) {
-      current = sectionMatch[1].trim();
-      if (!sections[current]) {
-        sections[current] = {};
-        order.push(current);
-      }
-      continue;
-    }
-
-    const kvMatch = line.match(/^([^=]+)=(.*)$/);
-    if (kvMatch && current) {
-      sections[current][kvMatch[1].trim()] = kvMatch[2].trim();
-    }
-  }
-
-  return { sections, order };
-}
-
-const isTrue = (v) => ['1', 'true', 'yes', 'on'].includes(String(v).trim().toLowerCase());
-const isFalse = (v) => ['0', 'false', 'no', 'off'].includes(String(v).trim().toLowerCase());
+// 파서는 저장소 공용이다 — 같은 선언 파일을 janus 대시보드도 읽는다.
+const { parseIni, isTrue, isFalse } = require(require('path').resolve(__dirname, '../../../../lib/ini'));
 
 function joinUrl(origin, pathname) {
   return `${String(origin).replace(/\/+$/, '')}/${String(pathname).replace(/^\/+/, '')}`;
