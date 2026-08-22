@@ -129,6 +129,30 @@ sudo ./install.sh --remove        # 걷어내기 (secrets/ 는 남긴다)
 ./check-public-ip.sh --write      # 현재 값을 public-ip 에 적는다
 ```
 
+### 올리는 플러그인은 셋입니다
+
+| | 무엇에 |
+|---|---|
+| `sip` | 이 게이트웨이의 본업 (인터폰 ↔ 모바일) |
+| `echotest` | "브라우저 ↔ Janus 미디어 경로만" 을 SIP 없이 떼어 확인할 때 |
+| `videoroom` | WebRTC 클라이언트의 다자 통화 |
+
+나머지는 빌드는 돼 있지만 `janus.jcfg` 의 `plugins.disable` 로 올리지 않습니다 —
+올려 두면 쓰지 않는 API 가 열려 있게 되고 "어느 쪽이 진짜 경로인지" 가 흐려집니다.
+하나 켜려면 그 목록에서 빼고 `sudo ./install.sh --apply` 를 돌립니다. 점검이
+**선언대로 올라왔는지** 확인해 줍니다.
+
+```
+[ok]   sip 올라옴
+[ok]   echotest 올라옴
+[--]   videoroom 이 선언에는 켜져 있는데 올라오지 않았습니다 → sudo ./install.sh --apply
+```
+
+> `videoroom` 의 설정 파일(`janus.plugin.videoroom.jcfg`)은 **저장소가 소유하지
+> 않습니다.** 방은 API 로만 만들기로 했으므로 배포본 파일을 그대로 둡니다.
+> 고정 방을 설정에 박아 두게 되면 그때 `install.sh` 의 `OWNED_CFGS` 에 넣으세요 —
+> 그러지 않으면 그 파일은 "설치본이 저장소와 같은가" 점검 밖에 있게 됩니다.
+
 ### 접속 주소는 대시보드 개요에 있습니다
 
 클라이언트를 짤 때 필요한 주소는 **개요 화면의 '접속 주소' 카드**에 있습니다.
@@ -196,7 +220,8 @@ sudo ./nginx/install_nginx_stack.sh --skip-install
 | Janus | `/opt/janus/bin/janus` **1.4.1** — 2026-03-05 소스 빌드 |
 | 빌드 옵션 | `--prefix=/opt/janus --enable-post-processing --enable-data-channels` |
 | 소스 | `~/Public/RetroLink/janus-gateway` (`v1.4.0-5-gae0078e1`) |
-| 플러그인 | SIP · echotest · videoroom · audiobridge · streaming · nosip · textroom · recordplay · videocall |
+| 플러그인 | **빌드된 것** SIP · echotest · videoroom · audiobridge · streaming · nosip · textroom · recordplay · videocall |
+| 올리는 플러그인 | **sip · echotest · videoroom** — 나머지는 `janus.jcfg` 의 `plugins.disable` 로 올리지 않습니다 |
 | 트랜스포트 | HTTP · WebSocket · Unix socket |
 | `janus.js` | `/opt/janus/share/janus/javascript/janus.js` |
 | 설정 | 이 저장소가 소유 — `.jcfg` 넷을 `install.sh --apply` 가 설치 |

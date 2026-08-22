@@ -196,6 +196,64 @@ actual_sample_hash() {
     sha256sum "$1" | cut -c1-16
 }
 
+# libjanus_videoroom.so → janus.plugin.videoroom
+plugin_name_of() {
+    local f="${1##*/}"
+    f="${f#libjanus_}"
+    f="${f%.so}"
+    echo "janus.plugin.${f}"
+}
+
+# 선언대로 올라왔는가.
+#
+# janus.jcfg 의 plugins.disable 에 없는 플러그인은 전부 올라와 있어야 한다.
+# **설정을 썼다는 것과 그렇게 동작한다는 것은 다르다** — 여기서 어긋나면 대개
+# --apply 를 아직 안 돌린 것이다. 설치본 janus.jcfg 는 root 전용이라 내용을
+# 볼 수 없지만, 그 결과인 /info 는 누구나 볼 수 있다.
+report_loaded_plugins() {
+    local info
+    info="$(curl -s -m 3 "http://127.0.0.1:${API_PORT}${API_BASE_PATH}/info" 2>/dev/null || true)"
+    if [[ -z "$info" ]]; then
+        skip "플러그인 목록을 읽지 못해 확인을 건너뜁니다 (${API_BASE_PATH}/info)"
+        return 0
+    fi
+
+    local disabled
+    disabled="$(sed -n 's/^[[:space:]]*disable[[:space:]]*=[[:space:]]*"\(.*\)".*/\1/p' "${SCRIPT_DIR}/janus.jcfg" | head -1)"
+
+    local loaded
+    loaded="$(grep -o '"janus\.plugin\.[a-z0-9_]*"' <<<"$info" | tr -d '"' | sort -u)"
+
+    local lib base name missing=0
+    for lib in "${JANUS_PREFIX}"/lib/janus/plugins/libjanus_*.so; do
+        [[ -e "$lib" ]] || continue
+        base="${lib##*/}"
+        # 목록에 있으면 일부러 안 올린 것이다.
+        [[ ",${disabled}," == *",${base},"* ]] && continue
+
+        name="$(plugin_name_of "$base")"
+        if grep -qx "$name" <<<"$loaded"; then
+            ok "${name#janus.plugin.} 올라옴"
+        else
+            pend "${name#janus.plugin.} 이 선언에는 켜져 있는데 올라오지 않았습니다 → sudo $0 --apply"
+            missing=$((missing + 1))
+        fi
+    done
+
+    # 반대쪽 — 끄기로 한 것이 올라와 있으면 설치본이 저장소와 다른 것이다.
+    local up
+    while read -r up; do
+        [[ -z "$up" ]] && continue
+        base="libjanus_${up#janus.plugin.}.so"
+        if [[ ",${disabled}," == *",${base},"* ]]; then
+            pend "${up#janus.plugin.} 은 끄기로 했는데 올라와 있습니다 → sudo $0 --apply"
+            missing=$((missing + 1))
+        fi
+    done <<<"$loaded"
+
+    return $missing
+}
+
 # ---------- 점검 ----------
 
 report() {
@@ -371,6 +429,10 @@ report() {
         pend "시그널링 API(${API_PORT}) 가 열려 있지 않습니다"
         pending=$((pending + 1))
     fi
+
+    info ""
+    info "선언대로 올라왔는가 (janus.jcfg 의 plugins.disable)"
+    report_loaded_plugins || pending=$((pending + $?))
 
     if [[ -n "$admin_addr" ]]; then
         if [[ "$admin_addr" == 127.0.0.1:* ]]; then
