@@ -106,6 +106,7 @@ pm2 등록(`pm2 delete` 후 재등록)만 손보면 됩니다.
 - 서버 수준 설정(listen 포트·TLS·mTLS·인증서) → [nginx/README.md](nginx/README.md)
 - 기동·부팅 복원·문제 해결 → [pm2/README.md](pm2/README.md)
 - `/health` 응답 형식 → [docs/health-contract.md](docs/health-contract.md)
+- **모바일·브라우저 클라이언트를 만들려면** → [docs/client-guide.md](docs/client-guide.md)
 - 대시보드와 로그인 → [services/manager/README.md](services/manager/README.md)
 - 데이터베이스 → [database/README.md](database/README.md)
 - 이 구조로 옮긴 과정 → [docs/migration-plan.md](docs/migration-plan.md)

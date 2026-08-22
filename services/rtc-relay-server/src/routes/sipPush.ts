@@ -120,8 +120,10 @@ router.post('/', loopbackOnly, async (req: Request, res: Response) => {
             body: caller ? `${caller} 님이 전화를 걸었습니다.` : '전화가 왔습니다.',
         },
         data: {
-            // 단말이 이 값을 보고 SIP 스택을 깨워 WSS 로 REGISTER 한다.
-            // 등록이 끝나면 Kamailio 가 붙들어 둔 INVITE 를 그 연결로 보낸다.
+            // 단말이 이 값을 보고 깨어나 **Janus 에 붙어** SIP 플러그인에
+            // register 를 요청한다 (단말은 SIP 를 직접 말하지 않는다 —
+            // docs/client-guide.md). Janus 가 Kamailio 에 REGISTER 를 보내고,
+            // 그 순간 Kamailio 가 붙들어 둔 INVITE 를 그 연결로 흘려보낸다.
             method: 'sip-incoming',
             aor,
             caller,

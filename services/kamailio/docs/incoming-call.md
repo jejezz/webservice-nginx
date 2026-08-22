@@ -44,13 +44,21 @@ services/kamailio/check-push.sh --json   # 구축 마법사가 읽는 형식
                                           │
  ⑦                        FCM ──▶ 단말 기동
                                           │
- ⑧ 단말 ──REGISTER (WSS)──▶ Kamailio
+ ⑧ 단말 ──WSS──▶ Janus ──REGISTER (평문 SIP)──▶ Kamailio
                                           │
  ⑨                        save("location") 성공
                           ts_append()  ← 붙들어 둔 INVITE 를 새 contact 로 분기
                                           │
- ⑩ Kamailio ──INVITE──▶ 단말             벨이 울린다
+ ⑩ Kamailio ──INVITE──▶ Janus ──WSS──▶ 단말    벨이 울린다
 ```
+
+> ⚠️ ⑧⑩ 은 **2026-08-21 에 바뀌었습니다.** 예전 계획은 단말이 SIP over WebSocket
+> 으로 Kamailio 에 직접 붙는 것이었습니다. 지금은 단말이 SIP 를 말하지 않고
+> **Janus 가 단말을 대신해 등록하고 통화합니다**
+> ([mobile-transport.md](mobile-transport.md) 7절). 그래서 ⑧ 의 REGISTER 를 보내는
+> 것은 Janus 이고, 단말이 하는 일은 Janus 에 붙어 SIP 플러그인에 `register` 를
+> 요청하는 것입니다. 앱 쪽 절차는 [클라이언트 안내](../../../docs/client-guide.md)
+> 에 있습니다.
 
 ②와 ⑩ 사이가 FCM 지연 구간입니다. 현실적으로 2~8초이고 그동안 발신자는 무음이라,
 `183 Session Progress` 로 링백을 흘리는 것을 권합니다.
