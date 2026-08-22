@@ -1,10 +1,11 @@
 import { NavLink, Navigate, Route, Routes } from 'react-router-dom';
-import { ArrowLeft, Activity, Radio, Globe, UserRound, BarChart3 } from 'lucide-react';
+import { Activity, ArrowLeft, BarChart3, Globe, Radio, ScrollText, UserRound } from 'lucide-react';
 import Overview from '@/pages/Overview';
 import Registrations from '@/pages/Registrations';
 import WebSockets from '@/pages/WebSockets';
 import Accounts from '@/pages/Accounts';
 import Stats from '@/pages/Stats';
+import Logs from '@/pages/Logs';
 import { cn } from '@/lib/utils';
 
 const TABS = [
@@ -13,6 +14,7 @@ const TABS = [
   { to: '/websockets', label: 'WebSocket', Icon: Globe },
   { to: '/accounts', label: 'SIP 계정', Icon: UserRound },
   { to: '/stats', label: '통계', Icon: BarChart3 },
+  { to: '/logs', label: '로그', Icon: ScrollText },
 ];
 
 function Header() {
@@ -73,6 +75,7 @@ export default function App() {
           <Route path="/websockets" element={<WebSockets />} />
           <Route path="/accounts" element={<Accounts />} />
           <Route path="/stats" element={<Stats />} />
+          <Route path="/logs" element={<Logs />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>

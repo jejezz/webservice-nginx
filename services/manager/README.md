@@ -291,6 +291,7 @@ pm2 restart manager
 | `POST` | `/manager/api/login` | — | 로그인 / 승인 요청 (IP당 5회 실패 시 5분 차단) |
 | `POST` | `/manager/api/logout` | — | 로그아웃 |
 | `GET` | `/manager/api/me` | 필요 | 현재 세션 |
+| `POST` | `/manager/api/verify-password` | 필요 | 지금 로그인한 사람이 맞는지 비밀번호로 재확인 (서비스 대시보드가 민감한 값을 꺼내기 전에 부름) |
 | `GET` | `/manager/api/overview` | 필요 | 서비스·Nginx 전체 상태 |
 | `GET` | `/manager/api/services/:name/health` | 필요 | 개별 서비스 재확인 |
 | `GET` | `/manager/api/setup` | 필요 | 구축 단계 정의 + 각 단계의 마지막 점검 결과 |

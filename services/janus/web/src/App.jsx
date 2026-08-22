@@ -1,9 +1,10 @@
 import { NavLink, Navigate, Route, Routes } from 'react-router-dom';
-import { ArrowLeft, Activity, PhoneCall, Radio, SlidersHorizontal } from 'lucide-react';
+import { Activity, ArrowLeft, PhoneCall, Radio, ScrollText, SlidersHorizontal } from 'lucide-react';
 import Overview from '@/pages/Overview';
 import Sessions from '@/pages/Sessions';
 import Settings from '@/pages/Settings';
 import TestCall from '@/pages/TestCall';
+import Logs from '@/pages/Logs';
 import { cn } from '@/lib/utils';
 
 // 세션 · SIP · 미디어 화면은 계획서 8단계에서 Admin API 로 채운다.
@@ -12,6 +13,7 @@ const TABS = [
   { to: '/sessions', label: '세션·미디어', Icon: Radio },
   { to: '/test-call', label: '시험 통화', Icon: PhoneCall },
   { to: '/settings', label: '설정', Icon: SlidersHorizontal },
+  { to: '/logs', label: '로그', Icon: ScrollText },
 ];
 
 function Header() {
@@ -79,6 +81,7 @@ export default function App() {
           <Route path="/sessions" element={<Sessions />} />
           <Route path="/test-call" element={<TestCall />} />
           <Route path="/settings" element={<Settings />} />
+          <Route path="/logs" element={<Logs />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>

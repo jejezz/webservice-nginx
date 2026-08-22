@@ -10,7 +10,9 @@ const sessions = require('./sessions');
 const settings = require('./settings');
 const addresses = require('./addresses');
 const config = require('./config');
+const journal = require(require('path').resolve(__dirname, '../../../../lib/journal'));
 const { requireAuth } = require('./auth/session');
+const log = require('./utils/logger');
 
 function createApiRouter() {
   const router = express.Router();
@@ -62,6 +64,68 @@ function createApiRouter() {
       transports: Object.keys(d.transports || {}).sort(),
       admin: { ok: adminPing.ok, error: adminPing.error || null },
     });
+  });
+
+
+  /**
+   * systemd 저널 — 이 서비스는 pm2 가 아니라 systemd 가 띄우므로 로그가
+   * 저널에만 있습니다. 터미널을 열지 않고도 볼 수 있게 그대로 내려 줍니다.
+   *
+   * **읽기 전용이고 유닛 이름은 여기 박혀 있습니다.** 사람이 넣는 값은 줄 수와
+   * 필터뿐이고, 셸을 거치지 않습니다 (lib/journal.js 의 경계).
+   */
+  router.get('/logs', async (req, res) => {
+    res.json(await journal.read('janus', {
+      lines: req.query.lines,
+      grep: req.query.grep,
+      minutes: req.query.minutes,
+    }));
+  });
+  /**
+   * 시그널링 API 비밀 — **비밀번호를 다시 받아야** 내려 준다.
+   *
+   * 클라이언트를 만들려면 이 값이 필요한데, 서버에 들어가 파일을 열어 보는 것
+   * 말고는 길이 없었습니다. 화면에서 꺼낼 수 있게 하되 세션 쿠키만으로는 주지
+   * 않습니다 — 자리를 비운 사이 열린 화면으로 새어 나가지 않게, 지금 이 사람이
+   * 맞는지 로그인 비밀번호로 한 번 더 확인합니다.
+   *
+   * 계정은 manager 가 소유하므로 확인도 manager 에게 맡깁니다. **사용자의 세션
+   * 쿠키를 그대로 넘겨** 물어보므로, 이 서비스가 비밀번호를 판단하지도, 그것을
+   * 저장하지도 않습니다.
+   */
+  router.post('/api-secret', async (req, res) => {
+    const password = String(req.body?.password ?? '');
+    if (!password) return res.status(400).json({ error: 'missing_password' });
+
+    let verdict;
+    try {
+      const upstream = await fetch(`${config.MANAGER_API_BASE}/verify-password`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          // 세션 주인을 manager 가 쿠키로 가린다. 사용자 이름을 우리가 말하지 않는다.
+          cookie: req.headers.cookie || '',
+        },
+        body: JSON.stringify({ password }),
+        signal: AbortSignal.timeout(5000),
+      });
+      verdict = { status: upstream.status, body: await upstream.json().catch(() => ({})) };
+    } catch (err) {
+      log.warn(`verify-password 호출 실패: ${err.message}`);
+      return res.status(503).json({ error: 'verify_unavailable', message: '확인 서버에 닿지 못했습니다.' });
+    }
+
+    if (verdict.status !== 200) {
+      return res.status(verdict.status).json(verdict.body || { error: 'invalid_password' });
+    }
+
+    const secret = janus.loadApiSecret();
+    if (!secret) {
+      return res.status(404).json({ error: 'no_secret', message: 'secrets/api-secret 이 없습니다 — sudo ./install.sh --apply' });
+    }
+
+    log.info(`api_secret 열람: ${req.user?.username ?? '?'}`);
+    res.json({ apiSecret: secret });
   });
 
   /**

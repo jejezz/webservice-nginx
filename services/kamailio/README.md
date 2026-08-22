@@ -43,6 +43,11 @@ services/kamailio/
 
 ## 관찰용 대시보드
 
+로그는 대시보드의 **로그** 탭에서 봅니다 — 이 서비스는 pm2 가 아니라 systemd 가
+띄우므로 `pm2 logs` 에 나오지 않습니다. 자주 쓰는 필터(`REGISTER`, `INVITE`,
+`ts_store|ts_append`, `sip-push`)를 화면에 적어 두었습니다. 터미널에서는
+`journalctl -u kamailio -f` 입니다.
+
 `https://<서버>/kamailio/dashboard`
 
 manager 로그인 하나로 들어갑니다 — 이 서비스도 계정을 두지 않고 세션만 검증합니다.

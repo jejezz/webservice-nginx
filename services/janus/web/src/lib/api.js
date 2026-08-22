@@ -36,9 +36,22 @@ async function request(path, options = {}) {
 }
 
 export const api = {
+  // systemd 저널 (이 서비스는 pm2 가 아니라 systemd 가 띄운다)
+  logs: ({ lines, minutes, grep } = {}) => {
+    const q = new URLSearchParams();
+    if (lines) q.set('lines', lines);
+    if (minutes) q.set('minutes', minutes);
+    if (grep) q.set('grep', grep);
+    const qs = q.toString();
+    return request(`/logs${qs ? `?${qs}` : ''}`);
+  },
   overview: () => request('/overview'),
   sessions: () => request('/sessions'),
   addresses: () => request('/addresses'),
+
+  // 시그널링 API 비밀. 로그인 비밀번호를 다시 받아야 내려온다.
+  apiSecret: (password) =>
+    request('/api-secret', { method: 'POST', body: JSON.stringify({ password }) }),
   settings: () => request('/settings'),
   saveSettings: (values) => request('/settings', { method: 'PUT', body: JSON.stringify(values) }),
   testCallConfig: () => request('/testcall-config'),

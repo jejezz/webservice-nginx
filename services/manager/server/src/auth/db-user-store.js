@@ -41,6 +41,16 @@ class DbUserStore {
       return { status: 'unavailable' };
     }
 
+    /*
+     * verifyOnly — **아무것도 만들지 않고 확인만 한다.**
+     *
+     * 로그인 화면은 처음 보는 이메일을 승인 요청으로 바꿔 주지만, 이미 로그인한
+     * 사람에게 "지금 당신이 맞습니까" 를 묻는 자리(POST /verify-password)에서는
+     * 그 부작용이 있으면 안 된다. 세션은 있는데 계정이 사라진 상태로 물으면
+     * 엉뚱한 승인 요청이 생긴다 — 실제로 시험하다 하나 만들어 봤다.
+     */
+    if (!row && ctx.verifyOnly) return { status: 'invalid' };
+
     // 처음 보는 이메일 — 승인 요청으로 등록한다.
     if (!row) {
       try {
@@ -64,8 +74,9 @@ class DbUserStore {
 
     // 승인 대기 중에는 비밀번호를 다시 설정할 수 있게 둔다.
     // (처음 요청할 때 오타가 났어도 승인 전에 바로잡을 수 있다. 아직 접근 권한은 없다)
+    // ⚠️ 확인만 하는 호출에서는 그 재설정도 하지 않는다.
     if (!row.approved) {
-      if (!ok) {
+      if (!ok && !ctx.verifyOnly) {
         try {
           await db.query('UPDATE administrator SET password_hash = ? WHERE id = ?', [
             password.hash(plain),

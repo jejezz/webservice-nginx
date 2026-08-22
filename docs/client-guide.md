@@ -48,7 +48,7 @@ Flutter·안드로이드·브라우저 등 **WebRTC 클라이언트를 만드는
 | | 값 | 어디서 |
 |---|---|---|
 | 시그널링 주소 | `wss://<서버>/janus-ws` | Janus 대시보드 **개요 → 접속 주소** 에서 복사 |
-| API 비밀 | `apisecret` | `services/janus/secrets/api-secret` (서버 관리자에게) |
+| API 비밀 | `apisecret` | Janus 대시보드 **개요 → 시그널링 API 비밀 → 보기** (로그인 비밀번호를 한 번 더 묻습니다). 서버에서는 `services/janus/secrets/api-secret` |
 | SIP 계정 | 내선 번호 + 비밀번호 | 사람이 만듭니다 — `services/kamailio/accounts.md` |
 
 도메인과 프록시는 이 서버에서 이렇게 정해져 있습니다.
@@ -70,6 +70,10 @@ wss://<서버>/janus-ws          서브프로토콜: janus-protocol   ← 필수
 ```
 
 서브프로토콜을 빠뜨리면 Janus 가 연결을 끊고 nginx 는 **502** 를 냅니다.
+
+**응답을 기다렸다가 다음 것을 보내세요.** `create`·`attach`·`message` 를 한꺼번에
+쏘면 뒤엣것들은 `session_id`/`handle_id` 가 비어 있어 `457 Unhandled request` 로
+떨어집니다. `transaction` 값으로 응답을 짝지어 두면 그대로 순서가 됩니다.
 
 ### 1. 세션 만들기
 
@@ -215,7 +219,8 @@ curl -k -X POST -H 'Content-Type: application/json' -d '{}' \
 | 증상 | 원인 | 고치는 법 |
 |---|---|---|
 | 502, 소켓이 바로 닫힘 | 서브프로토콜 없음 | `janus-protocol` 을 요청 |
-| `403` / `Unauthorized request` | `apisecret` 누락 | 모든 요청에 넣기 |
+| `403` / `Unauthorized request` | `apisecret` 누락 또는 **값이 틀림** | 대시보드에서 실제 값을 확인해 모든 요청에 넣기 |
+| `457 Unhandled request` | `session_id`/`handle_id` 없이 보냄 | `create` → `attach` 응답을 **기다렸다가** 그 id 를 실어 보내기 |
 | INVITE 를 Kamailio 가 못 봄 (로그도 없음) | `outbound_proxy` 누락 → `pluto.org` 가 DNS 로 풀림 | `outbound_proxy` 지정 |
 | **연결은 됐는데 소리가 안 남** | 코덱을 opus 로 좁힘 | offer 에 PCMU/PCMA 유지 |
 | 통화 중 갑자기 끊김 | keepalive 안 보냄 (세션 60초) | 30초마다 keepalive |

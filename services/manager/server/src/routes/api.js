@@ -122,6 +122,42 @@ router.post('/logout', (req, res) => {
   res.json({ ok: true });
 });
 
+/**
+ * 지금 로그인한 사람이 맞는지 **비밀번호로** 다시 확인한다.
+ *
+ * 서비스 대시보드가 민감한 값(예: janus 의 api_secret)을 화면에 꺼내기 전에
+ * 부릅니다. 세션 쿠키만으로는 "자리를 비운 사이 누가 화면을 봤는가" 를 가릴 수
+ * 없기 때문입니다.
+ *
+ * 세션에서 사용자를 얻으므로 **아무 프로세스나 부를 수 있는 비밀번호 확인기가
+ * 아닙니다** — 그 사람의 유효한 세션 쿠키를 들고 있어야 합니다. 실패는 로그인과
+ * 같은 IP 잠금 통에 넣습니다.
+ */
+router.post('/verify-password', requireAuth, async (req, res) => {
+  const key = attemptKey(req);
+  if (isLockedOut(key)) {
+    return res.status(429).json({ error: 'too_many_attempts', message: '시도가 너무 많습니다. 잠시 후 다시 하세요.' });
+  }
+
+  const password = String(req.body?.password ?? '');
+  if (!password) return res.status(400).json({ error: 'missing_password' });
+
+  // verifyOnly — 확인만 한다. 승인 요청을 만들거나 비밀번호를 고치지 않는다.
+  const result = await userStore.authenticate(req.user.username, password, { ip: key, verifyOnly: true });
+
+  if (result.status === 'ok') {
+    attempts.delete(key);
+    return res.json({ ok: true });
+  }
+  if (result.status === 'unavailable') {
+    return res.status(503).json({ error: 'service_unavailable', message: '인증 저장소에 접속할 수 없습니다.' });
+  }
+
+  recordFailure(key);
+  log.warn(`verify-password failed for ${req.user.username} from ${key}`);
+  return res.status(401).json({ error: 'invalid_password', message: '비밀번호가 맞지 않습니다.' });
+});
+
 router.get('/me', requireAuth, (req, res) => {
   res.json({ user: { username: req.user.username, displayName: req.user.displayName }, expiresAt: req.user.expiresAt });
 });

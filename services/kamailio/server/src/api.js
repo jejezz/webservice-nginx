@@ -15,6 +15,7 @@ const rpc = require('./rpc');
 const db = require('./db');
 const subscribers = require('./subscribers');
 const config = require('./config');
+const journal = require(require('path').resolve(__dirname, '../../../../lib/journal'));
 const stats = require('./stats');
 const { requireAuth } = require('./auth/session');
 const log = require('./utils/logger');
@@ -105,6 +106,22 @@ function createApiRouter() {
   router.use(requireAuth);
 
   /** 개요 — 서비스 자신 + Kamailio 요약 */
+
+  /**
+   * systemd 저널 — 이 서비스는 pm2 가 아니라 systemd 가 띄우므로 로그가
+   * 저널에만 있습니다. 터미널을 열지 않고도 볼 수 있게 그대로 내려 줍니다.
+   *
+   * **읽기 전용이고 유닛 이름은 여기 박혀 있습니다.** 사람이 넣는 값은 줄 수와
+   * 필터뿐이고, 셸을 거치지 않습니다 (lib/journal.js 의 경계).
+   */
+  router.get('/logs', async (req, res) => {
+    res.json(await journal.read('kamailio', {
+      lines: req.query.lines,
+      grep: req.query.grep,
+      minutes: req.query.minutes,
+    }));
+  });
+
   router.get('/overview', async (req, res) => {
     const data = await rpc.callAll({
       version: ['core.version'],

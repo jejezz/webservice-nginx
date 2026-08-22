@@ -23,6 +23,11 @@ module.exports = {
   // 브라우저는 nginx 를 거쳐 같은 경로로 가고, 이 프로세스는 루프백으로 직접 간다.
   JANUS_API_BASE: process.env.JANUS_API_BASE || 'http://127.0.0.1:8088/janus-api',
 
+  // manager 의 API. 민감한 값을 화면에 꺼내기 전에 "지금 이 사람이 맞는지" 를
+  // 비밀번호로 다시 확인할 때 부른다 (POST /verify-password). 계정은 manager 가
+  // 소유하므로 이 서비스는 물어볼 뿐이다.
+  MANAGER_API_BASE: process.env.MANAGER_API_BASE || 'http://127.0.0.1:28084/manager/api',
+
   // Admin API. 루프백에만 열려 있고 nginx 라우트가 없다.
   // 세션·핸들·미디어 상태를 여기서 읽는다.
   JANUS_ADMIN_BASE: process.env.JANUS_ADMIN_BASE || 'http://127.0.0.1:7088/admin',

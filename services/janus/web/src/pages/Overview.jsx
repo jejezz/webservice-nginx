@@ -1,5 +1,6 @@
 import { AlertCircle, Activity, Cpu, Network, Puzzle, RefreshCw } from 'lucide-react';
 import { AddressCard } from '@/components/AddressCard';
+import { ApiSecretCard } from '@/components/ApiSecretCard';
 import { InfoCard, StatTile } from '@/components/InfoCard';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -169,6 +170,8 @@ export default function Overview() {
       </Card>
 
       <AddressCard data={addresses} />
+
+      <ApiSecretCard />
 
       <div className="flex items-center gap-2">
         <Button variant="outline" size="sm" onClick={reload} disabled={refreshing}>
