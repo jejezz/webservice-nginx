@@ -384,8 +384,16 @@ report() {
         pending=$((pending + 1))
     fi
 
-    if [[ -n "$ws_addr" ]]; then
-        warn "WebSocket 트랜스포트가 켜져 있습니다 (${ws_addr}) — 이 계획에서는 쓰지 않습니다 (plan.md ①)"
+    # WebRTC 클라이언트가 붙는 시그널링 입구. 밖에서는 nginx 가 TLS 를 끊고
+    # /janus-ws 로 넘긴다 (nginx-conf/service.ini 의 [route:ws]).
+    if [[ -z "$ws_addr" ]]; then
+        pend "WebSocket 트랜스포트(${WS_PORT})가 열려 있지 않습니다 — WebRTC 클라이언트가 붙을 곳이 없습니다"
+        pending=$((pending + 1))
+    elif [[ "$ws_addr" == 127.0.0.1:* ]]; then
+        ok "WebSocket 수신 중: ${ws_addr} (루프백 전용 — 밖에서는 nginx 의 /janus-ws 로)"
+    else
+        # 밖에서 직접 닿으면 TLS 없이 시그널링이 오간다. ws_ip 로 좁혀야 한다.
+        warn "WebSocket 이 ${ws_addr} 에 열려 있습니다 — ws_ip 를 127.0.0.1 로 좁히세요"
         problems=$((problems + 1))
     fi
 
@@ -727,9 +735,9 @@ apply() {
     [[ "$admin_addr" == 127.0.0.1:* ]] \
         && ok "Admin API: ${admin_addr} (루프백 전용)" \
         || warn "Admin API 가 예상과 다릅니다: ${admin_addr:-열려 있지 않음}"
-    [[ -z "$ws_addr" ]] \
-        && ok "WebSocket 트랜스포트 꺼짐 (의도한 대로)" \
-        || warn "WebSocket 트랜스포트가 열려 있습니다: ${ws_addr}"
+    [[ "$ws_addr" == 127.0.0.1:* ]] \
+        && ok "WebSocket: ${ws_addr} (루프백 전용)" \
+        || warn "WebSocket 이 예상과 다릅니다: ${ws_addr:-열려 있지 않음}"
 
     echo
     echo "다음 단계 — 계획서 3단계 (대시보드 서비스와 라우트 개방):"

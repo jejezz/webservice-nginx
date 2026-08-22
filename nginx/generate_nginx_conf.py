@@ -138,6 +138,23 @@ class Route:
 
         self.proxy_path = (cfg.get("proxy_path") or "").strip()
         self.websocket = as_bool(cfg.get("websocket"))
+
+        # 같은 데몬의 **다른 포트**로 보내는 라우트. 헬스는 [service] 의 첫 포트로
+        # 그대로 가므로, 포트마다 서비스를 쪼개지 않아도 된다.
+        #
+        # 왜 [service] 의 ports 에 더하면 안 되는가: 거기 둘 이상을 적으면
+        # least_conn 로드밸런싱이 된다. 그건 "같은 것을 여러 벌 돌린다" 는 뜻이고,
+        # 여기서 필요한 것은 "같은 데몬의 다른 입구" 다.
+        port_value = (cfg.get("port") or "").strip()
+        if port_value:
+            try:
+                self.port = int(port_value)
+            except ValueError:
+                raise ConfigError(f"[{section_name}] port 는 숫자여야 합니다: {port_value!r}")
+            if not (1 <= self.port <= 65535):
+                raise ConfigError(f"[{section_name}] port 가 범위를 벗어납니다: {self.port}")
+        else:
+            self.port = None
         self.buffering = (cfg.get("buffering") or "on").strip().lower() != "off"
         self.max_body = (cfg.get("max_body") or "").strip()
 
@@ -148,13 +165,20 @@ class Route:
             raise ConfigError(f"[{section_name}] timeout/order 는 숫자여야 합니다: {err}")
 
     @property
+    def upstream(self):
+        """이 라우트가 보낼 곳. port 를 적었으면 그 포트 전용 업스트림이다."""
+        if self.port is None:
+            return self.service.upstream
+        return f"{self.service.upstream[:-len('_backend')]}_{self.key}_backend"
+
+    @property
     def match_key(self):
         """충돌 검사용 정규화 키. 'location  =  /a/' 와 'location = /a/' 를 같게 본다."""
         return re.sub(r"\s+", " ", self.location).strip()
 
     def render(self):
         proto = "https" if self.service.protocol == "https" else "http"
-        target = f"{proto}://{self.service.upstream}{self.proxy_path}"
+        target = f"{proto}://{self.upstream}{self.proxy_path}"
 
         lines = [f"    location {self.location} {{"]
         lines.append(f"        # {self.service.name} ({self.key})")
@@ -226,13 +250,28 @@ class Service:
             self.routes.append(Route(self, section_name, parser[section_name]))
 
     def render_upstream(self):
+        blocks = []
+
         lines = [f"upstream {self.upstream} {{"]
         if len(self.ports) > 1:
             lines.append("    least_conn;")
         for port in self.ports:
             lines.append(f"    server {self.host}:{port} max_fails=3 fail_timeout=10s;")
         lines.append("}")
-        return "\n".join(lines)
+        blocks.append("\n".join(lines))
+
+        # port 를 따로 적은 라우트마다 업스트림을 하나씩 더 만든다.
+        for route in self.routes:
+            if route.port is None:
+                continue
+            blocks.append(
+                f"upstream {route.upstream} {{\n"
+                f"    # {self.name} ({route.key}) — 같은 데몬의 다른 입구\n"
+                f"    server {self.host}:{route.port} max_fails=3 fail_timeout=10s;\n"
+                f"}}"
+            )
+
+        return "\n\n".join(blocks)
 
 
 def load_services(services_dir):

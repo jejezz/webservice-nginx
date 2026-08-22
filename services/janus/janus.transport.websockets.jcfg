@@ -1,32 +1,45 @@
-# Janus WebSocket 트랜스포트 — OWNED-BY-WEBSERVICES (전부 꺼 둠)
+# Janus WebSocket 트랜스포트 — OWNED-BY-WEBSERVICES
 #
 # derived-from-sample: ec2900b570ec72bd   (janus.transport.websockets.jcfg.sample, Janus 1.4.1)
 #
 # 이 파일은 services/janus/janus.transport.websockets.jcfg 의 사본입니다.
 # **직접 고치지 마세요** — install.sh --apply 가 덮어씁니다.
 #
-# --- 왜 꺼 두는가 ---
+# --- 무엇을 위해 켰는가 ---
 #
-# janus.js 는 WebSocket 도 REST 도 모두 지원하므로 어느 쪽이든 동작합니다.
-# 그런데 이 프로젝트에서 서비스의 헬스 URL 은
+# WebRTC 클라이언트가 붙을 WebSocket 시그널링 주소가 필요해서 켰습니다.
+# 밖에서는 nginx 가 TLS 를 끊고 /janus-ws 로 넘깁니다.
 #
-#     host + nginx-conf 의 ports[0] + health_path
+#     브라우저/앱 ──wss://<서버>/janus-ws──▶ nginx ──ws://127.0.0.1:8188──▶ Janus
 #
-# 로 만들어지고, 서비스 하나에 포트는 하나뿐입니다. 라우트를 WS 포트로 보내면
-# 헬스도 그 포트로 가는데, **Janus 의 WS 트랜스포트는 평범한 HTTP GET 에
-# 응답하지 않아** manager 대시보드에 영원히 "중단" 으로 뜹니다.
+# --- 왜 예전에는 꺼 두었는가, 무엇이 바뀌었는가 ---
 #
-# HTTP 트랜스포트로 두면 <base_path>/info 가 그대로 헬스가 되어 규약에 손댈
-# 것이 없습니다. 그래서 REST 로 고정하고 이 트랜스포트는 켜지 않습니다.
-# 자세한 검토와 나중에 WS 로 옮기는 방법(스키마에 health_port 추가)은
-# docs/plan.md 의 ① 절에 있습니다.
+# 서비스의 헬스 URL 은 nginx-conf 의 host + ports[0] + health_path 로 만들어집니다.
+# 예전에는 라우트가 곧 그 포트라, WS 로 보내면 헬스도 WS 포트로 갔습니다.
+# **Janus 의 WS 트랜스포트는 평범한 HTTP GET 에 응답하지 않아** manager 대시보드에
+# 영원히 "중단" 으로 떴습니다. 그래서 REST 하나로 고정했습니다 (docs/plan.md ①).
 #
-# 모듈 자체를 janus.jcfg 의 transports.disable 로 막지는 않았습니다. 그러면
-# 여기서 ws = true 로 바꿔도 조용히 동작하지 않는 함정이 됩니다. 끄는 자리는
-# 이 파일 한 곳입니다.
+# 이제 nginx-conf 의 [route:*] 가 자기 포트를 가질 수 있습니다 (`port = 8188`).
+# 헬스는 [service] 의 ports[0](8088, REST)로 그대로 가고, WS 는 그 옆문으로만
+# 나갑니다. plan.md 가 "정공법" 이라 적어 둔 health_port 확장과 같은 것을,
+# 헬스가 아니라 라우트 쪽에 붙여 푼 것입니다.
+#
+#   REST (8088)  /janus-api   janus.js · **헬스**(/janus-api/info)
+#   WS   (8188)  /janus-ws    WebRTC 클라이언트 시그널링
+#
+# --- 경계 ---
+#
+# ws_ip 로 **루프백에만** 답니다. TLS 는 nginx 가 끊으므로 wss 는 켜지 않습니다
+# (Janus 에 인증서를 두 벌 두지 않기 위해서입니다). Admin API 의 WS 도 그대로
+# 꺼 둡니다 — 관리 API 는 127.0.0.1:7088 하나면 충분합니다.
 
 general: {
-	ws = false
+	ws = true
+	ws_port = 8188
+	# nginx 만 이 포트에 붙습니다. 밖에서 직접 닿는 길은 두지 않습니다.
+	ws_ip = "127.0.0.1"
+
+	# TLS 는 nginx 가 끊습니다.
 	wss = false
 }
 

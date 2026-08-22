@@ -57,11 +57,47 @@ websocket = true
 |---|---|---|
 | `location` | — | nginx location 지시자 그대로. `= /health`, `/manager`, `~ ^/x/(a\|b)$` 모두 가능 |
 | `proxy_path` | (없음) | 백엔드에서의 경로. **비우면 원본 URI 가 그대로 전달됩니다** |
+| `port` | (서비스의 `ports`) | **같은 데몬의 다른 입구.** 이 라우트만 이 포트로 보냅니다 (아래) |
 | `websocket` | `false` | `true` 면 `Upgrade`/`Connection` 헤더를 넘깁니다 |
 | `buffering` | `on` | `off` 면 SSE 용으로 버퍼링·캐시를 끄고 chunked 를 켭니다 |
 | `timeout` | `120` | `proxy_send_timeout` / `proxy_read_timeout` (초) |
 | `max_body` | (서버 기본) | `client_max_body_size`. 업로드가 큰 라우트에만 |
 | `order` | `100` | 생성 순서. **정규식 location 은 순서대로 평가되므로** 먼저 걸려야 하는 것에 낮은 값을 줍니다 |
+
+### `port` — 같은 데몬의 다른 입구
+
+한 데몬이 포트를 여럿 여는 일이 있습니다. Janus 가 그렇습니다 — 같은 API 를
+REST(8088)와 WebSocket(8188) 두 곳으로 냅니다.
+
+```ini
+[service]
+name  = janus
+ports = 8088                  ; 헬스는 늘 이 포트로 간다
+
+[route:api]
+location = /janus-api         ; → 8088
+
+[route:ws]
+location  = /janus-ws
+port      = 8188              ; → 8188
+websocket = true
+```
+
+**`[service]` 의 `ports` 에 8188 을 더하면 안 됩니다.** 거기 둘 이상을 적으면
+`least_conn` 로드밸런싱이 됩니다. 그건 *"같은 것을 여러 벌 돌린다"* 는 뜻이고,
+여기 필요한 것은 *"같은 데몬의 다른 입구"* 입니다.
+
+`port` 를 쓰면 그 라우트만 별도 업스트림으로 나갑니다.
+
+```nginx
+upstream janus_backend    { server 127.0.0.1:8088 …; }
+upstream janus_ws_backend { server 127.0.0.1:8188 …; }
+```
+
+**헬스는 영향을 받지 않습니다** — 헬스 URL 은 `[service]` 의 `ports[0]` 로
+만들어지므로 그대로 8088 입니다. Janus 의 WS 트랜스포트는 평범한 HTTP GET 에
+응답하지 않아서, 헬스가 그쪽으로 가면 대시보드에 영원히 "중단" 으로 뜹니다.
+`port` 는 그 문제를 건드리지 않고 옆문만 여는 방법입니다.
 
 ### `proxy_path` 를 비워 두는 것이 현재의 기본
 
