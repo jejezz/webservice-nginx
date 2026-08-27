@@ -802,10 +802,10 @@ apply() {
         || warn "WebSocket 이 예상과 다릅니다: ${ws_addr:-열려 있지 않음}"
 
     echo
-    echo "다음 단계 — 계획서 3단계 (대시보드 서비스와 라우트 개방):"
-    echo "  ${SCRIPT_DIR}/docs/plan.md"
-    echo
-    echo "지금은 루프백에서만 닿습니다. nginx-conf 가 아직 enabled = false 입니다."
+    #echo "다음 단계 — 계획서 3단계 (대시보드 서비스와 라우트 개방):"
+    #echo "  ${SCRIPT_DIR}/docs/plan.md"
+    #echo
+    #echo "지금은 루프백에서만 닿습니다. nginx-conf 가 아직 enabled = false 입니다."
 }
 
 # ---------- 되돌리기 ----------

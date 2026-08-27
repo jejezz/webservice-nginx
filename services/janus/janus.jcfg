@@ -28,7 +28,7 @@ general: {
 	# /janus-api/info 에 그대로 나옵니다. 장비를 구분하려고 둡니다.
 	server_name = "webservices-janus"
 
-	debug_level = 4
+	debug_level = 6
 	# 로그는 journald 가 받습니다. 색상 이스케이프와 자체 타임스탬프는
 	# 저널에서 잡음이 되므로 끕니다 (journalctl 이 시각을 붙여 줍니다).
 	debug_colors = false
