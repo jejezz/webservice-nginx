@@ -34,7 +34,7 @@ Flutter·안드로이드·브라우저 등 **WebRTC 클라이언트를 만드는
       │                                 │ Kamailio ├──▶│ 인터폰  │
       │                                 └──────────┘   └────────┘
       │
-      │ ③  https://<서버>/rtc-relay/register  (FCM 토큰 · sip_user 등록)
+      │ ③  https://<서버>/iot/register  (FCM 토큰 · sip_user 등록)
       └────────────────────────────────▶ rtc-relay-server ──▶ FCM
 ```
 
@@ -161,7 +161,7 @@ wss://<서버>/janus-ws          서브프로토콜: janus-protocol   ← 필수
 단말이 0대인 이유가 이것입니다.
 
 ```
-POST https://<서버>/rtc-relay/register/mobile
+POST https://<서버>/iot/register/mobile
 {
   "uuid": "<단말 고유 id>",
   "email": "…", "complex": "…", "address": "…",
@@ -175,12 +175,12 @@ POST https://<서버>/rtc-relay/register/mobile
 - 안 보내면 **기존 값을 건드리지 않습니다**(빈 문자열을 보내면 연결이 끊깁니다).
 - 쓸 수 있는 문자는 `A-Z a-z 0-9 . _ -` 64자까지입니다.
 
-경로 끝의 **`/mobile` 을 빠뜨리지 마세요** — `/rtc-relay/register` 는 404 입니다.
+경로 끝의 **`/mobile` 을 빠뜨리지 마세요** — `/iot/register` 는 404 입니다.
 빈 본문으로 한 번 찔러 보면 붙었는지 바로 압니다.
 
 ```bash
 curl -k -X POST -H 'Content-Type: application/json' -d '{}' \
-  https://<서버>/rtc-relay/register/mobile
+  https://<서버>/iot/register/mobile
 # → 400 {"error":"uuid, email, complex, address, token 은 필수입니다."}   ← 이러면 정상
 ```
 
@@ -225,7 +225,7 @@ curl -k -X POST -H 'Content-Type: application/json' -d '{}' \
 | **연결은 됐는데 소리가 안 남** | 코덱을 opus 로 좁힘 | offer 에 PCMU/PCMA 유지 |
 | 통화 중 갑자기 끊김 | keepalive 안 보냄 (세션 60초) | 30초마다 keepalive |
 | 착신이 안 옴 | `sip_user` 미등록, 또는 등록이 60초를 넘김 | `/register/mobile` 에 `sip_user`, 깨어나면 등록 먼저 |
-| 단말 등록이 404 | 경로가 `/register` (끝에 `/mobile` 없음) | `/rtc-relay/register/mobile` |
+| 단말 등록이 404 | 경로가 `/register` (끝에 `/mobile` 없음) | `/iot/register/mobile` |
 | 밖에서 소리만 안 남 | 공유기 UDP 포워딩 없음 | `20000-20200`(WebRTC) 열기 |
 | REST 로 붙였는데 세션이 안 만들어짐 | `/janus-api/` 끝 슬래시 → `POST` 가 301 로 본문을 잃음 | 슬래시 없이 `/janus-api` |
 

@@ -29,7 +29,7 @@ The CallFusion server provides both REST APIs and WebSocket connectivity for And
 - **WebSocket IoT**: `wss://jejezzhome.iptime.org:28099/iot`
 
 관리 대시보드는 사람이 보는 화면이라 경로가 다릅니다 — Nginx 를 거쳐
-`https://jejezzhome.iptime.org/rtc-relay/dashboard` 이며 manager 로그인이 필요합니다.
+`https://jejezzhome.iptime.org/iot/dashboard` 이며 manager 로그인이 필요합니다.
 단말이 쓸 일은 없습니다.
 
 ## Group Communication Application Features

@@ -9,7 +9,7 @@
  *
  *   인터폰 ──INVITE(1001)──▶ Kamailio
  *                            ├─ lookup 실패 → ts_store()
- *                            └─ POST /rtc-relay/sip-push  ← 여기
+ *                            └─ POST /iot/sip-push  ← 여기
  *                                        │
  *                                   FCM ─┴─▶ 단말 기동
  *                                              │

@@ -14,7 +14,7 @@ webservices/
     ├── ws-bridge/              # WebSocket Bridge     /ws-bridge/   (28083)
     ├── stock-analyzer/         # 주식 차트·예측       /stock-analyzer (28085)
     ├── route-a|route-b|route-c/# 예제 서비스          (라우트 꺼 둠) (28080~28082)
-    └── rtc-relay-server/       # rtc-relay-server     /rtc-relay/   (28099, 자체 HTTPS)
+    └── rtc-relay-server/       # rtc-relay-server     /iot/         (28099, 자체 HTTPS)
 ```
 
 경계는 이렇습니다.

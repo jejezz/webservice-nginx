@@ -105,7 +105,7 @@ tsx 는 타입을 확인하지 않으므로 이 명령이 유일한 타입 안�
 
 ## 관리 대시보드
 
-`https://<서버>/rtc-relay/dashboard`
+`https://<서버>/iot/dashboard`
 
 manager 로그인 하나로 들어갑니다 — 이 서비스는 계정을 두지 않고 세션만 검증합니다
 (`src/auth/session.ts`, 시크릿은 `services/.session-secret`). 화면은 개요 · 방 ·
@@ -120,14 +120,14 @@ cd web && npm install && npm run build   # 빌드. 빌드가 없으면 대시보
 cd web && npm run dev                    # 개발 서버 (5185, API 는 28099 로 프록시)
 ```
 
-`web/vite.config.js` 의 `BASE`(`/rtc-relay/dashboard/`)가 라우터 basename 과 API
+`web/vite.config.js` 의 `BASE`(`/iot/dashboard/`)가 라우터 basename 과 API
 경로의 출처입니다. Nginx 라우트(`nginx-conf/service.ini` 의 `location`)나 대시보드
 경로(`pm2-conf/app.ini` 의 `DASHBOARD_PATH`)를 바꾸면 이 값도 함께 바꿔야 합니다.
 
 ### 경로가 둘인 이유
 
 Android 단말은 포트 28099 에 자체 인증서로 직접 붙고, 사람은 Nginx 를 거쳐
-`/rtc-relay/...` 로 옵니다. 앱은 같은 라우터를 두 경로에 마운트해 양쪽에 응답합니다.
+`/iot/...` 로 옵니다. 앱은 같은 라우터를 두 경로에 마운트해 양쪽에 응답합니다.
 
 예외가 하나 있습니다. `/mobile-crud-operation` 은 **포트 직접 경로에만** 붙입니다.
 Nginx 를 거친 요청은 소켓 주소가 항상 127.0.0.1 이라 이 라우트의 내부망 IP 제한이

@@ -51,7 +51,7 @@ process.title = "rtc-relay-server";
  * Nginx 가 이 서비스를 프록시할 때 쓰는 경로 접두사.
  * 단말은 포트(28099)로 직접 붙으므로 루트 경로도 함께 받는다.
  */
-const BASE_PATH = process.env.BASE_PATH || '/rtc-relay';
+const BASE_PATH = process.env.BASE_PATH || '/iot';
 
 /** 관리 대시보드 경로 (BASE_PATH 하위). manager 가 이 값으로 링크를 만든다. */
 const DASHBOARD_PATH = process.env.DASHBOARD_PATH || '/dashboard';
@@ -285,7 +285,7 @@ export class CallFusion {
         this.expressApp.use(express.urlencoded({ extended: true }));
 
         // 라우트를 Router 하나에 모아 두 곳에 붙인다 — 루트('/')와 Nginx 접두사(BASE_PATH).
-        // Nginx 의 proxy_pass 에 URI 가 없어 원본 경로(/rtc-relay/...)가 그대로 오기 때문이다.
+        // Nginx 의 proxy_pass 에 URI 가 없어 원본 경로(/iot/...)가 그대로 오기 때문이다.
         // 단말은 포트로 직접(루트 경로), 사람은 Nginx 를 거쳐(접두사) 같은 앱에 닿는다.
         const router = express.Router();
 
@@ -321,7 +321,7 @@ export class CallFusion {
         // Mobile CRUD operations - Internal access only
         // 이 경로만 router 가 아니라 앱에 직접 붙인다.
         //
-        // router 는 BASE_PATH('/rtc-relay')에도 마운트되는데, Nginx 를 거쳐 들어온 요청은
+        // router 는 BASE_PATH('/iot')에도 마운트되는데, Nginx 를 거쳐 들어온 요청은
         // 소켓 주소가 항상 127.0.0.1(Nginx)이라 아래 내부망 검사를 무조건 통과해 버린다.
         // 즉 프록시 경로로 노출하는 순간 IP 제한이 무의미해진다. 그래서 포트로 직접
         // 들어온 요청(루트 경로)에만 존재하게 한다.

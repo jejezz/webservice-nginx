@@ -1,4 +1,4 @@
-// API 는 SPA 와 같은 경로(/rtc-relay/dashboard) 아래에 있다.
+// API 는 SPA 와 같은 경로(/iot/dashboard) 아래에 있다.
 const API_BASE = `${import.meta.env.BASE_URL.replace(/\/+$/, '')}/api`;
 
 export class ApiError extends Error {

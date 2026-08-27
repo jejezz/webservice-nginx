@@ -14,7 +14,7 @@
 | `ws-bridge` | 28083 | `services/ws-bridge` | nginx `/ws-bridge/`, 자체 대시보드 `/dashboard` |
 | `stock-analyzer` | 28085 | `services/stock-analyzer` | nginx `/stock-analyzer`. tsx 로 TS 직접 실행 |
 | `route-a` `route-b` `route-c` | 28080·28081·28082 | `services/route-*` | 예제 서비스. nginx 라우트는 꺼 둠(`enabled = false`) |
-| `rtc-relay-server` | 28099 (자체 HTTPS) | `services/rtc-relay-server` | `/rtc-relay/` — 단말은 포트로 직접, 대시보드는 nginx 경유 |
+| `rtc-relay-server` | 28099 (자체 HTTPS) | `services/rtc-relay-server` | `/iot/` — 단말은 포트로 직접, 대시보드는 nginx 경유 |
 | `callfusion-v2` | 28091 | `services/callfusion-v2-server` | nginx 라우트 없음 — 포트 직결 |
 | `nginx` | 80/443 | — | ❌ pm2 아님. systemd 가 유지 |
 | `webrtc-signal-server` | — | `services/webrtc-signal-server` | ⏳ 미등록 (선언 없음) |
