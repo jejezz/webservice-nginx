@@ -33,7 +33,10 @@ import type { RelayGateway } from '../gateway';
 import { TokenMessage } from 'firebase-admin/messaging';
 import { DbConn } from './dbConnection';
 import { sendToTargets, PushTarget } from './push';
-import { complexClause, pointsToAnotherComplex, COMPLEX_ID } from './complex';
+import { complexClause, pointsToAnotherComplex, complexId } from './complex';
+import { approve as approveEnrollment, reject as rejectEnrollment, homeAllowsControl } from './enrollment';
+import { pendingFor } from './enrollmentEvents';
+import { normalizeAddress } from './address';
 import { IoTMessage, ClientMessage } from './clientMessage';
 import logger from './logger'; // Import your configured logger
 
@@ -104,6 +107,14 @@ const WS_METHODS = {
     BYE: 'bye',
     /** @brief Error notification message */
     ERROR: 'error',
+
+    // 등록 승인 (월패드 ↔ 서버)
+    /** @brief 대기 중인 등록 목록을 달라 */
+    ENROLL_LIST: 'enroll.list',
+    /** @brief 이 요청을 인정한다 */
+    ENROLL_APPROVE: 'enroll.approve',
+    /** @brief 이 요청을 거절한다 */
+    ENROLL_REJECT: 'enroll.reject',
     
     // IoT Methods
     /** @brief Create IoT room/device */
@@ -578,7 +589,7 @@ export class WebSocketService {
         // 옛 형식(호스트 이름)이면 판단하지 않는다 — 지금 도는 인터폰을
         // 깨지 않기 위해서다 (libs/complex.ts 의 complexFromAgent).
         if (pointsToAnotherComplex(msg.receiver)) {
-            logger.warn(`다른 단지로 향한 호출을 거부합니다: ${msg.receiver} (이 서버 ${COMPLEX_ID})`);
+            logger.warn(`다른 단지로 향한 호출을 거부합니다: ${msg.receiver} (이 서버 ${complexId()})`);
             // 조용히 버리면 인터폰은 벨이 울리기를 기다리며 매달린다. 알려 준다.
             this.sendError(ws, Error('this server serves another complex'));
             return false;
@@ -722,7 +733,12 @@ export class WebSocketService {
                 case WS_METHODS.MODIFY: this._handleIotModify(ws, json); break; // modify is same as create
                 case WS_METHODS.JOIN: this._handleIotJoin(ws, json); break;
                 case WS_METHODS.SUBSCRIBE: this._handleIotSubscribe(ws, json); break;
-                case WS_METHODS.IOT_CONTROL: this._handleIotControl(ws, json); break;
+                case WS_METHODS.IOT_CONTROL:
+                    // 권한 조회가 비동기라 safeHandle 밖으로 나간다. 여기서 받는다.
+                    this._handleIotControl(ws, json).catch((err: any) => {
+                        logger.error(`[IOT] control 처리 실패: ${err?.message ?? err}`);
+                    });
+                    break;
                 // async 함수라 안에서 던진 예외는 safeHandle 이 못 잡는다.
                 // 거부된 프로미스가 unhandledRejection 으로 새지 않게 여기서 받는다.
                 case WS_METHODS.IOT_STATUS:
@@ -732,6 +748,16 @@ export class WebSocketService {
                     break;
                 case WS_METHODS.UNSUBSCRIBE: this._handleIotUnsubscribe(ws, json); break;
                 case WS_METHODS.ERROR: this._handleIotError(ws, json); break;
+
+                // 등록 승인. 월패드만 부를 수 있다 (_wallpadOf 가 확인한다).
+                // async 라 안에서 던진 예외를 safeHandle 이 못 잡으므로 여기서 받는다.
+                case WS_METHODS.ENROLL_LIST:
+                case WS_METHODS.ENROLL_APPROVE:
+                case WS_METHODS.ENROLL_REJECT:
+                    this._handleEnrollment(ws, json).catch((err: any) => {
+                        logger.error(`[IOT] 등록 승인 처리 실패: ${err?.message ?? err}`);
+                    });
+                    break;
             }
         }));
         ws.once('error', error => {
@@ -740,6 +766,71 @@ export class WebSocketService {
         ws.once('close', () => {
             this.app.roomTable.removeClientFromRooms(ws);
         });        
+    }
+
+    // ===== 등록 승인 (월패드) =====
+
+    /**
+     * 이 소켓이 **그 세대의 월패드**인지 확인하고, 맞으면 그 클라이언트를 준다.
+     *
+     * ── 무엇을 신뢰하는가 ────────────────────────────────────────
+     * 월패드는 IoT 방을 **만든 쪽**(initiator)이다. 방을 만들려면 RoomID 를
+     * 알아야 하고, RoomID 는 그 집 월패드 화면에서만 보인다. 즉 여기서 얻는
+     * 신뢰 수준은 **기존 제어 권한과 같다** — 새로 만든 것이 아니라, 이미
+     * 제어를 허용하던 그 경계를 승인에도 그대로 쓴다.
+     *
+     * ⚠️ 그러므로 이것은 월패드의 **강한 인증이 아니다.** RoomID 를 아는
+     *    누구나 여기까지 온다. 제대로 하려면 월패드에 클라이언트 인증서를
+     *    발급해야 한다 (nginx/cert/ 에 기반이 있다). 그 전까지는 "제어할 수
+     *    있는 자는 승인도 할 수 있다" 는 선까지가 이 구현의 보장이다.
+     */
+    private _wallpadOf(ws: WebSocket): RtcClient | null {
+        const client = this.app.roomTable.findClient(ws);
+        if (!client || !client.initiator) return null;
+        return client;
+    }
+
+    /** 월패드가 보내는 enroll.* 를 처리한다. */
+    private async _handleEnrollment(ws: WebSocket, msg: any): Promise<void> {
+        const wallpad = this._wallpadOf(ws);
+        if (!wallpad) {
+            this.sendError(ws, Error('등록 승인은 그 세대의 월패드만 할 수 있습니다.'));
+            return;
+        }
+        const address = normalizeAddress(wallpad.getAddress());
+
+        if (msg.method === WS_METHODS.ENROLL_LIST) {
+            wallpad.send({ method: WS_METHODS.ENROLL_LIST, address, pending: await pendingFor(address) } as any);
+            return;
+        }
+
+        const enrollmentId = Number(msg.enrollmentId ?? msg.id);
+        if (!Number.isFinite(enrollmentId) || enrollmentId <= 0) {
+            this.sendError(ws, Error("invalid request: missing 'enrollmentId'"));
+            return;
+        }
+
+        if (msg.method === WS_METHODS.ENROLL_REJECT) {
+            const ok = await rejectEnrollment(enrollmentId, 'wallpad');
+            wallpad.send({ method: WS_METHODS.ENROLL_REJECT, enrollmentId, ok,
+                           pending: await pendingFor(address) } as any);
+            return;
+        }
+
+        // ENROLL_APPROVE — 무엇을 열어 줄지는 월패드가 정한다.
+        // 값을 안 보내면 **둘 다 꺼짐**이다. 반대로 두면 실수 한 번이 권한 부여가 된다.
+        const result = await approveEnrollment(enrollmentId, {
+            canCall: Boolean(msg.canCall),
+            canControl: Boolean(msg.canControl),
+        }, 'wallpad');
+
+        wallpad.send({
+            method: WS_METHODS.ENROLL_APPROVE,
+            enrollmentId,
+            ok: result.ok,
+            ...(result.ok ? {} : { error: result.reason, message: result.message }),
+            pending: await pendingFor(address),
+        } as any);
     }
 
     // ===== IOT METHODS =====
@@ -782,6 +873,8 @@ export class WebSocketService {
                                         ''/*client.getIoTPayload()*/);
                 // 아래 신규 생성 경로와 같은 방식으로 보낸다.
                 client.send(response);
+                // 끊겨 있는 동안 놓친 등록 요청을 따라잡게 한다.
+                this._pushPendingTo(client);
            }
            return;
         }
@@ -801,9 +894,33 @@ export class WebSocketService {
                                                 '200', 
                                                 ''/*client.getIoTPayload()*/);
             client.send(response);
+            this._pushPendingTo(client);
         } else {
             this.sendError(ws, Error("Cannot create client"));
         }
+    }
+
+    /**
+     * 월패드가 붙을 때 대기 중인 등록 요청을 건네준다.
+     *
+     * 등록 요청이 들어온 순간 월패드가 꺼져 있었으면 그 이벤트는 사라진다.
+     * 그래도 **진실은 DB 의 대기 표에 있으므로** 여기서 따라잡으면 된다.
+     * 이벤트를 큐에 쌓아 두지 않는 이유가 이것이다 — 큐를 또 관리할 필요가 없다.
+     *
+     * 대기가 없으면 아무것도 보내지 않는다. 접속마다 빈 목록이 날아가면
+     * 월패드 쪽에서 걸러야 할 것이 늘어난다.
+     */
+    private _pushPendingTo(client: RtcClient): void {
+        if (!client.initiator) return;   // 모바일이 아니라 월패드에만 보낸다
+        const address = normalizeAddress(client.getAddress());
+
+        void pendingFor(address).then((pending) => {
+            if (pending.length === 0) return;
+            client.send({ method: WS_METHODS.ENROLL_LIST, address, pending } as any);
+            logger.info(`월패드 접속 — 대기 중인 등록 ${pending.length}건 전달 (${address})`);
+        }).catch((err: any) => {
+            logger.error(`대기 목록 전달 실패 (${address}): ${err?.message ?? err}`);
+        });
     }
 
     /**
@@ -969,7 +1086,7 @@ export class WebSocketService {
      * - Provides one-way command transmission for device operation
      * - Logs control operations with timestamp for audit trail
      */
-    private _handleIotControl(ws: WebSocket, msg: IoTMessage) {
+    private async _handleIotControl(ws: WebSocket, msg: IoTMessage): Promise<void> {
         if (!msg.roomid || !msg.clientid) {
             // room id to join or create
             this.sendError(ws, Error("invalid control request: missing 'roomid' | 'clientid'"));
@@ -993,6 +1110,23 @@ export class WebSocketService {
         if (sender === null) {
             logger.warn(`room ${msg.roomid} 에 들어오지 않은 소켓의 iot-control 을 버린다`);
             this.sendError(ws, Error("You are not joined to the room"));
+            return;
+        }
+
+        /*
+         * 이 세대가 제어를 허용했는가 (can_control).
+         *
+         * 월패드(initiator)가 자기 집에 보내는 것은 검사하지 않는다 — 월패드는
+         * 승인하는 쪽이지 승인받는 쪽이 아니다.
+         *
+         * ⚠️ 세대 단위 검사다. WS 메시지에 단말 식별자가 없어 "이 소켓이 어느
+         *    등록 행인가" 를 알 수 없기 때문이다 (libs/enrollment.ts 의
+         *    homeAllowsControl 주석). 단말 단위로 막으려면 핸드셰이크가 uuid 를
+         *    실어 와야 한다.
+         */
+        if (!sender.initiator && !(await homeAllowsControl(sender.getAddress()))) {
+            logger.warn(`제어 거부 — 허용된 단말이 없는 세대: ${sender.getAddress()} (room ${msg.roomid})`);
+            this.sendError(ws, Error('이 세대에 제어가 허용된 단말이 없습니다. 월패드에서 승인하세요.'));
             return;
         }
 
@@ -1220,8 +1354,10 @@ async function findAndSendNotificationAsync(address: string, msg: any): Promise<
     // 단지 조건이 붙는 이유: address 는 `1B101U`(동/호)라 **단지 안에서만
     // 유일하다.** 두 단지에 모두 101동 101호가 있다 (libs/complex.ts).
     const c = complexClause();
+    // can_call — 이 세대가 인정한 단말만 부른다 (libs/enrollment.ts).
+    // 이 조건이 빠지면 단지+동+호만 아는 사람이 남의 집 초인종을 받는다.
     const sql = `SELECT id, token, email, push_error FROM ${config.tables.mobile}
-                  WHERE address = ? AND active = 1${c.sql}` + (targetEmail ? ` AND email = ?` : ``);
+                  WHERE address = ? AND active = 1 AND can_call = 1${c.sql}` + (targetEmail ? ` AND email = ?` : ``);
     const params = targetEmail ? [address, ...c.params, targetEmail] : [address, ...c.params];
 
     let rows: any[];

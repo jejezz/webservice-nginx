@@ -115,33 +115,6 @@ export function createApp(): Application {
         res.redirect(302, `${config.basePath}${config.dashboardPath}/tester`);
     });
 
-    // ── 관리 대시보드 ────────────────────────────────────────────
-    //
-    // manager 로그인 세션 하나로 들어온다. 이 서비스는 계정을 따로 두지 않고
-    // 검증만 한다. 이전에는 같은 정보를 무인증 HTML 페이지로 그대로 내보냈다.
-    const indexHtml = path.join(config.dashboardDir, 'index.html');
-    const hasDashboardBuild = fs.existsSync(indexHtml);
-
-    router.use(`${config.dashboardPath}/api`, createDashboardApi());
-
-    if (hasDashboardBuild) {
-        // 정적 에셋은 인증 없이 준다. (데이터가 없는 JS/CSS)
-        router.use(`${config.dashboardPath}/assets`, express.static(path.join(config.dashboardDir, 'assets'), {
-            immutable: true,
-            maxAge: '1y',
-        }));
-
-        // 페이지는 로그인 상태에서만 열리며, 아니면 manager 로그인으로 보낸다.
-        router.get(`${config.dashboardPath}`, requirePage, (_req: Request, res: Response) => res.sendFile(indexHtml));
-        router.get(`${config.dashboardPath}/*`, requirePage, (_req: Request, res: Response) => res.sendFile(indexHtml));
-    } else {
-        logger.warn(`대시보드 빌드를 찾을 수 없습니다: ${config.dashboardDir} — "cd web && npm install && npm run build"`);
-        router.get(`${config.dashboardPath}*`, (_req: Request, res: Response) => {
-            res.status(503).type('text/plain')
-                .send('Dashboard build not found. Run: cd services/websocket-relay/web && npm install && npm run build');
-        });
-    }
-
     // ── 내부 전용 — 앱에만 붙는다 (nginx 로는 닿지 않는다) ───────
     //
     // 단말 관리 CRUD. 사람이 쓰는 관리 화면은 세션을 요구하는 /dashboard 쪽에 있다.
@@ -165,6 +138,17 @@ export function createApp(): Application {
     app.use('/', router);
     app.use(config.basePath, router);
 
+    // ── 관리 대시보드 — **접두사 아래에만** 붙는다 ───────────────
+    //
+    // 위의 공용 라우터에 두지 않는 이유: 그러면 `/dashboard` 로도 열려서, nginx 를
+    // 거치지 않고 포트로 직접 들어온 요청에도 관리 화면이 나온다. 지금은 루프백에만
+    // 묶여 있어 같은 호스트에서만 가능하지만, 입구를 하나로 두는 편이 낫다 —
+    // "manager 를 거쳐 들어온다" 가 이 대시보드의 유일한 접근 경로다.
+    //
+    // 인증은 경로가 아니라 세션이 한다. 아래 requirePage/requireAuth 가
+    // manager 가 발급한 쿠키를 검증하고, 만료된 토큰은 거부한다 (auth/session.ts).
+    app.use(`${config.basePath}${config.dashboardPath}`, createDashboardRouter());
+
     app.use((req: Request, res: Response) => {
         res.status(404).json({ error: 'Not Found', path: req.path });
     });
@@ -176,6 +160,51 @@ export function createApp(): Application {
     });
 
     return app;
+}
+
+/**
+ * 관리 대시보드 라우터.
+ *
+ * manager 로그인 세션 하나로 들어온다. 이 서비스는 계정을 따로 두지 않고
+ * 검증만 한다 (auth/session.ts). 이전에는 같은 정보를 무인증 HTML 페이지로
+ * 그대로 내보냈다.
+ *
+ * **정적 에셋에도 세션을 요구한다.** 예전에는 "데이터가 없는 JS/CSS 라" 열어
+ * 뒀는데, 그러면 로그인하지 않은 사람도 관리 화면의 번들을 받아 어떤 API 가
+ * 어떤 모양으로 있는지 전부 읽을 수 있다. 데이터가 없다는 것과 알려 줄 것이
+ * 없다는 것은 다르다. 에셋은 페이지가 불러오므로 쿠키가 함께 가고, 캐시는
+ * 파일 이름에 해시가 붙어 있어 그대로 유효하다.
+ */
+function createDashboardRouter(): express.Router {
+    const router = express.Router();
+    const indexHtml = path.join(config.dashboardDir, 'index.html');
+
+    // API 는 401 JSON 으로 답한다 — 화면이 그걸 보고 로그인으로 보낸다.
+    router.use('/api', createDashboardApi());
+
+    if (!fs.existsSync(indexHtml)) {
+        logger.warn(`대시보드 빌드를 찾을 수 없습니다: ${config.dashboardDir} — "npm run web:build"`);
+        router.get('*', (_req: Request, res: Response) => {
+            res.status(503).type('text/plain')
+                .send('Dashboard build not found. Run: cd services/websocket-relay && npm run web:build');
+        });
+        return router;
+    }
+
+    router.use('/assets', requirePage, express.static(path.join(config.dashboardDir, 'assets'), {
+        immutable: true,
+        maxAge: '1y',
+    }));
+
+    // 페이지는 로그인 상태에서만 열리며, 아니면 manager 로그인으로 보낸다.
+    // SPA 라 어떤 경로로 들어와도 같은 index.html 을 준다.
+    router.get('*', requirePage, (_req: Request, res: Response) => {
+        // 로그아웃한 뒤 뒤로 가기로 화면이 되살아나지 않게 한다.
+        res.setHeader('Cache-Control', 'no-store');
+        res.sendFile(indexHtml);
+    });
+
+    return router;
 }
 
 /** 대시보드 빌드가 있는지. index.ts 가 기동 로그와 /health 에 싣는다. */

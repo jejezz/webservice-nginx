@@ -83,6 +83,20 @@ function verifyToken(token?: string): SessionUser | null {
 
     if (!payload.exp || Date.now() >= payload.exp) return null;
 
+    /**
+     * 관리자 콘솔(super) 토큰은 여기서 받지 않는다.
+     *
+     * manager 는 토큰을 두 종류로 발급한다 — 일반 세션과, 설정 화면에 쓰는
+     * 관리자 콘솔 토큰(payload.s === 'super', TTL 이 더 짧다). manager 자신의
+     * `verify()` 는 일반 세션 자리에 super 토큰이 오면 거부하는데
+     * (services/manager/server/src/auth/session.js), 이쪽 검증에는 그 규칙이
+     * 빠져 있어 **manager 가 거부하는 토큰을 이 대시보드는 받아들였다.**
+     *
+     * 두 토큰은 같은 시크릿으로 서명되므로 서명만으로는 구분되지 않는다.
+     * 발급하는 쪽의 규약을 그대로 따라 여기서도 막는다.
+     */
+    if (payload.s) return null;
+
     return { username: payload.u, displayName: payload.n, expiresAt: payload.exp };
 }
 
@@ -95,9 +109,11 @@ export function userFromRequest(req: Request): SessionUser | null {
 export function requireAuth(req: Request, res: Response, next: NextFunction): void {
     const user = userFromRequest(req);
     if (!user) {
+        // 캐시에 남아 이전 응답이 재사용되는 일이 없도록 못 박는다.
+        res.setHeader('Cache-Control', 'no-store');
         res.status(401).json({
             error: 'unauthorized',
-            message: '로그인이 필요합니다.',
+            message: '세션이 만료되었거나 로그인이 필요합니다.',
             loginUrl: '/manager/login',
         });
         return;

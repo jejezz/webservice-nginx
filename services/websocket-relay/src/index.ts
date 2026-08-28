@@ -34,7 +34,8 @@ import { RtcRoomTable } from './libs/rtcRoomTable';
 import { startWebsocketService } from './libs/websocketService';
 import { DbConn } from './libs/dbConnection';
 import { Firebase } from './libs/firebaseAdmin';
-import { backfillComplexId } from './libs/complex';
+import { backfillComplexId, complexId } from './libs/complex';
+import { startPruneTimer } from './libs/enrollment';
 
 process.title = config.serviceName;
 
@@ -80,7 +81,7 @@ function logConfiguration(): void {
     logger.info('설정:');
     logger.info(`- 듣기: http://${config.host}:${config.port} (TLS 는 nginx 가 끊는다)`);
     logger.info(`- 공개 경로: ${config.basePath}  ·  대시보드: ${config.basePath}${config.dashboardPath}${hasDashboardBuild() ? '' : ' (빌드 없음)'}`);
-    logger.info(`- 단지: ${config.complexId ?? '미설정 — 단지 검사를 하지 않습니다'}`);
+    logger.info(`- 단지: ${complexId() ?? '미설정 — 단지 검사를 하지 않습니다'}`);
     logger.info(`- 실행 환경: ${config.env}`);
     logger.info(`- DB: ${DbConn.isConfigured() ? `${config.db.user}@${config.db.host}:${config.db.port}/${config.db.name}` : '미설정 — 단말 등록 비활성'}`);
     logger.info(`- 표: ${config.tables.mobile}, ${config.tables.homenet}`);
@@ -175,6 +176,10 @@ async function main(): Promise<void> {
         // complex_id 가 비어 있는 행을 이 서버의 단지로 채운다.
         // SQL 마이그레이션은 .env 를 모르므로 여기서 한다 (libs/complex.ts).
         void backfillComplexId();
+
+        // 만료된 등록 대기를 주기적으로 지운다. 조회가 이미 expires_at 으로
+        // 거르므로 안전에 필요한 것은 아니고, 디스크 정리일 뿐이다.
+        startPruneTimer();
 
         startWebsocketService(gateway);
 

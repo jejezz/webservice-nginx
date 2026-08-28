@@ -24,7 +24,10 @@ import { getGateway } from '../gateway';
 import { DbConn } from '../libs/dbConnection';
 import logger from '../libs/logger'; // Import your configured logger
 import { normalizeSipUser, SIP_USER_ERROR } from '../libs/sipUser';
-import { COMPLEX_ID, COMPLEX_ID_RE, COMPLEX_ID_ERROR } from '../libs/complex';
+import { requestEnrollment } from '../libs/enrollment';
+import { PLACE_PART_RE } from '../libs/address';
+import { onEnrollmentPending } from '../libs/enrollmentEvents';
+import { complexId as serverComplexId, COMPLEX_ID_RE, COMPLEX_ID_ERROR } from '../libs/complex';
 
 /** @brief Express router instance for registration endpoints */
 const Route2Register = express.Router();
@@ -118,21 +121,23 @@ async function handlePostMobile(req: Request, res: Response) {
      * 잡는다. 단지 ID 는 앱을 깐 누구나 알 수 있는 값이라 **인증이 아니다** —
      * 오배송을 막는 안전망이다 (libs/complex.ts).
      *
-     *   서버에 COMPLEX_ID 없음  → 검사하지 않는다 (단지가 하나인 지금 배치)
+     *   서버에 단지 미설정      → 검사하지 않는다 (단지가 하나인 지금 배치)
      *   앱이 안 보냄            → 이 서버 값으로 채운다 (옛 앱 호환)
      *   보냈는데 다름           → 403. 조용히 받아 두면 그 단말은 영영 전화를
      *                              못 받는다 — 대상 조회가 단지로도 거르기 때문
      */
     const rawComplexId = req.body?.complexId ?? req.body?.complex_id;
-    let complexId: string | null = COMPLEX_ID;
+    // 매번 지금 값을 읽는다 — 대시보드에서 바뀔 수 있다 (libs/complex.ts).
+    const serverId = serverComplexId();
+    let complexId: string | null = serverId;
     if (rawComplexId !== undefined && rawComplexId !== null && String(rawComplexId).trim() !== '') {
         const v = String(rawComplexId).trim().toLowerCase();
         if (!COMPLEX_ID_RE.test(v)) {
             res.status(400).json({ error: COMPLEX_ID_ERROR });
             return;
         }
-        if (COMPLEX_ID && v !== COMPLEX_ID) {
-            logger.warn(`단지가 다른 등록을 거부했습니다: 보낸 값 ${v}, 이 서버 ${COMPLEX_ID}`);
+        if (serverId && v !== serverId) {
+            logger.warn(`단지가 다른 등록을 거부했습니다: 보낸 값 ${v}, 이 서버 ${serverId}`);
             res.status(403).json({
                 error: 'complex_mismatch',
                 message: '이 서버가 맡은 단지가 아닙니다. 앱에서 단지를 다시 선택하세요.',
@@ -160,53 +165,65 @@ async function handlePostMobile(req: Request, res: Response) {
     }
     const sipUser = parsed.value;
 
-    // uuid 에 UNIQUE 가 걸려 있어 조회 없이 한 번으로 끝난다.
-    // (이관 전에는 SELECT COUNT → INSERT 또는 UPDATE 3단계였다)
-    // sip_user 만 COALESCE 로 받는다 — 안 보냈을 때(null) 기존 값을 지우지 않기 위해서다.
     /*
-     * 토큰이 **바뀌었을 때만** 건강 상태를 손본다 (schema/003-push-health.sql).
+     * ── 여기서 곧바로 rtc_mobiles 에 넣지 않는다 ────────────────────
      *
-     *   active      FCM 이 "모르는 토큰" 이라고 해서 자동으로 내려간 행만 되살린다.
-     *               사람이 대시보드에서 내린 행은 push_error 가 NULL 이므로 그대로
-     *               둔다 — 앱이 다시 등록한다고 관리자의 판단을 뒤집으면 안 된다.
-     *   push_error  새 토큰에는 옛 실패 코드가 의미가 없으니 지운다.
+     * 예전에는 이 자리에서 바로 INSERT 했다. 그래서 **단지 + 동 + 호 세 값만
+     * 알면 그 집 초인종 영상·음성을 받고 방문자와 대화까지 됐다.** 셋 중 비밀은
+     * 하나도 없다 — 단지 ID 는 공개 디렉터리에 있고 동/호는 건물에 적혀 있다.
      *
-     * ⚠️ 대입 순서가 중요하다. MySQL 은 ON DUPLICATE KEY UPDATE 의 대입을 왼쪽부터
-     *    차례로 적용하므로, `token` 을 덮어쓰기 **전에** 옛 값을 참조하는 식들을
-     *    먼저 둬야 한다. active 도 push_error 를 지우기 전에 읽어야 한다.
+     * 지금은 그 집 안에 있는 월패드가 인정해야 들어온다 (libs/enrollment.ts).
+     * 이미 인정된 단말(uuid 가 있는 것)은 그대로 갱신되므로, 토큰이 바뀔 때마다
+     * 승인을 다시 받는 일은 없다.
      */
-    const sql = `INSERT INTO ${config.tables.mobile}
-                    (uuid, email, complex, complex_id, address, token, phone, image, sip_user, token_updated_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
-                 ON DUPLICATE KEY UPDATE
-                    active = IF(VALUES(token) <> token AND push_error IS NOT NULL, 1, active),
-                    push_error = IF(VALUES(token) <> token, NULL, push_error),
-                    push_failed_at = IF(VALUES(token) <> token, NULL, push_failed_at),
-                    token_updated_at = IF(VALUES(token) <> token, NOW(), token_updated_at),
-                    token = VALUES(token),
-                    email = VALUES(email), complex = VALUES(complex), address = VALUES(address),
-                    complex_id = COALESCE(VALUES(complex_id), complex_id),
-                    phone = VALUES(phone), image = VALUES(image),
-                    sip_user = COALESCE(VALUES(sip_user), sip_user)`;
-
+    let outcome;
     try {
-        const result = await DbConn.execute(sql, [
-            uuid, email, complex, complexId, address, token,
-            req.body.phone ?? null, req.body.image ?? null, sipUser,
-        ]);
-        // affectedRows: 1 = 새로 넣음, 2 = 갱신함
-        const created = result.affectedRows === 1;
-        logger.info(`mobile ${created ? 'registered' : 'updated'}: ${uuid}`);
-        res.status(200).json({
-            title: 'websocket-relay',
-            result: 'success',
-            message: created ? 'Your token has been saved successfully.'
-                             : 'Your token has been updated successfully.',
-        });
+        outcome = await requestEnrollment(
+            {
+                uuid, email, complex, address, token,
+                phone: req.body.phone ?? null,
+                image: req.body.image ?? null,
+                sip_user: sipUser,
+            },
+            {
+                // 월패드 승인 화면이 "어느 것이 내 폰인가" 를 가리는 데 쓴다.
+                // 헤더에서 그냥 얻어지므로 앱을 고치지 않아도 된다.
+                userAgent: (req.headers['user-agent'] as string | undefined)?.slice(0, 255) ?? null,
+                ipaddress: (req.socket.remoteAddress || '').replace('::ffff:', '') || null,
+            },
+        );
     } catch (err: any) {
         logger.error('mobile 등록 실패:', err.message);
         res.status(500).json({ error: 'registration failed' });
+        return;
     }
+
+    if (outcome.kind === 'rejected') {
+        // 409 — 요청이 잘못된 게 아니라 이 세대가 꽉 찬 것이다.
+        res.status(409).json({ error: outcome.reason, message: outcome.message });
+        return;
+    }
+
+    if (outcome.kind === 'refreshed') {
+        res.status(200).json({
+            title: 'websocket-relay',
+            result: 'success',
+            status: 'approved',
+            message: 'Your token has been updated successfully.',
+        });
+        return;
+    }
+
+    // 대기에 올랐다. 월패드에 알린다 (연결돼 있으면 즉시, 아니면 다음 접속 때).
+    void onEnrollmentPending(address, email);
+
+    res.status(202).json({
+        title: 'websocket-relay',
+        result: 'pending',
+        status: 'pending',
+        expiresAt: outcome.expiresAt,
+        message: '등록 요청을 받았습니다. 댁내 월패드에서 승인해 주세요.',
+    });
 }
 
 /**
@@ -237,15 +254,42 @@ async function handlePostComplexAgents(req: Request, res: Response) {
         return;
     }
 
+    /*
+     * ── 동/호 형식을 본다 ────────────────────────────────────────
+     *
+     * 이 경로도 무인증이다. 예전에는 building·unit 이 자유 문자열이라 아무 값이나
+     * 넣어 행을 **끝없이 만들 수 있었다.** 그리고 이 표는 "그 집에 월패드가
+     * 있는가" 를 판단하는 근거이므로, 여기가 무제한이면 모바일 등록의 상한도
+     * 함께 무너진다 (공격자가 게이트를 직접 심고 그 주소로 등록하면 된다).
+     *
+     * 형식을 좁히면 행 수가 실제 동/호 조합으로 묶인다.
+     */
+    if (!PLACE_PART_RE.test(String(building)) || !PLACE_PART_RE.test(String(unit))) {
+        res.status(400).json({
+            error: 'invalid_place',
+            message: 'building 과 unit 은 영문·숫자·- 8자 이내여야 합니다.',
+        });
+        return;
+    }
+
+    /*
+     * complex_id — 이 서버의 단지로 못박는다.
+     *
+     * 표시용 `complex` 는 자유 문자열이라 그것만으로는 단지를 셀 수 없었다.
+     * 모바일과 같은 규칙이다 (schema/004-complex-id.sql).
+     */
+    const serverId = serverComplexId();
+
     // (complex, building, unit) 에 UNIQUE 가 걸려 있다.
     const sql = `INSERT INTO ${config.tables.homenet}
-                    (complex, type, building, unit, ipaddress)
-                 VALUES (?, ?, ?, ?, ?)
+                    (complex, complex_id, type, building, unit, ipaddress)
+                 VALUES (?, ?, ?, ?, ?, ?)
                  ON DUPLICATE KEY UPDATE
+                    complex_id = COALESCE(VALUES(complex_id), complex_id),
                     type = VALUES(type), ipaddress = VALUES(ipaddress)`;
 
     try {
-        const result = await DbConn.execute(sql, [complex, type, building, unit, ipaddress]);
+        const result = await DbConn.execute(sql, [complex, serverId, type, building, unit, ipaddress]);
         const created = result.affectedRows === 1;
         logger.info(`homenet ${created ? 'registered' : 'updated'}: ${complex}/${building}/${unit}`);
         res.status(200).json({

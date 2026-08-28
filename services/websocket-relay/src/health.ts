@@ -18,6 +18,7 @@ import { Router, Request, Response } from 'express';
 import config from './config';
 import { getGateway } from './gateway';
 import { DbConn } from './libs/dbConnection';
+import { complexId } from './libs/complex';
 import { Firebase } from './libs/firebaseAdmin';
 
 // package.json 의 version. dist/ 에서 실행돼도 서비스 디렉토리에서 찾는다.
@@ -56,7 +57,7 @@ export function createHealthRouter(): Router {
                 websockets: gateway ? gateway.roomTable.websocketCount() : 0,
                 memoryMb: Math.round(process.memoryUsage().rss / 1024 / 1024),
                 nodeEnv: config.env,
-                complexId: config.complexId,
+                complexId: complexId(),
                 // 푸시는 선택적 의존성이다. 꺼져 있어도 중계 자체는 정상이므로
                 // status 를 떨어뜨리지 않고 여기에만 적는다.
                 pushEnabled: Firebase.isConfigured(),

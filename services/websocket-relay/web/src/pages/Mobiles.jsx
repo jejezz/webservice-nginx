@@ -12,6 +12,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import MobileForm from '@/components/MobileForm';
+import PendingEnrollments from '@/components/PendingEnrollments';
+import { toKorean } from '@/lib/address';
 
 export default function Mobiles() {
   const { data, error, loading, refreshing, reload, setData } = usePolling(api.mobiles, 10000);
@@ -20,6 +22,8 @@ export default function Mobiles() {
   const [actionError, setActionError] = useState('');
   // null 이면 닫힘, {} 면 추가, 행이면 수정.
   const [editing, setEditing] = useState(null);
+  // 동/호 필터. 빈 값이면 전체.
+  const [home, setHome] = useState('');
 
   const toggle = useCallback(async (record) => {
     setBusy(record.id);
@@ -29,6 +33,31 @@ export default function Mobiles() {
       setData((prev) => ({
         ...prev,
         records: prev.records.map((r) => (r.id === result.id ? { ...r, active: result.active } : r)),
+      }));
+    } catch (err) {
+      setActionError(err.message);
+    } finally {
+      setBusy(null);
+    }
+  }, [setData]);
+
+  /**
+   * 통화/제어 권한을 바꾼다.
+   *
+   * active 토글과 **다른 API** 를 쓴다. active 는 FCM 이 자동으로 내리고
+   * 올리는 푸시 건강 상태이고, 이쪽은 사람이 정하는 권한이다
+   * (schema/005-enrollment.sql).
+   */
+  const setPermission = useCallback(async (record, patch) => {
+    setBusy(record.id);
+    setActionError('');
+    try {
+      const result = await api.setMobilePermissions(record.id, patch);
+      setData((prev) => ({
+        ...prev,
+        records: prev.records.map((r) => (r.id === result.id
+          ? { ...r, can_call: result.can_call, can_control: result.can_control }
+          : r)),
       }));
     } catch (err) {
       setActionError(err.message);
@@ -63,10 +92,18 @@ export default function Mobiles() {
   }
 
   const q = filter.trim().toLowerCase();
+  const byHome = home ? data.records.filter((r) => r.address === home) : data.records;
   const records = q
-    ? data.records.filter((r) =>
+    ? byHome.filter((r) =>
         [r.address, r.email, r.complex, r.complex_id, r.uuid, r.sip_user].some((v) => (v || '').toLowerCase().includes(q)))
-    : data.records;
+    : byHome;
+
+  // 동/호 목록은 등록된 단말에서 뽑는다. 별도 조회를 하지 않아도 되고,
+  // 고를 수 있는 값이 곧 결과가 있는 값이라 빈 화면이 나오지 않는다.
+  const homes = Array.from(new Set(data.records.map((r) => r.address).filter(Boolean))).sort();
+
+  // 승인은 됐지만 통화가 막힌 단말. 조용히 전화를 못 받는 상태라 드러낸다.
+  const noCall = data.records.filter((r) => !r.can_call).length;
 
   // 조용히 망가져 있는 것들을 눈에 보이게 한다.
   const pushBroken = data.records.filter((r) => r.push_error).length;
@@ -115,6 +152,19 @@ export default function Mobiles() {
         </Alert>
       )}
 
+      {noCall > 0 && (
+        <Alert>
+          <PhoneOff />
+          <AlertDescription>
+            {noCall}대가 <strong>통화 수신이 꺼져</strong> 있습니다. 등록은 되어 있지만
+            초인종·전화가 그 단말로 가지 않습니다. 승인할 때 통화를 켜지 않았거나,
+            나중에 꺼진 것입니다.
+          </AlertDescription>
+        </Alert>
+      )}
+
+      <PendingEnrollments address={home || undefined} onApproved={reload} />
+
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold">모바일 단말</h2>
@@ -122,7 +172,16 @@ export default function Mobiles() {
             등록 {data.records.length} · 착신 알림(FCM)은 활성 단말에만 갑니다
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={home}
+            onChange={(e) => setHome(e.target.value)}
+            aria-label="동/호 필터"
+            className="h-9 rounded-md border bg-transparent px-3 py-1 text-sm shadow-xs"
+          >
+            <option value="">전체 세대</option>
+            {homes.map((a) => <option key={a} value={a}>{toKorean(a)}</option>)}
+          </select>
           <Input
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
@@ -164,6 +223,8 @@ export default function Mobiles() {
                   <TableHead>전화</TableHead>
                   <TableHead>토큰</TableHead>
                   <TableHead>등록</TableHead>
+                  <TableHead className="text-center">통화</TableHead>
+                  <TableHead className="text-center">제어</TableHead>
                   <TableHead className="text-center">활성</TableHead>
                   <TableHead className="text-right">수정 · 삭제</TableHead>
                 </TableRow>
@@ -171,7 +232,7 @@ export default function Mobiles() {
               <TableBody>
                 {records.map((r) => (
                   <TableRow key={r.id}>
-                    <TableCell className="font-mono text-xs" title={r.uuid}>{r.address}</TableCell>
+                    <TableCell className="whitespace-nowrap text-xs" title={`${r.address}\n${r.uuid}`}>{toKorean(r.address)}</TableCell>
                     <TableCell className="text-xs">{r.email}</TableCell>
                     <TableCell className="text-xs">{r.complex}</TableCell>
                     <TableCell className="font-mono text-xs">
@@ -211,6 +272,24 @@ export default function Mobiles() {
                       )}
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground">{formatDateTime(r.created)}</TableCell>
+                    {/* 사람이 정하는 권한. 통화가 꺼지면 초인종이 이 단말을 부르지 않는다. */}
+                    <TableCell className="text-center">
+                      <Switch
+                        checked={r.can_call}
+                        disabled={busy === r.id}
+                        onCheckedChange={(v) => setPermission(r, { canCall: v })}
+                        aria-label="통화 수신 허용"
+                      />
+                    </TableCell>
+                    <TableCell className="text-center">
+                      <Switch
+                        checked={r.can_control}
+                        disabled={busy === r.id}
+                        onCheckedChange={(v) => setPermission(r, { canControl: v })}
+                        aria-label="홈넷 제어 허용"
+                      />
+                    </TableCell>
+                    {/* 기계가 정하는 푸시 건강 상태. 위의 권한과 다른 축이다. */}
                     <TableCell className="text-center">
                       <Switch
                         checked={r.active}

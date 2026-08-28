@@ -112,8 +112,9 @@ router.post('/', loopbackOnly, async (req: Request, res: Response) => {
         // (libs/push.ts). 단지 조건은 다른 조회들과 같은 이유다 (libs/complex.ts).
         const c = complexClause();
         rows = await DbConn.select(
+            // can_call — 이 세대가 인정한 단말만 (libs/enrollment.ts).
             `SELECT id, token, push_error FROM ${config.tables.mobile}
-              WHERE sip_user = ? AND active = 1 AND token <> ''${c.sql}`,
+              WHERE sip_user = ? AND active = 1 AND can_call = 1 AND token <> ''${c.sql}`,
             [aor, ...c.params]
         );
     } catch (err: any) {

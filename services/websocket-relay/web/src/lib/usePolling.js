@@ -3,7 +3,10 @@ import { ApiError } from '@/lib/api';
 
 /**
  * 주기적으로 데이터를 다시 불러온다.
- * 세션이 만료되면(401) manager 로그인으로 보낸다.
+ *
+ * 401 은 여기서 다루지 않는다 — api.js 의 request() 가 어떤 호출이든
+ * manager 로그인으로 보낸다. 여기서는 그 사이에 오류 문구가 번쩍이지 않게
+ * 조용히 넘기기만 한다.
  */
 export function usePolling(fetcher, intervalMs = 5000) {
   const [data, setData] = useState(null);
@@ -31,11 +34,8 @@ export function usePolling(fetcher, intervalMs = 5000) {
       setError('');
     } catch (err) {
       if (!mounted.current) return;
-      if (err instanceof ApiError && err.status === 401) {
-        const next = encodeURIComponent(window.location.pathname);
-        window.location.href = `${err.payload?.loginUrl || '/manager/login'}?next=${next}`;
-        return;
-      }
+      // 리다이렉트가 진행 중이다. 오류로 그리지 않는다.
+      if (err instanceof ApiError && err.status === 401) return;
       setError(err.message || '데이터를 불러오지 못했습니다.');
     } finally {
       if (mounted.current) {

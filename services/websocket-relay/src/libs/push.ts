@@ -152,3 +152,40 @@ export async function sendToTargets(
         }
     }
 }
+
+
+/**
+ * 토큰 하나에 보내고 **DB 는 건드리지 않는다.**
+ *
+ * ── 왜 sendToTargets 를 쓰면 안 되는가 ──────────────────────────
+ * 위의 sendToTargets 는 발송 결과를 `rtc_mobiles ... WHERE id = ?` 로 되쓴다.
+ * 그래서 `id` 는 **반드시 rtc_mobiles 의 기본 키**여야 한다.
+ *
+ * 그런데 등록 거절·만료 통보는 아직 rtc_mobiles 에 없는 단말에게 간다
+ * (mobile_enrollments 에만 있다). 거기 id 를 그대로 넘기면 우연히 같은 번호를
+ * 가진 **남의 단말 행이 비활성으로 내려간다.** 조용하고 재현하기 어려운 사고다.
+ *
+ * 그래서 되쓰기가 없는 길을 따로 둔다. 건강 상태를 기록하지 못하는 것은
+ * 감수한다 — 어차피 그 단말은 아직 우리 표에 없다.
+ *
+ * @returns 보냈으면 true. 푸시가 꺼져 있거나 실패하면 false (던지지 않는다)
+ */
+export async function sendOne(token: string, message: TokenMessage, label: string): Promise<boolean> {
+    if (!token) return false;
+
+    const messaging = Firebase.getMessaging();
+    if (!messaging) {
+        logger.warn(`FCM 미설정 — ${label} 푸시를 보내지 않습니다.`);
+        return false;
+    }
+
+    try {
+        await messaging.send({ ...message, token });
+        logger.info(`${label} 푸시 전송`);
+        return true;
+    } catch (err: any) {
+        // 실패해도 부르는 쪽의 작업(승인·거절)은 이미 끝났다. 되돌리지 않는다.
+        logger.warn(`${label} 푸시 실패: ${err?.message ?? err}`);
+        return false;
+    }
+}

@@ -172,6 +172,20 @@ export const config = {
     },
 
     /**
+     * manager 의 내부 주소.
+     *
+     * 되돌리기 어려운 설정을 바꿀 때 **비밀번호를 다시 확인**하는 데 쓴다.
+     * 확인은 브라우저가 아니라 이 서버가 한다 — 브라우저가 "확인했다" 고 말하는
+     * 것은 신뢰할 수 없다 (세션만 있으면 우리 API 를 직접 불러 건너뛴다).
+     *
+     * manager 는 같은 호스트의 루프백에 있다. nginx 를 거치지 않는다.
+     */
+    manager: {
+        verifyPasswordUrl:
+            process.env.MANAGER_VERIFY_URL || 'http://127.0.0.1:28084/manager/api/verify-password',
+    },
+
+    /**
      * 앱이 붙어야 할 Janus 주소. 공개 주소라 서버가 스스로 알 수 없어 설정으로
      * 받는다. 비어 있으면 착신 푸시 payload 에 싣지 않는다.
      */

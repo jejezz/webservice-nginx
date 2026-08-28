@@ -161,8 +161,9 @@ async function handlePostInvite(req: Request, res: Response) {
         // 단지 조건은 address 가 단지 안에서만 유일하기 때문이다 (libs/complex.ts).
         const c = complexClause();
         rows = await DbConn.select(
+            // can_call — 이 세대가 인정한 단말만 (libs/enrollment.ts).
             `SELECT id, token, push_error FROM ${config.tables.mobile}
-              WHERE address = ? AND active = 1${c.sql}`,
+              WHERE address = ? AND active = 1 AND can_call = 1${c.sql}`,
             [req.body.target, ...c.params]);
     } catch (err: any) {
         logger.error('초대 대상 조회 실패:', err.message);

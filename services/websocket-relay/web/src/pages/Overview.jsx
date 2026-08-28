@@ -3,6 +3,7 @@ import { api } from '@/lib/api';
 import { usePolling } from '@/lib/usePolling';
 import { formatUptime } from '@/lib/format';
 import { InfoCard, StatTile } from '@/components/InfoCard';
+import ComplexCard from '@/components/ComplexCard';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -74,6 +75,8 @@ export default function Overview() {
         />
       </div>
 
+      <ComplexCard />
+
       <div className="grid gap-4 lg:grid-cols-2">
         <InfoCard
           title="서비스"
@@ -86,9 +89,6 @@ export default function Overview() {
             ['메모리 (RSS)', `${data.memoryMb} MB`],
             ['NODE_ENV', data.nodeEnv],
             ['듣는 주소', data.listen, '루프백 전용. TLS 는 nginx 가 끊는다'],
-            ['단지 ID', data.complexId || '미설정', data.complexId
-              ? '이 서버가 맡은 단지. 등록과 착신 대상 조회가 이 값으로 걸러진다'
-              : '단지 검사를 하지 않는다. .env 의 COMPLEX_ID 로 켠다'],
           ]}
         />
 

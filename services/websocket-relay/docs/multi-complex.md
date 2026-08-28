@@ -6,7 +6,7 @@
 
 이 문서는 그 설계와, **지금 서버에 들어간 부분 / 아직 남은 부분**을 적습니다.
 
-관련: [../ReadMe.md](../ReadMe.md) · [../ANDROID_API_GUIDE.md](../ANDROID_API_GUIDE.md)
+관련: [../ReadMe.md](../ReadMe.md) · [../ANDROID_API_GUIDE.md](../ANDROID_API_GUIDE.md) · [enrollment.md](enrollment.md)
 
 ## 구조
 

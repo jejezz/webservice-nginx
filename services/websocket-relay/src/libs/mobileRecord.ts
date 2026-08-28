@@ -18,7 +18,7 @@
  * 일은 각 라우트가 한다.
  */
 import { DbConn } from './dbConnection';
-import { COMPLEX_ID } from './complex';
+import { complexId } from './complex';
 import { normalizeSipUser, SIP_USER_ERROR } from './sipUser';
 import config from '../config';
 import logger from './logger';
@@ -65,7 +65,7 @@ export async function createMobileRecord(body: any): Promise<MobileResult<{ id: 
             `INSERT INTO ${config.tables.mobile}
                 (uuid, email, complex, complex_id, address, token, phone, image, active, sip_user, token_updated_at)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
-            [body.uuid, body.email, body.complex, COMPLEX_ID, body.address, body.token,
+            [body.uuid, body.email, body.complex, complexId(), body.address, body.token,
              body.phone ?? null, body.image ?? null, active ? 1 : 0, sipUser.value]
         );
         logger.info(`Mobile record created with ID: ${result.insertId}`);

@@ -11,14 +11,23 @@ import { requireAuth } from '../auth/session';
 import config from '../config';
 import { getGateway } from '../gateway';
 import { createMobileRecord, updateMobileRecord, statusFor } from '../libs/mobileRecord';
+import { Firebase } from '../libs/firebaseAdmin';
+import { analyze, install, installedStatus, remove } from '../libs/firebaseKey';
 import logger from '../libs/logger';
-import { COMPLEX_ID } from '../libs/complex';
+import { complexId, setComplexId, COMPLEX_ID_RE, COMPLEX_ID_ERROR } from '../libs/complex';
+import { verifyPassword } from '../auth/reauth';
+import {
+    listPending, approve, reject, countApproved,
+    MAX_APPROVED_PER_HOME, MAX_PENDING_PER_HOME, PENDING_TTL_MS, invalidateControlCache,
+} from '../libs/enrollment';
+import { notifyWallpad } from '../libs/enrollmentEvents';
+import { normalizeAddress } from '../libs/address';
 
 /** 목록에 내보낼 컬럼. token 은 FCM 자격이라 싣지 않는다. */
 // token 은 FCM 자격이라 싣지 않는다. 대신 그 토큰이 쓸 만한지를 알려 주는 값들을
 // 싣는다 — sip_user 가 비어 있으면 인터폰 착신이 조용히 0건이고, push_error 가
 // 있으면 그 단말에는 푸시가 닿지 않고 있다.
-const PUBLIC_COLUMNS = 'id, uuid, email, complex, complex_id, address, phone, active, created, modified, sip_user, token_updated_at, push_error, push_failed_at';
+const PUBLIC_COLUMNS = 'id, uuid, email, complex, complex_id, address, phone, active, can_call, can_control, approved_at, approved_by, created, modified, sip_user, token_updated_at, push_error, push_failed_at';
 
 function fail(res: Response, err: any, what: string) {
     logger.error(`${what}:`, err.message);
@@ -80,7 +89,7 @@ export function createDashboardApi(): Router {
             memoryMb: Math.round(process.memoryUsage().rss / 1024 / 1024),
             nodeEnv: config.env,
             listen: `${config.host}:${config.port}`,
-            complexId: COMPLEX_ID,
+            complexId: complexId(),
             rooms: table.roomTable.size,
             // 두 용도를 나눠 센다. 합계만으로는 통화 중인지 홈넷 세션인지 모른다.
             roomsByKind: Array.from(table.roomTable.values()).reduce((acc: Record<string, number>, r) => {
@@ -163,8 +172,13 @@ export function createDashboardApi(): Router {
                 `SELECT ${PUBLIC_COLUMNS} FROM ${config.tables.mobile} ORDER BY created DESC`);
             // 화면이 '다른 단지로 등록된 단말' 을 표시할 수 있게 이 서버의 값도 함께 준다.
             res.json({
-                complexId: COMPLEX_ID,
-                records: rows.map((r: any) => ({ ...r, active: r.active === 1 })),
+                complexId: complexId(),
+                records: rows.map((r: any) => ({
+                    ...r,
+                    active: r.active === 1,
+                    can_call: r.can_call === 1,
+                    can_control: r.can_control === 1,
+                })),
             });
         } catch (err: any) {
             fail(res, err, 'Failed to fetch mobile records');
@@ -230,6 +244,306 @@ export function createDashboardApi(): Router {
             res.json({ id: Number(req.params.id) });
         } catch (err: any) {
             fail(res, err, 'Failed to delete mobile record');
+        }
+    });
+
+    // ── 등록 승인 ────────────────────────────────────────────────
+    //
+    // 이 표(mobile_enrollments)에 있는 것은 **아무 권한이 없다.** 승인되어야
+    // rtc_mobiles 로 옮겨 가고 그때 can_call / can_control 이 켜진다.
+    // 규칙은 libs/enrollment.ts 한 곳에 있고 월패드 경로도 같은 것을 쓴다.
+
+    /** 대기 중인 등록 요청. `?address=1B101U` 로 세대를 좁힌다. */
+    router.get('/enrollments', async (req: Request, res: Response) => {
+        const address = req.query.address ? normalizeAddress(String(req.query.address)) : undefined;
+        try {
+            res.json({
+                records: await listPending(address),
+                limits: {
+                    approvedPerHome: MAX_APPROVED_PER_HOME,
+                    pendingPerHome: MAX_PENDING_PER_HOME,
+                    ttlMinutes: Math.round(PENDING_TTL_MS / 60000),
+                },
+            });
+        } catch (err: any) {
+            fail(res, err, 'Failed to fetch enrollments');
+        }
+    });
+
+    /**
+     * 요청을 인정한다. 무엇을 열어 줄지는 호출부가 정한다.
+     *
+     * 기본값은 **둘 다 꺼짐**이다. 실수로 body 를 비워 보내면 등록만 되고
+     * 아무것도 못 하는 상태가 된다 — 반대로 기본을 켜 두면 실수 한 번이
+     * 그대로 권한 부여가 된다.
+     */
+    router.post('/enrollments/:id/approve', async (req: Request, res: Response) => {
+        const actor = (req as any).user?.username ?? 'unknown';
+        try {
+            const result = await approve(Number(req.params.id), {
+                canCall: Boolean(req.body?.canCall),
+                canControl: Boolean(req.body?.canControl),
+            }, actor);
+
+            if (!result.ok) {
+                return res.status(result.reason === 'not_found' ? 404 : 409)
+                          .json({ error: result.reason, message: result.message });
+            }
+            // 월패드 목록에서도 사라지도록 갱신본을 밀어 준다.
+            invalidateControlCache(result.address);
+            void notifyWallpad(result.address);
+            res.json({ id: result.id, address: result.address, uuid: result.uuid });
+        } catch (err: any) {
+            fail(res, err, 'Failed to approve enrollment');
+        }
+    });
+
+    /** 요청을 거절한다. 그냥 지운다 — 남겨 둘 이유가 없다. */
+    router.delete('/enrollments/:id', async (req: Request, res: Response) => {
+        const actor = (req as any).user?.username ?? 'unknown';
+        try {
+            const ok = await reject(Number(req.params.id), actor);
+            if (!ok) return res.status(404).json({ error: 'not found' });
+            res.json({ id: Number(req.params.id) });
+        } catch (err: any) {
+            fail(res, err, 'Failed to reject enrollment');
+        }
+    });
+
+    /**
+     * 이미 승인된 단말의 권한을 바꾼다.
+     *
+     * toggle-active 와 분리한다 — active 는 기계가 정하는 푸시 건강 상태이고
+     * 이쪽은 사람이 정하는 권한이다 (schema/005-enrollment.sql).
+     */
+    router.patch('/mobiles/:id/permissions', async (req: Request, res: Response) => {
+        const actor = (req as any).user?.username ?? 'unknown';
+        const sets: string[] = [];
+        const params: any[] = [];
+
+        if (req.body?.canCall !== undefined) {
+            sets.push('can_call = ?');
+            params.push(req.body.canCall ? 1 : 0);
+        }
+        if (req.body?.canControl !== undefined) {
+            sets.push('can_control = ?');
+            params.push(req.body.canControl ? 1 : 0);
+        }
+        if (sets.length === 0) return res.status(400).json({ error: 'canCall 또는 canControl 이 필요합니다.' });
+
+        params.push(req.params.id);
+        try {
+            const result = await DbConn.execute(
+                `UPDATE ${config.tables.mobile} SET ${sets.join(', ')} WHERE id = ?`, params);
+            if (result.affectedRows === 0) return res.status(404).json({ error: 'not found' });
+
+            const [row] = await DbConn.select(
+                `SELECT address, email, can_call, can_control FROM ${config.tables.mobile} WHERE id = ?`,
+                [req.params.id]);
+            invalidateControlCache(row.address);
+            logger.warn(
+                `[audit] 단말 권한 변경: ${row.address} ${row.email} ` +
+                `통화=${row.can_call ? '허용' : '불가'} 제어=${row.can_control ? '허용' : '불가'} (by ${actor})`);
+            res.json({
+                id: Number(req.params.id),
+                can_call: row.can_call === 1,
+                can_control: row.can_control === 1,
+            });
+        } catch (err: any) {
+            fail(res, err, 'Failed to update permissions');
+        }
+    });
+
+    /** 세대별 요약. 화면이 "이 집은 몇 대 남았나" 를 보여주는 데 쓴다. */
+    router.get('/homes', async (_req: Request, res: Response) => {
+        try {
+            const rows = await DbConn.select(
+                `SELECT h.building, h.unit, CONCAT(h.building, 'B', h.unit, 'U') AS address,
+                        h.type, h.ipaddress, h.modified,
+                        (SELECT COUNT(*) FROM ${config.tables.mobile} m
+                          WHERE m.address = CONCAT(h.building, 'B', h.unit, 'U')
+                            AND m.complex_id <=> h.complex_id) AS devices,
+                        (SELECT COUNT(*) FROM mobile_enrollments e
+                          WHERE e.address = CONCAT(h.building, 'B', h.unit, 'U')
+                            AND e.complex_id <=> h.complex_id AND e.expires_at > NOW()) AS pending
+                   FROM ${config.tables.homenet} h
+                  WHERE h.complex_id <=> ?
+                  ORDER BY h.building, h.unit`, [complexId()]);
+            res.json({ records: rows, capacity: MAX_APPROVED_PER_HOME });
+        } catch (err: any) {
+            fail(res, err, 'Failed to fetch homes');
+        }
+    });
+
+    // ── 단지 ID ──────────────────────────────────────────────────
+    //
+    // ⚠️ 이 값은 **비밀이 아니다.** 앱이 Firestore 디렉터리에서 공개로 받아 오는
+    //    라우팅 키다 (docs/multi-complex.md 의 `allow read: if true`). 실제로
+    //    /register 는 앱이 이 필드를 아예 안 보내면 서버 값으로 채우고 통과시킨다
+    //    — 즉 값을 가려도 막히는 것이 없다.
+    //
+    //    위험한 것은 **바꾸는 쪽**이다. 바뀌는 순간 지금 등록된 단말의 complex_id
+    //    와 어긋나 그 단말들이 착신 대상 조회에서 통째로 빠진다. 그래서 읽기는
+    //    열어 두고 쓰기만 조인다: 영향 대수 → 재입력 확인 → 비밀번호 재확인.
+
+    /** 지금 단지와, 바꿨을 때 무슨 일이 생기는지. */
+    router.get('/complex', async (_req: Request, res: Response) => {
+        const id = complexId();
+        const gateway = getGateway();
+
+        let registered: { total: number; matching: number; orphaned: number } | null = null;
+        try {
+            const [row] = await DbConn.select(
+                `SELECT COUNT(*) AS total,
+                        SUM(complex_id <=> ?) AS matching,
+                        SUM(complex_id IS NOT NULL AND NOT (complex_id <=> ?)) AS orphaned
+                   FROM ${config.tables.mobile} WHERE active = 1`, [id, id]);
+            registered = {
+                total: Number(row.total) || 0,
+                matching: Number(row.matching) || 0,
+                orphaned: Number(row.orphaned) || 0,
+            };
+        } catch {
+            // DB 가 끊겨도 지금 값은 보여준다.
+        }
+
+        res.json({
+            complexId: id,
+            format: { pattern: COMPLEX_ID_RE.source, hint: COMPLEX_ID_ERROR },
+            // 화면이 "왜 가리지 않는가" 를 설명할 수 있게 서버가 성격을 알려 준다.
+            isSecret: false,
+            registered,
+            connectedWebsockets: gateway ? gateway.roomTable.websocketCount() : 0,
+            activeRooms: gateway ? gateway.roomTable.roomTable.size : 0,
+        });
+    });
+
+    /**
+     * 단지를 바꾼다. 세 겹을 통과해야 한다.
+     *
+     *   ① 형식      소문자 16진수 8자 (또는 빈 값 = 단지 검사 끄기)
+     *   ② 재입력    confirm 이 새 값과 같아야 한다 — 오타와 오클릭을 거른다
+     *   ③ 비밀번호  manager 에 **서버가** 물어본다 (auth/reauth.ts)
+     *
+     * 등록된 단말이 있어도 막지는 않는다. 단지 ID 를 정말 바꿔야 하는 상황
+     * (재발급·오설정 정정)이 있고, 그때 화면에서 고칠 길이 없으면 사람이 .env 를
+     * 직접 고치게 되는데 그러면 이 검사들이 전부 무의미해진다. 대신 영향을
+     * 숫자로 보여 주고 확인을 받는다.
+     */
+    router.put('/complex', async (req: Request, res: Response) => {
+        const actor = (req as any).user?.username ?? 'unknown';
+        const raw = String(req.body?.complexId ?? '').trim().toLowerCase();
+        const confirm = String(req.body?.confirm ?? '').trim().toLowerCase();
+
+        // ① 형식. 빈 값은 "단지 검사를 끈다" 는 뜻으로 받는다.
+        if (raw !== '' && !COMPLEX_ID_RE.test(raw)) {
+            return res.status(400).json({ error: 'invalid_format', message: COMPLEX_ID_ERROR });
+        }
+        const next = raw === '' ? null : raw;
+
+        if (next === complexId()) {
+            return res.status(400).json({ error: 'unchanged', message: '지금 값과 같습니다.' });
+        }
+
+        // ② 재입력.
+        if (confirm !== raw) {
+            return res.status(400).json({
+                error: 'confirm_mismatch',
+                message: '확인 입력이 새 단지 ID 와 다릅니다.',
+            });
+        }
+
+        // ③ 비밀번호. 브라우저가 아니라 여기서 manager 에 물어본다.
+        const reauth = await verifyPassword(req, String(req.body?.password ?? ''));
+        if (!reauth.ok) {
+            logger.warn(`[audit] 단지 ID 변경 거부 — 비밀번호 재확인 실패 (by ${actor}: ${reauth.error})`);
+            return res.status(reauth.status).json({ error: reauth.error, message: reauth.message });
+        }
+
+        try {
+            setComplexId(next, actor);
+        } catch (err: any) {
+            // .env 쓰기가 실패했다. 메모리 값은 이미 바뀌었으므로 사람에게 알린다 —
+            // 재시작하면 옛 값으로 돌아간다.
+            logger.error(`단지 ID 를 .env 에 적지 못했습니다: ${err.message}`);
+            return res.status(500).json({
+                error: 'persist_failed',
+                message: `값은 적용됐지만 .env 에 기록하지 못했습니다 — 재시작하면 되돌아갑니다: ${err.message}`,
+            });
+        }
+
+        res.json({ complexId: complexId() });
+    });
+
+    // ── FCM 서비스 계정 키 ───────────────────────────────────────
+    //
+    // 이 키 하나가 "자고 있는 집의 전화를 울릴 수 있는가" 를 결정한다. 잘못
+    // 올리면 서비스는 멀쩡해 보이는데 착신만 조용히 죽으므로, 쓰기 전에
+    // 판단할 수 있는 것은 전부 판단해서 보여 준다 (libs/firebaseKey.ts).
+
+    /** 지금 키의 상태 + 바뀌었을 때의 영향 범위. */
+    router.get('/firebase', async (_req: Request, res: Response) => {
+        const status = installedStatus();
+        const live = await Firebase.verifyLive();
+
+        // 이 키가 죽으면 몇 집이 전화를 못 받는지. 숫자가 있어야 위험이 실감된다.
+        let affectedDevices: number | null = null;
+        try {
+            const [row] = await DbConn.select(
+                `SELECT COUNT(*) AS n FROM ${config.tables.mobile} WHERE active = 1`);
+            affectedDevices = Number(row.n) || 0;
+        } catch {
+            // DB 가 끊겨도 키 상태는 보여준다.
+        }
+
+        res.json({ ...status, live, affectedDevices, channelId: config.firebase.channelId });
+    });
+
+    /**
+     * 올리기 전에 살펴보기만 한다. **파일을 건드리지 않는다.**
+     *
+     * 화면이 파일을 고른 즉시 이걸 부른다 — 사람이 "적용" 을 누르기 전에
+     * 프로젝트가 바뀐다는 사실을 알아야 하기 때문이다.
+     */
+    router.post('/firebase/analyze', (req: Request, res: Response) => {
+        const raw = typeof req.body?.content === 'string' ? req.body.content : '';
+        if (!raw.trim()) return res.status(400).json({ error: 'content 가 비어 있습니다.' });
+        res.json(analyze(raw));
+    });
+
+    /** 키를 설치한다. 덮어쓰기 전에 백업하고, 설치 후 실제로 통하는지 확인한다. */
+    router.post('/firebase', async (req: Request, res: Response) => {
+        const raw = typeof req.body?.content === 'string' ? req.body.content : '';
+        if (!raw.trim()) return res.status(400).json({ error: 'content 가 비어 있습니다.' });
+
+        try {
+            const result = await install(raw);
+            if (!result.ok) {
+                // 400 이지만 분석 결과를 그대로 실어 준다 — 화면이 왜 거부됐는지 보여줘야 한다.
+                return res.status(400).json({ error: '사용할 수 없는 키입니다.', analysis: result.analysis });
+            }
+            logger.warn(`[dashboard] FCM 키 교체됨 (by ${(req as any).user?.username})`);
+            res.json({ ...result, status: installedStatus() });
+        } catch (err: any) {
+            logger.error('FCM 키 설치 실패:', err.message);
+            res.status(500).json({ error: `키를 저장하지 못했습니다: ${err.message}` });
+        }
+    });
+
+    /** 지금 설치된 키가 실제로 통하는지 Google 에 물어본다. */
+    router.post('/firebase/verify', async (_req: Request, res: Response) => {
+        res.json(await Firebase.verifyLive());
+    });
+
+    /** 키를 내린다. 푸시만 꺼지고 중계는 계속 돈다. */
+    router.delete('/firebase', async (req: Request, res: Response) => {
+        try {
+            const result = await remove();
+            logger.warn(`[dashboard] FCM 키 내림 (by ${(req as any).user?.username})`);
+            res.json({ ...result, status: installedStatus() });
+        } catch (err: any) {
+            logger.error('FCM 키 삭제 실패:', err.message);
+            res.status(500).json({ error: `키를 지우지 못했습니다: ${err.message}` });
         }
     });
 
