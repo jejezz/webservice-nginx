@@ -80,7 +80,7 @@ TLS 종단, 포트를 새로 열어야 함)보다 (a)안이 나은 결정적인 
 **모바일은 WebRTC 를 권합니다.** (영상이 들어오면서 판단이 바뀌었습니다 —
 앞서 평문 RTP 를 권했던 것은 영상과 기존 WebRTC 스택을 모르는 상태의 판단이었습니다)
 
-- 모바일 앱에 **이미 WebRTC 스택이 있습니다** (rtc-relay-server 용). 평문 RTP 로
+- 모바일 앱에 **이미 WebRTC 스택이 있습니다** (websocket-relay 용). 평문 RTP 로
   가려면 H.264 RTP 스택을 새로 만들어야 하는데, 그게 WebRTC 를 재사용하는 것보다
   일이 큽니다.
 - 인터넷 구간이 **SRTP 로 암호화**됩니다.
@@ -120,7 +120,7 @@ a=fmtp:96 profile-level-id=42e01f;packetization-mode=1
 
 **Android WebRTC 의 H.264 는 단말 하드웨어에 의존합니다.** libwebrtc 는 H.264 를
 MediaCodec(하드웨어 코덱)으로 처리하는데, 없는 단말에서는 **VP8 만 제시하고
-영상이 아예 안 됩니다.** 지금 rtc-relay-server 로 영상 통화가 되고 있다면 이미
+영상이 아예 안 됩니다.** 지금 websocket-relay 로 영상 통화가 되고 있다면 이미
 확인된 셈이지만, 대상 단말 범위를 넓힐 때 다시 걸릴 수 있습니다.
 
 #### 지금 할 수 있는 확인 — 인터폰의 실제 SDP 보기
@@ -188,7 +188,7 @@ Kamailio 는 이 셋을 이미 가지고 있습니다.
 | WebRTC ↔ SIP 미디어 | `rtpengine` 모듈 + rtpengine 데몬 |
 
 그러면 `ws-bridge` 는 SIP 경로에서 빠지고, FCM 발송은 이미 Firebase 를 갖춘
-`rtc-relay-server` 가 맡는 편이 자연스럽습니다.
+`websocket-relay` 가 맡는 편이 자연스럽습니다.
 
 ## 지금 무엇이 있고 무엇이 없는가
 
@@ -200,7 +200,7 @@ Kamailio 는 이 셋을 이미 가지고 있습니다.
 | `nathelper` | ✅ 있음 | — |
 | `rtpengine` 모듈 | ✅ 있음 | — |
 | `tsilo` | ✅ 있음 | — |
-| Android WebRTC 스택 | ✅ 이미 사용 중 | rtc-relay-server 용으로 구현되어 있음 |
+| Android WebRTC 스택 | ✅ 이미 사용 중 | websocket-relay 용으로 구현되어 있음 |
 | `websocket` 모듈 | ✅ 설치됨 | (2026-08-19) |
 | `tls` 모듈 | ❌ 없음 | `kamailio-tls-modules` 5.5.4-1 — (b)안을 택할 때만 필요 |
 | TCP 소켓 | ✅ 있음 | TCP·UDP 5060 이 모든 인터페이스에 열려 있음. WS 는 전용 포트 5080 을 따로 연다 |
@@ -447,7 +447,7 @@ Kamailio 설정 언어로는 uptime 이나 메모리 같은 값을 얻기 번거
 
 | 조각 | 상태 |
 |---|---|
-| `POST /sip-push` (rtc-relay-server, 루프백 전용) | ✅ 구현·검증 완료 |
+| `POST /sip-push` (websocket-relay, 루프백 전용) | ✅ 구현·검증 완료 |
 | `rtc_mobiles.sip_user` 컬럼 (SIP 사용자명 ↔ FCM 토큰) | ✅ 스키마 작성 (`002-sip-user.sql`) |
 | Kamailio 의 `ts_store` / `ts_append` / 푸시 호출 | ⬜ 설정 소유 필요 |
 
@@ -493,7 +493,7 @@ Kamailio 설정 언어로는 uptime 이나 메모리 같은 값을 얻기 번거
  1. INVITE(1001) ────────────────────────────▶ Kamailio
  2. Kamailio ── 100 Trying ──▶ 발신측         ← 500ms 안에. 재전송 타이머 정지
  3. WS 연결 없음 확인 → ts_store()             ← 트랜잭션을 붙들어 둔다
- 4. Kamailio ──HTTP──▶ rtc-relay-server /sip-push
+ 4. Kamailio ──HTTP──▶ websocket-relay /sip-push
  5.                     rtc-relay ──FCM──▶ 단말 기동
  6. 단말 ──WSS──▶ Kamailio : REGISTER
  7. REGISTER 라우트: save() 후 ts_append()     ← 붙들어 둔 INVITE 를 새 contact 로 분기
@@ -579,7 +579,7 @@ CONNECT 를 지원하지 않으므로 h2 로 WS 를 시도하는 클라이언트
 | 3-1 | 이 배치 전용 `kamailio.cfg` 작성 | 배포판 포크 아님. 필요한 것만 |
 | 3-2 | `route[LOCATION]` 에 `ts_store()` + 푸시 요청 | |
 | 3-3 | `route[REGISTRAR]` 에 `ts_append()` | |
-| 3-4 | rtc-relay-server 에 `POST /sip-push` 추가 (④) | FCM 은 이미 있음 |
+| 3-4 | websocket-relay 에 `POST /sip-push` 추가 (④) | FCM 은 이미 있음 |
 | 3-5 | SIP 사용자 ↔ FCM 토큰 매핑 (⑤) | `rtc_mobiles` 스키마 변경 |
 | 3-6 | `100 Trying` / `183` 타이밍 확인 | 아래 "착신 전체 흐름" |
 

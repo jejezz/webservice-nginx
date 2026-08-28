@@ -42,6 +42,37 @@ reload 는 무중단으로 들어갔습니다 — master 프로세스는 그대�
 restart nginx` 로 실제 재기동까지 확인했습니다 — master 프로세스가 새로 뜨고
 라우트·`/health` 전부 그대로였습니다. 부팅 후 nginx 기동은 안전합니다.
 
+### 이후 변경 — 릴레이 두 벌을 하나로 (2026-08-29)
+
+`rtc-relay-server` 와 `websocket-relay-gateway` 는 같은 릴레이의 서로 다른 두
+벌이었습니다. 라우트 이름(`/register` `/room` `/status` `/mobile-crud-operation`)도
+와이어 프로토콜도 같고, 다른 것은 **어느 쪽이 무엇을 더 갖고 있느냐** 뿐이었습니다.
+
+| | `rtc-relay-server` | `websocket-relay-gateway` |
+|---|---|---|
+| 기능 | **상위집합** — `/sip-push`, 단지 ID, `sip_user`, 세션 인증, 푸시 건강 상태, React 대시보드 | 부분집합 |
+| 구조 | 설정이 흩어져 있고 `CallFusion` 싱글턴 때문에 순환 참조 | **더 낫다** — `config.ts` 단일화, 부팅/조립/상태 분리 |
+| 운영 | 없음 | **`scripts/`** — setup · doctor · db:migrate · db:status |
+
+기능이 상위집합인 쪽을 기준으로 두고 구조와 운영 도구를 가져왔습니다. 합친
+서비스의 이름은 **`websocket-relay`** 입니다.
+
+| 바뀐 것 | 전 | 후 |
+|---|---|---|
+| 디렉토리 | `services/rtc-relay-server` | `services/websocket-relay` |
+| pm2 앱 · `process.title` · `/health` 의 `service` | `rtc-relay-server` | `websocket-relay` |
+| 저장소 | gitea `webrtc/rtc-relay-server` | GitHub `ptype-co-kr/websocket-relay-gateway` |
+| 대시보드 | React (`web/`) 와 무번들 정적(`src/dashboard/`) 두 벌 | React 한 벌 |
+
+DB 이름 `rtc_relay` 와 표 이름(`rtc_mobiles`·`rtc_homenet`), Android 알림 채널
+ID `callfusion_2_rtc` 는 **그대로 둡니다** — 외부와 맞물려 있고, 바꿔서 얻는 것이
+없습니다. `database/database.ini` 의 `schema_dir` 만 새 경로로 옮겼습니다.
+
+`websocket-relay-gateway` 의 nginx 선언은 2026-08-28 에 이미 `enabled = false`
+였고(두 서비스가 `/relay/` 를 함께 선언하면 충돌), 이번에 디렉토리째 제거했습니다.
+그쪽에만 있던 안드로이드 클라이언트 묶음은
+`services/websocket-relay/example/android/okhttp/` 로 옮겨 보존했습니다.
+
 ### 이후 변경 — 중복 서비스 정리 (2026-08-18)
 
 아래 문서의 구조 그림에는 지금 없는 서비스 둘이 남아 있습니다. 마이그레이션

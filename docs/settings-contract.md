@@ -164,5 +164,5 @@ chmod 644 "$APPLIED_FILE"
 | `services/janus` | `public_ip` · `rtp_port_range` | `install.sh` |
 | `services/kamailio` | `sip_domain` · `sip_listen_addr` · `sip_push_url` | `install.sh` |
 
-`rtc-relay-server` 는 아직 없습니다 — 자기 `.env` 로 값을 받고 있고, 13단계
+`websocket-relay` 는 아직 없습니다 — 자기 `.env` 로 값을 받고 있고, 13단계
 어디에서도 파라미터를 묻지 않기 때문입니다. 필요해지면 같은 모양으로 붙입니다.

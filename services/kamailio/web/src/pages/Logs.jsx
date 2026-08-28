@@ -21,7 +21,7 @@ export default function Logs() {
               <li>REGISTER — 등록 요청과 401 인증 흐름</li>
               <li>INVITE — 통화 시도</li>
               <li>ts_store|ts_append — 착신 푸시로 붙들어 둔 INVITE</li>
-              <li>sip-push — rtc-relay-server 로 나간 깨우기 요청</li>
+              <li>sip-push — websocket-relay 로 나간 깨우기 요청</li>
             </ul>
             <p>
               등록된 단말과 온라인 상태는 로그보다 <strong className="text-foreground">등록</strong> 탭이 정확합니다 —

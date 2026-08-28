@@ -179,7 +179,7 @@ privileges = ALL
 |--------|--------|-------------|------|
 | `manager` | Nginx manager | [services/manager/schema/](../services/manager/schema/) | `administrator`, `admin_audit_log`, `schema_migrations` |
 | `ws_bridge` | ws-bridge | [services/ws-bridge/schema/](../services/ws-bridge/schema/) | `schema_migrations` (아직 저장할 데이터 미정) |
-| `rtc_relay` | rtc-relay-server | [services/rtc-relay-server/schema/](../services/rtc-relay-server/schema/) | `rtc_mobiles`, `rtc_homenet`, `schema_migrations` |
+| `rtc_relay` | websocket-relay | [services/websocket-relay/schema/](../services/websocket-relay/schema/) | `rtc_mobiles`, `rtc_homenet`, `schema_migrations` |
 
 > DB 이름에는 하이픈을 쓸 수 없어 서비스 이름 `ws-bridge`의 스키마는 `ws_bridge`입니다.
 

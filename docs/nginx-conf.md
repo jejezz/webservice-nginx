@@ -35,7 +35,7 @@ health_path = /health
 | `name` | 폴더 이름 | 서비스 이름. `/health` 응답의 `service`, `pm2-conf` 의 `[app] name` 과 **모두 같아야** 합니다 |
 | `host` | `127.0.0.1` | 백엔드 주소. 루프백에 묶어 두면 Nginx 를 우회한 직접 접근이 차단됩니다 |
 | `ports` | — | 공백으로 구분. **두 개 이상이면 `least_conn` 로드밸런싱** 됩니다 |
-| `protocol` | `http` | 백엔드와 말하는 프로토콜. `https` 면 TLS 검증을 건너뜁니다 (자체 서명 대응 — `rtc-relay-server` 가 이 경우) |
+| `protocol` | `http` | 백엔드와 말하는 프로토콜. `https` 면 TLS 검증을 건너뜁니다 (자체 서명 대응) |
 | `health_path` | `/health` | 대시보드가 직접 호출할 경로 ([health-contract.md](health-contract.md)) |
 | `dashboard_path` | — | 서비스 자체 관리 화면 경로. 있으면 대시보드에 링크 버튼이 생깁니다 |
 | `enabled` | `true` | `false` 면 라우트를 만들지 않습니다 (서비스를 잠시 내릴 때) |

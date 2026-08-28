@@ -1,0 +1,52 @@
+{
+  "name": "websocket-relay",
+  "version": "1.0.0",
+  "description": "WebRTC 시그널링 · IoT · SIP 착신 푸시를 중계하는 WebSocket 릴레이 (nginx /relay/ 뒤)",
+  "main": "index.js",
+  "author": "jejezz",
+  "license": "MIT",
+  "dependencies": {
+    "dotenv": "^17.0.1",
+    "express": "^4.18.1",
+    "firebase-admin": "^13.4.0",
+    "mysql2": "^3.14.1",
+    "winston": "^3.17.0",
+    "winston-daily-rotate-file": "^5.0.0",
+    "ws": "^8.5.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.13",
+    "@types/node": "^17.0.45",
+    "@types/ws": "^8.5.3",
+    "eslint": "^8.17.0",
+    "nodemon": "^3.1.10",
+    "prettier": "^2.6.2",
+    "tsx": "^4.19.4",
+    "typescript": "^4.9.5"
+  },
+  "scripts": {
+    "dev": "nodemon --watch \"src/**/*.ts\" --exec \"tsx\" src/index.ts",
+    "build": "tsc -p .",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc -p . --noEmit && tsc -p tsconfig.scripts.json --noEmit",
+    "setup": "tsx scripts/setup.ts",
+    "doctor": "tsx scripts/doctor.ts",
+    "db:migrate": "tsx scripts/db-migrate.ts",
+    "db:status": "tsx scripts/db-status.ts",
+    "web:build": "npm --prefix web install && npm --prefix web run build",
+    "start": "pm2 start ../../pm2/ecosystem.config.js --only websocket-relay && pm2 save",
+    "stop": "pm2 stop websocket-relay; pm2 delete websocket-relay",
+    "restart": "pm2 restart websocket-relay",
+    "logs": "pm2 logs websocket-relay --lines 50",
+    "nginx:check": "../../nginx/install_nginx_stack.sh --check",
+    "nginx:apply": "sudo ../../nginx/install_nginx_stack.sh --skip-install",
+    "directory": "node tools/directory.js",
+    "fcm": "node tools/fcm.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ptype-co-kr/websocket-relay-gateway.git"
+  },
+  "keywords": [],
+  "type": "commonjs"
+}

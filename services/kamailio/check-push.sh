@@ -10,7 +10,7 @@
 #
 #   ① Kamailio 가 INVITE 를 붙들어 두는가      (tsilo · ts_store/ts_append)
 #   ② 붙들어 두는 시간이 얼마인가              (tm wt_timer)
-#   ③ 깨우러 갈 상대가 살아 있는가             (rtc-relay-server /health)
+#   ③ 깨우러 갈 상대가 살아 있는가             (websocket-relay /health)
 #   ④ 깨울 단말을 찾을 수 있는가               (rtc_mobiles.sip_user)
 #
 # ④ 가 이 흐름에서 가장 자주 비어 있는 자리입니다 — 단말 앱이 /register 에
@@ -23,8 +23,9 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 INSTALLED_CFG="/etc/kamailio/kamailio.cfg"
 LOCAL_CFG="/etc/kamailio/kamailio-local.cfg"
-RELAY_HEALTH="${RELAY_HEALTH_URL:-https://127.0.0.1:28099/health}"
-FCM_CREDENTIALS="${PROJECT_ROOT}/services/rtc-relay-server/secrets/firebase-admin.json"
+# 평문 HTTP 다 — 이 서비스는 TLS 를 직접 다루지 않는다 (nginx 가 443 에서 끊는다).
+RELAY_HEALTH="${RELAY_HEALTH_URL:-http://127.0.0.1:28099/health}"
+FCM_CREDENTIALS="${PROJECT_ROOT}/services/websocket-relay/secrets/firebase-admin.json"
 
 DB_NAME="rtc_relay"
 DB_USER="jyahn"
@@ -97,12 +98,12 @@ fi
 # ---------- ③ 깨우러 갈 상대 ----------
 
 info ""
-info "rtc-relay-server — 깨우는 쪽"
+info "websocket-relay — 깨우는 쪽"
 
 code="$(curl -sk -o /dev/null -w '%{http_code}' --max-time 3 "$RELAY_HEALTH" 2>/dev/null || true)"
 case "${code:-000}" in
     200) ok "살아 있습니다: ${RELAY_HEALTH} → 200" ;;
-    000) warn "응답이 없습니다: ${RELAY_HEALTH} — pm2 restart rtc-relay-server" ;;
+    000) warn "응답이 없습니다: ${RELAY_HEALTH} — pm2 restart websocket-relay" ;;
     *)   warn "${RELAY_HEALTH} → ${code}" ;;
 esac
 

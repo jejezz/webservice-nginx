@@ -82,7 +82,7 @@ manager 는 하위 호환을 위해 `healthy` / `up` / `pass` / `ready` / `green
 | `route-a` `route-b` `route-c` | 28080·28081·28082 | ✅ 규약대로 |
 | `ws-bridge` | 28083 | ✅ 규약대로. `details` 에 세션·연결 수, 프로토콜 |
 | `manager` | 28084 | ✅ 규약대로 |
-| `rtc-relay-server` | 28099 (자체 HTTPS) | ✅ 규약대로. `details` 에 방 수와 DB 상태 |
+| `websocket-relay` | 28099 | ✅ 규약대로. `details` 에 방·연결 수, DB·푸시 상태 |
 | `stock-analyzer` | 28085 | ⚠️ 최상위에 `db`, `uptime` 이 더 있음 → `details` 로 옮길 것 |
 
 ⚠️ 위 한 건은 지금도 대시보드에서 **정상으로 잡힙니다.** 하위 호환 값과 누락 필드를

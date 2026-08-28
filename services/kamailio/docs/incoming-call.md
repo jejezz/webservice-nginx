@@ -37,7 +37,7 @@ services/kamailio/check-push.sh --json   # 구축 마법사가 읽는 형식
                                           │
  ④                        ts_store()  ← INVITE 를 붙들어 둔다
                                           │
- ⑤ Kamailio ──POST /sip-push──▶ rtc-relay-server (127.0.0.1:28099)
+ ⑤ Kamailio ──POST /sip-push──▶ websocket-relay (127.0.0.1:28099)
                 {aor:"1001", caller:"...", callId:"..."}
                                           │
  ⑥                        rtc_mobiles 에서 sip_user='1001' 인 토큰 조회
@@ -101,7 +101,7 @@ services/kamailio/check-push.sh --json   # 구축 마법사가 읽는 형식
 `evapi_async_relay` 로 트랜잭션을 매달고 외부 앱이 `t_continue` 로 깨우는 방식이라
 워커를 붙들지 않지만, 움직이는 조각이 늘어납니다.
 
-### ② rtc-relay-server — 푸시 발송  ✅ 구현됨
+### ② websocket-relay — 푸시 발송  ✅ 구현됨
 
 `POST /sip-push` (루프백 전용)
 
@@ -137,7 +137,7 @@ Nginx 경유        → 404 (존재하지 않음)  ✓
 사용자명(`1001`)으로는 토큰을 찾을 수 없었습니다. `sip_user` 컬럼을 추가합니다.
 
 ```
-services/rtc-relay-server/schema/002-sip-user.sql
+services/websocket-relay/schema/002-sip-user.sql
 ```
 
 UNIQUE 를 걸지 않습니다 — 한 내선에 휴대폰·태블릿이 함께 붙을 수 있고, 그때는
@@ -233,7 +233,7 @@ Kamailio 에 **`!~` 연산자는 없습니다.** `!( ... =~ ... )` 로 써야 �
 
 - 반환값은 대입이 아니라 **`$rc`** 로 받습니다 (`$var(x) = http_client_query(...)` 아님)
 - 인자는 **네 개** — `(url, post-data, hdrs, result)`. `Content-Type: application/json`
-  을 빠뜨리면 안 됩니다. rtc-relay-server 가 `express.json()` 으로 받으므로
+  을 빠뜨리면 안 됩니다. websocket-relay 가 `express.json()` 으로 받으므로
   헤더가 없으면 본문이 파싱되지 않아 `aor_required` 가 옵니다.
 
 남은 미검증 부분은 그 함수 호출의 인자 개수뿐이고, 패키지 README 의 4인자 예제를
@@ -360,4 +360,4 @@ FCM 지연 + 앱 콜드 스타트 + (Janus 를 쓰면) 세션 생성 · `attach`
 `002-sip-user.sql` 은 *"값은 단말이 `/register` 할 때 함께 보낸다"* 고 적어
 두었지만 그 코드가 없어서, `rtc_mobiles.sip_user` 를 채울 방법이 아예
 없었습니다. `sipPush.ts` 는 그 컬럼으로 조회하므로 **푸시가 영원히 `pushed:0`**
-이었습니다. 이번에 채워 넣었습니다 (rtc-relay-server 커밋 참고).
+이었습니다. 이번에 채워 넣었습니다 (websocket-relay 커밋 참고).

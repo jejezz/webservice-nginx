@@ -20,6 +20,38 @@ function joinUrl(origin, pathname) {
   return `${String(origin).replace(/\/+$/, '')}/${String(pathname).replace(/^\/+/, '')}`;
 }
 
+/**
+ * nginx location 지시자를 연산자와 경로로 나눈다.
+ *   "= /relay/rtc"  → { modifier: '=',  pattern: '/relay/rtc' }
+ *   "/relay/"       → { modifier: '',   pattern: '/relay/' }
+ */
+function splitLocation(location) {
+  const m = String(location || '').trim().match(/^(\^~|~\*|~|=)?\s*(.*)$/);
+  return { modifier: (m && m[1]) || '', pattern: ((m && m[2]) || '').trim() };
+}
+
+/**
+ * 이 라우트를 **공개 기준 경로**로 쓸 수 있는가.
+ *
+ * 대시보드 링크와 공개 경로 표시는 "여기에 하위 경로를 붙이면 열린다" 를 전제한다.
+ * 그런 자격이 없는 라우트가 있다.
+ *
+ *   =        정확 일치라 하위 경로가 붙지 않는다
+ *   ~ ~*     정규식이라 경로를 만들 수 없다
+ *   websocket  ws 전용 입구다. 브라우저로 여는 곳이 아니다
+ *
+ * 예전에는 order 가 가장 낮은 라우트를 그냥 대표로 삼았다. order 는 nginx 에
+ * 생성되는 **순서**를 정하는 값이지 공개 입구를 고르는 값이 아니어서,
+ * `= /relay/rtc`(order 10) 같은 WebSocket 전용 라우트가 대표가 되고
+ * 대시보드 링크가 `= /relay/rtc/dashboard` 라는 열리지 않는 문자열이 됐다.
+ */
+function isBrowsableBase(route) {
+  if (route.websocket) return false;
+  const { modifier, pattern } = splitLocation(route.location);
+  if (modifier === '=' || modifier === '~' || modifier === '~*') return false;
+  return pattern.startsWith('/');
+}
+
 /** nginx-stack.conf — 서버 수준 값과 services 디렉토리 위치. */
 function loadStack(stackPath) {
   const { sections } = parseIni(fs.readFileSync(stackPath, 'utf8'));
@@ -108,11 +140,20 @@ function loadRoutes(stackPath) {
       }))
       .filter((r) => r.location);
 
-    const primary = [...declared].sort((a, b) => a.order - b.order)[0] || null;
+    // 하위 경로가 붙을 수 있는 것들 중 **가장 일반적인(짧은) 접두사**를 고른다.
+    // 나머지 경로가 전부 그 아래 걸리기 때문이다. 같으면 order 가 낮은 쪽.
+    const primary = declared
+      .filter(isBrowsableBase)
+      .sort((a, b) =>
+        splitLocation(a.location).pattern.length - splitLocation(b.location).pattern.length ||
+        a.order - b.order)[0] || null;
+    // 연산자를 뗀 순수 경로. 링크와 표시에 쓰는 값이므로 지시자 문자열을 그대로
+    // 쓰면 안 된다. 원본 지시자는 아래 routes[] 에 그대로 남는다.
+    const primaryPath = primary ? splitLocation(primary.location).pattern : null;
 
     routes.push({
       name,
-      location: primary ? primary.location : '',
+      location: primaryPath || '',
       // 예전 nginx.ini 의 proxy_pass 자리. 표시용으로만 쓴다.
       proxyPass: origin,
       websocket: declared.some((r) => r.websocket),
@@ -121,7 +162,7 @@ function loadRoutes(stackPath) {
       // 헬스 체크는 Nginx를 거치지 않고 백엔드에 직접 요청한다.
       healthUrl: joinUrl(origin, healthPath),
       // 외부에서 접근할 때의 경로 (참고용)
-      publicPath: primary ? joinUrl(primary.location, healthPath) : null,
+      publicPath: primaryPath ? joinUrl(primaryPath, healthPath) : null,
       // 부가 정보 — 여러 포트/여러 라우트를 선언한 서비스용
       ports,
       routes: declared,

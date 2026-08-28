@@ -35,7 +35,7 @@ Flutter·안드로이드·브라우저 등 **WebRTC 클라이언트를 만드는
       │                                 └──────────┘   └────────┘
       │
       │ ③  https://<서버>/iot/register  (FCM 토큰 · sip_user 등록)
-      └────────────────────────────────▶ rtc-relay-server ──▶ FCM
+      └────────────────────────────────▶ websocket-relay ──▶ FCM
 ```
 
 - ①②는 앱이 **Janus 하나**만 상대하면 됩니다. Kamailio·인터폰은 서버 안쪽 이야기입니다.
@@ -148,7 +148,7 @@ wss://<서버>/janus-ws          서브프로토콜: janus-protocol   ← 필수
 ```
 ① 인터폰 ──INVITE──▶ Kamailio        (모바일은 등록돼 있지 않다)
 ② Kamailio 가 INVITE 를 붙들어 둔다   ts_store · 최대 60초 (wt_timer)
-③ Kamailio ──/sip-push──▶ rtc-relay-server ──FCM──▶ 앱을 깨운다
+③ Kamailio ──/sip-push──▶ websocket-relay ──FCM──▶ 앱을 깨운다
 ④ 앱이 깨어나 Janus 에 붙고 register  ← 위 3번과 똑같다
 ⑤ 등록되는 순간 Kamailio 가 붙들어 둔 INVITE 를 그 연결로 흘려보낸다 (ts_append)
 ⑥ 앱에 incomingcall 이벤트 + jsep offer 가 온다

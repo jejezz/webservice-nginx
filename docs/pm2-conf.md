@@ -44,7 +44,7 @@ script = src/index.js
 | `autorestart` | `true` | |
 | `watch` | `false` | `true`/`false` 또는 공백으로 구분한 경로 목록 (`src`) |
 | `ignore_watch` | `node_modules logs` | 공백으로 구분 |
-| `max_memory_restart` | `256M` | `none` 이면 상한을 걸지 않습니다 (`rtc-relay-server` 가 이 경우) |
+| `max_memory_restart` | `256M` | `none` 이면 상한을 걸지 않습니다 (`websocket-relay` 가 이 경우) |
 | `min_uptime` | — | 이 시간 안에 죽으면 비정상 종료로 셉니다 (`10s`) |
 | `max_restarts` | — | |
 | `restart_delay` | — | 밀리초 |
@@ -85,7 +85,7 @@ manager 대시보드가 읽는 값이 셋 있습니다.
 | 변수 | 쓰임 |
 |---|---|
 | `PORT` | 기본 헬스 URL(`http://127.0.0.1:PORT/health`) 구성 |
-| `HEALTH_URL` | 헬스 URL 직접 지정. 자체 HTTPS 서비스용 (`rtc-relay-server`) |
+| `HEALTH_URL` | 헬스 URL 직접 지정 (`websocket-relay` 가 이 경우 — 포트를 `.env` 에서 읽어 `PORT` 를 두지 않습니다) |
 | `HEALTH_INSECURE_TLS` | `true` 면 자체 서명 인증서 검증을 건너뜀 |
 
 `DASHBOARD_PATH` 도 지금은 여기서 읽지만, 서비스 자체 관리 화면의 경로는
@@ -109,7 +109,7 @@ node pm2/ecosystem.config.js --check
   ok      ws-bridge         28083   src/index.js
   ok      manager           28084   manager/server/src/index.js
   WARN    stock-analyzer    28085   pm2-conf PORT=28085 vs nginx-conf ports=28086
-  ok      rtc-relay-server  -       nginx 28099
+  ok      websocket-relay   -       nginx 28099
 ```
 
 `nginx-conf` 없이 `pm2-conf` 만 있는 서비스는 경고가 아닙니다. Nginx 를 거치지
@@ -128,7 +128,7 @@ node pm2/ecosystem.config.js --check
 | `ws-bridge` | `DASHBOARD_PATH = /dashboard` |
 | `manager` | `cwd = server`, `script = src/index.js` |
 | `stock-analyzer` | `cwd = server`, `interpreter = server/node_modules/.bin/tsx`, `max_memory_restart = 512M`. 지금 로그를 절대 경로로 적어 둔 이유(cwd 가 `server` 라 `./logs` 가 흩어짐)는 로그 기본값이 `pm2/logs/` 로 통일되면서 사라집니다 |
-| `rtc-relay-server` | `watch = src`, `HEALTH_URL = https://127.0.0.1:28099/health`, `HEALTH_INSECURE_TLS = true`. 자체 HTTPS 라 `PORT` 대신 `HEALTH_URL` 을 씁니다 |
+| `websocket-relay` | `watch = src`, `HEALTH_URL = http://127.0.0.1:28099/health`. 포트를 `.env` 에서 읽으므로 `PORT` 대신 `HEALTH_URL` 을 씁니다 |
 
 ## 부팅 복원
 

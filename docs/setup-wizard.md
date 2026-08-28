@@ -51,7 +51,7 @@ services/janus/install.sh          services/janus/setup-dashboard.sh
 `/manager/setup` 에 둡니다.
 
 이 화면은 **여러 서비스를 가로지릅니다.** database·nginx·pm2·kamailio·janus·
-rtc-relay-server 가 한 흐름 안에 들어옵니다. 어느 한 서비스의 대시보드에 두면
+websocket-relay 가 한 흐름 안에 들어옵니다. 어느 한 서비스의 대시보드에 두면
 그 서비스가 다른 서비스를 아는 이상한 의존이 생깁니다.
 
 `manager` 는 이미 그 일을 하고 있습니다.
@@ -215,7 +215,7 @@ database ─┬─────────────────────�
           │                                         │
           ├─▶ kamailio ─┬─▶ janus ─▶ janus-dashboard │
           │             │                           │
-          │             └─▶ rtc-relay-server ◀──────┘
+          │             └─▶ websocket-relay ◀──────┘
           │                    (착신 푸시)
           └─▶ manager
 
@@ -428,7 +428,7 @@ sudo 명령을 다루는 방식과 같습니다 — **오래 걸리고 되돌리
   `database/check-database.sh` 로 따로 뒀습니다. **공용 계정(jyahn)으로**
   확인합니다 — root 소켓 인증을 쓰면 sudo 없이 도는 마법사에서 늘 "확인 불가"
   가 되기 때문입니다.
-- **13단계(착신 푸시).** 네 조각(tsilo 훅 · `wt_timer` · rtc-relay-server ·
+- **13단계(착신 푸시).** 네 조각(tsilo 훅 · `wt_timer` · websocket-relay ·
   `sip_user` 매핑)이 서로 다른 서비스에 흩어져 있어 주인이 없었습니다.
   `services/kamailio/check-push.sh` 가 그 넷을 한 줄씩 봅니다.
 
@@ -691,7 +691,7 @@ services/kamailio/check-push.sh
    DB 를 세우는 것이 1단계이기 때문입니다 (위 '확인 기록은 파일에').
 3. ~~**다른 서비스의 설정도 `settings.ini` 방식으로 옮길지**~~ — 답했습니다.
    스키마를 데이터로 내리고 kamailio 에도 붙였습니다 (위 '스키마를 데이터로').
-   `rtc-relay-server` 는 아직 두었습니다 — 자기 `.env` 로 값을 받고 있고,
+   `websocket-relay` 는 아직 두었습니다 — 자기 `.env` 로 값을 받고 있고,
    13단계 어디에서도 파라미터를 묻지 않습니다.
 4. ~~**설치본이 저장소보다 낡은 것을 어떻게 알아챌지**~~ — 답했습니다.
    `lib/config-diff.sh` 로 파일 단위 비교를 넣었고, 붙이자마자 nginx 에서

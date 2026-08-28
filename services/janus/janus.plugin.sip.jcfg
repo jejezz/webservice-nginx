@@ -33,7 +33,13 @@ general: {
 	# janus.jcfg 의 nat_1_1_mapping 이 담당합니다 — 이쪽이 아닙니다.
 	behind_nat = false
 
-	register_ttl = 3600
+	# 등록 만료. **짧게 둔다 (10분).**
+	#
+	# Janus 는 모바일을 대신해 Kamailio 에 등록한다. 앱이 사라져도 이 값이 남아
+	# 있는 동안 Kamailio 는 그 내선이 살아 있다고 보고 INVITE 를 그대로 보내며,
+	# **착신 푸시를 부르지 않는다.** 그러면 죽은 세션으로 흘러가 조용히 실패한다.
+	# 3600(1시간)은 그 창이 지나치게 넓었다.
+	register_ttl = 600
 
 	# SIP ↔ Janus 구간(평문 RTP)의 포트.
 	#

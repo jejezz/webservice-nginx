@@ -39,7 +39,7 @@ DB_HOST="localhost"
 #
 #   sip_domain        SIP 도메인
 #   sip_listen_addr   SIP 를 받을 이 장비의 주소 — **장비마다 다릅니다**
-#   sip_push_url      착신 푸시를 요청할 곳 (rtc-relay-server)
+#   sip_push_url      착신 푸시를 요청할 곳 (websocket-relay)
 #
 # 값이 형식에 맞지 않으면 --apply 가 아무것도 바꾸지 않고 멈춥니다.
 SETTINGS_FILE="${SCRIPT_DIR}/settings.ini"
@@ -76,9 +76,9 @@ SIP_DOMAIN="$(settings_get sip_domain 'pluto.org')"
 # 없으면 점검이 "아직 정하지 않았다" 로 보고하고, --apply 는 멈춘다.
 SIP_LISTEN_ADDR="$(settings_get sip_listen_addr '')"
 
-# 착신 푸시를 요청할 곳. rtc-relay-server 가 FCM 자격 증명과 토큰 테이블을 갖고
+# 착신 푸시를 요청할 곳. websocket-relay 가 FCM 자격 증명과 토큰 테이블을 갖고
 # 있으므로 그쪽에 맡긴다. 루프백 전용이라 같은 호스트에서만 부를 수 있다.
-SIP_PUSH_URL="$(settings_get sip_push_url 'https://127.0.0.1:28099/sip-push')"
+SIP_PUSH_URL="$(settings_get sip_push_url 'http://127.0.0.1:28099/sip-push')"
 
 # shellcheck source=../../database/lib_mariadb.sh
 source "${PROJECT_ROOT}/database/lib_mariadb.sh"

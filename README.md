@@ -14,7 +14,7 @@ webservices/
     ├── ws-bridge/              # WebSocket Bridge     /ws-bridge/   (28083)
     ├── stock-analyzer/         # 주식 차트·예측       /stock-analyzer (28085)
     ├── route-a|route-b|route-c/# 예제 서비스          (라우트 꺼 둠) (28080~28082)
-    └── rtc-relay-server/       # rtc-relay-server     /iot/         (28099, 자체 HTTPS)
+    └── websocket-relay/        # WebRTC·IoT·SIP 릴레이 /relay/       (28099)
 ```
 
 경계는 이렇습니다.
@@ -114,4 +114,4 @@ pm2 등록(`pm2 delete` 후 재등록)만 손보면 됩니다.
 서비스별 상세는 각 디렉토리의 README 에 있습니다
 ([ws-bridge](services/ws-bridge/README.md),
 [stock-analyzer](services/stock-analyzer/README.md),
-[rtc-relay-server](services/rtc-relay-server/ReadMe.md)).
+[websocket-relay](services/websocket-relay/ReadMe.md)).

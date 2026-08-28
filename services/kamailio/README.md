@@ -175,7 +175,7 @@ Kamailio 는 이 프로젝트가 만든 프로그램이 아니라 배포판 패�
 "선언을 빠뜨린 것"과 "pm2 대상이 아닌 것"을 구별할 수 있게 하기 위해서입니다.
 
 > 이 디렉토리는 원래 `services/ws-bridge/kamailio/` 에 있었습니다. Kamailio 는
-> ws-bridge 의 부속이 아니라 독립 서비스이고, 앞으로 rtc-relay-server 도
+> ws-bridge 의 부속이 아니라 독립 서비스이고, 앞으로 websocket-relay 도
 > (착신 푸시 때문에) 붙게 되므로 한 서비스 밑에 두는 것이 맞지 않습니다.
 
 ## 현황 (2026-08-19 확인)

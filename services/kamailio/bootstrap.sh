@@ -31,7 +31,7 @@ FEATURES=(
     "kamailio|/usr/sbin/kamailio|SIP 서버 본체"
     "kamailio-mysql-modules|db_mysql|계정(subscriber) 조회 — digest 인증"
     "kamailio-websocket-modules|websocket|SIP over WebSocket — 모바일이 WSS 로 붙는다"
-    "kamailio-utils-modules|http_client|착신 푸시 요청 — rtc-relay-server 호출"
+    "kamailio-utils-modules|http_client|착신 푸시 요청 — websocket-relay 호출"
 )
 
 # 배포판 kamailio 패키지에 이미 들어 있어 따로 설치할 것이 없는 모듈.

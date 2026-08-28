@@ -101,7 +101,7 @@ Doze 가 똑같이 끊습니다.
 - 포그라운드 서비스로 유지할 수 있지만, 앱이 죽으면 끝입니다
 
 **결국 FCM 이 필요합니다.** 서버 쪽은 이미 준비돼 있습니다 — `tsilo` · `http_client`
-설치됨, `kamailio.cfg` 포크에 훅 있음, `rtc-relay-server` 의 `POST /sip-push` 구현·검증
+설치됨, `kamailio.cfg` 포크에 훅 있음, `websocket-relay` 의 `POST /sip-push` 구현·검증
 완료. **비어 있는 것은 앱 쪽뿐입니다.**
 
 > 이 Kamailio 의 `registrar` 에는 RFC 8599(`pn-provider`/`pn-prid`) 지원이 없습니다
@@ -118,9 +118,9 @@ legacy SIP 호환만 되면 됩니다.
 ### ⚠️ 바로잡아야 할 전제
 
 `websocket-plan.md` 는 "모바일 앱에 이미 WebRTC 스택이 있습니다" 라고 적었는데,
-그것은 **`rtc-relay-server` 쪽 앱**입니다. **`android-pjsip-phone` 에는 WebRTC 가
+그것은 **`websocket-relay` 쪽 앱**입니다. **`android-pjsip-phone` 에는 WebRTC 가
 없습니다** (PJSIP 전용). 이 방향을 택하면 이 앱은 vehicle 이 아니며, 방·FCM·인증서
-신뢰가 이미 있는 rtc-relay-server 쪽 앱을 확장하는 편이 짧습니다.
+신뢰가 이미 있는 websocket-relay 쪽 앱을 확장하는 편이 짧습니다.
 
 ### 후보
 
@@ -150,7 +150,7 @@ behalf of the web peer**" 로, 구상했던 등록대행 Agent 와 같은 모델
 2. `siptest.html` 로 브라우저 → 인터폰 통화
    - **여기서 H.264 협상이 드러납니다.** 가장 큰 위험 요소
    - Android WebRTC 의 H.264 는 단말 MediaCodec 에 의존 — 없는 단말은 VP8 만 제시
-3. 되면 Android 클라이언트 (rtc-relay-server 앱 확장)
+3. 되면 Android 클라이언트 (websocket-relay 앱 확장)
 
 ## 6. 앱 쪽 변경 (Mac 저장소에 적용됨)
 

@@ -9,7 +9,7 @@ React + Tailwind CSS + shadcn/ui 기반의 관리 페이지입니다.
                                               │
                                               ├─ 서비스 목록: nginx.ini + ecosystem.config.js
                                               ├─ GET http://127.0.0.1:28083/health    (ws-bridge)
-                                              ├─ GET https://127.0.0.1:28099/health   (rtc-relay-server, TLS 검증 생략)
+                                              ├─ GET http://127.0.0.1:28099/health    (websocket-relay)
                                               ├─ pm2 jlist
                                               └─ systemctl show nginx
 ```
