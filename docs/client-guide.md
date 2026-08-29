@@ -119,7 +119,7 @@ wss://<서버>/janus-ws          서브프로토콜: janus-protocol   ← 필수
 
 ```json
 {"janus":"message","session_id":S,"handle_id":H,"transaction":"t4","apisecret":"…",
- "body":{"request":"call","uri":"sip:0010200601@pluto.org"},
+ "body":{"request":"call","uri":"sip:0101080501@pluto.org"},
  "jsep":{"type":"offer","sdp":"…"}}
 → event: result.event = "progress"  (180/183)
 → event: result.event = "accepted" + jsep answer   ← setRemoteDescription
@@ -217,7 +217,7 @@ curl -k -X POST -H 'Content-Type: application/json' -d '{}' \
 
 ```json
 {"janus":"event","plugindata":{"data":{"sip":"event","result":{
-   "event":"incomingcall","username":"sip:0010200601@pluto.org"}}},
+   "event":"incomingcall","username":"sip:0101080501@pluto.org"}}},
  "jsep":{"type":"offer","sdp":"…"}}
 ```
 
