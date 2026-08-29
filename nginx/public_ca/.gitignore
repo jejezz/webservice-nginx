@@ -1,0 +1,5 @@
+# 발급 설정 (docs/settings-contract.md). 비밀은 아니지만 장비·단지마다 다르다.
+# 구축 마법사의 폼과 사람이 settings.ini 를 쓰고, setup_letsencrypt.sh 가 읽는다.
+# .applied-settings 는 --prod 가 실제로 발급한 값의 기록이라 root 가 쓴다.
+settings.ini
+.applied-settings

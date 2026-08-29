@@ -18,14 +18,21 @@
 
 ```
 nginx/
-├── cert/                    사설 CA 가 만든 파일들 (git 제외)
-├── generate_certs.sh        사설 CA 발급          ← 개발용
+├── cert/                     사설 CA 가 만든 파일들 (git 제외)
+├── generate_certs.sh         사설 CA 발급          ← 개발용
 └── public_ca/
-    ├── README.md            이 문서
-    ├── setup_letsencrypt.sh 공인 인증서 발급      ← 배포용
-    ├── cert-status.sh       지금 무엇을 내밀고 있나
-    └── check-dns.sh         이름이 아직 이 서버를 가리키나
+    ├── README.md             이 문서
+    ├── settings-schema.json  받을 값의 정의 (도메인·알림 메일)
+    ├── settings.ini          이 장비의 값 (git 제외)
+    ├── setup_letsencrypt.sh  공인 인증서 발급      ← 배포용
+    ├── cert-status.sh        지금 무엇을 내밀고 있나
+    ├── renew-status.sh       90일 갱신이 돌 준비가 됐나
+    └── check-dns.sh          이름이 아직 이 서버를 가리키나
 ```
+
+넷 다 `--check --json` 으로 구축 마법사가 읽는 판정을 냅니다
+([check-contract.md](../../docs/check-contract.md)). 아래 '구축 마법사에서' 를
+보세요.
 
 ## 무엇이 달라지나
 
@@ -68,10 +75,23 @@ dig +short A <도메인>         # 같은 값이 나와야 한다
 
 ## 절차
 
+### 0. 도메인을 정합니다
+
+도메인과 알림 메일은 **`settings.ini` 에서 읽습니다** — 장비·단지마다 다른
+값이기 때문입니다 ([settings-contract.md](../../docs/settings-contract.md)).
+구축 마법사의 폼이 이 파일을 쓰고, 손으로 적어도 됩니다.
+
+```ini
+domain = c-a3f19c04.rtc.zoomon.art
+email  = you@example.com
+```
+
+아래 명령들은 전부 이 값을 씁니다. 인자로 주면 그쪽이 이깁니다.
+
 ### 1. 점검 — 아무것도 바꾸지 않습니다
 
 ```bash
-./setup_letsencrypt.sh --check c-a3f19c04.rtc.zoomon.art
+./setup_letsencrypt.sh --check
 ```
 
 DNS·80 포트·webroot·certbot 넷을 봅니다. **여기서 막히는 것을 먼저 없애세요.**
@@ -80,7 +100,7 @@ DNS·80 포트·webroot·certbot 넷을 봅니다. **여기서 막히는 것을 
 ### 2. 시험 발급
 
 ```bash
-./setup_letsencrypt.sh --staging c-a3f19c04.rtc.zoomon.art
+sudo ./setup_letsencrypt.sh --staging
 ```
 
 **staging 을 건너뛰지 마세요.** Let's Encrypt 는 같은 이름 조합에 **주 5건**
@@ -95,11 +115,14 @@ certbot 이 같은 계보를 갱신하려 들어 먼저 지워야 하는데, 나
 ### 3. 실제 발급
 
 ```bash
-./setup_letsencrypt.sh --prod -m <메일주소> c-a3f19c04.rtc.zoomon.art
+sudo ./setup_letsencrypt.sh --prod
 ```
 
-`-m` 은 만료 알림을 받을 주소입니다. 없으면 **자동 갱신이 조용히 멈춘 것을
-인증서가 만료된 뒤에야** 알게 됩니다.
+만료 알림 주소는 `settings.ini` 의 `email` 입니다. 없으면 **자동 갱신이 조용히
+멈춘 것을 인증서가 만료된 뒤에야** 알게 됩니다.
+
+성공하면 무엇을 발급했는지 `.applied-settings` 에 남깁니다. 저장한 값과 그것이
+어긋나면 점검이 "아직 반영되지 않았습니다" 로 말합니다.
 
 ### 4. nginx 에 물리기
 
@@ -125,8 +148,56 @@ sudo ../install_nginx_stack.sh --skip-install
 ### 5. 확인
 
 ```bash
-./cert-status.sh
+./cert-status.sh      # 지금 무엇이 나가고 있나
+./renew-status.sh     # 90일 뒤에도 나갈 것인가
 ```
+
+## 구축 마법사에서
+
+같은 절차가 `/manager/setup` 에 **네 단계**로 들어가 있습니다
+([setup-wizard.md](../../docs/setup-wizard.md)). 터미널에서 하든 화면에서 하든
+판정은 같은 스크립트가 냅니다 — 마법사는 새 지식을 만들지 않습니다.
+
+| 단계 | 무엇을 묻나 | 점검 |
+|---|---|---|
+| `public_ca.issue` | 발급받았나 (그 전에 DNS·80 포트·webroot 가 준비됐나) | `setup_letsencrypt.sh --check --json` |
+| `public_ca.nginx` | 발급받은 것을 **실제로 내밀고 있나** | `cert-status.sh --check --json` |
+| `public_ca.renew` | 90일 뒤에도 내밀 것인가 | `renew-status.sh --check --json` |
+| `public_ca.dns` | 이름이 아직 이 서버를 가리키나 | `check-dns.sh --check --json` |
+
+`public_ca.issue` 는 `nginx.routes` 다음입니다. HTTP-01 챌린지는 반드시 80 으로
+들어오는데 80 은 전부 HTTPS 로 301 하므로, 그 예외(`acme_webroot`)를 만드는
+라우트 반영이 먼저 끝나 있어야 합니다. 뒤집으면 챌린지가 301 로 튕깁니다.
+
+### 네 단계 다 '선택' 입니다
+
+LAN 전용 설치는 사설 CA 로 계속 도는 것이 옳고, 공인 이름을 받을 수 없는
+배치(도메인이 없거나 80 을 열 수 없는 경우)도 있기 때문입니다. **배포용에서는
+넷 다 해야 합니다.**
+
+안 끝났다는 사실이 잊히지는 않습니다 — 대시보드의 TLS 카드가 사설 CA 를 계속
+`warn` 으로 두기 때문입니다 (아래 '대시보드에서 보기').
+
+### 점검은 sudo 없이 돕니다
+
+마법사는 sudo 를 부르지 않습니다. 그래서 점검 경로에 `run_root` 가 하나도
+없어야 하는데, 두 군데가 걸렸습니다.
+
+**80 포트 확인.** 예전에는 webroot 에 파일을 하나 넣고 200 이 오는지 봤습니다.
+그 자리는 `root:www-data` 라 쓰려면 root 여야 합니다. 지금은 **없는 이름**을
+부르고 404 가 오는지 봅니다 — 생성기가 만드는 예외 블록이 `try_files $uri =404`
+라, 없는 이름의 정답이 404 입니다. 확인하려던 셋을 그대로 다 확인합니다.
+
+| 응답 | 뜻 |
+|---|---|
+| `404` | 바깥에서 80 으로 들어왔고, 평문으로 응답했고, 예외 location 이 살아 있다 |
+| `301` | 예외가 아직 반영되지 않았다 (`install_nginx_stack.sh --skip-install`) |
+| 연결 실패 | 외부 80 이 닫혔다 |
+
+**발급됐는지 확인.** `/etc/letsencrypt/live/` 는 `0700 root` 라 못 읽습니다.
+대신 `/etc/letsencrypt/renewal/<이름>.conf` 를 읽습니다 — 그 디렉토리는 `0755`,
+파일은 `0644` 이고, **발급의 결과로만 생깁니다.** 갱신 훅이 걸렸는지도 같은
+파일에 적혀 있습니다.
 
 ## ⚠️ 유동 IP — 사람이 고쳐야 합니다
 
@@ -184,6 +255,26 @@ systemctl list-timers certbot.timer
 계속 내밉니다.** 파일은 최신인데 접속은 만료로 끊기는, 원인을 찾기 어려운
 상태가 됩니다. `cert-status.sh` 가 파일이 아니라 **실제 접속해서** 인증서를
 읽는 이유가 이것입니다.
+
+훅이 실제로 걸렸는지는 `renew-status.sh` 가 봅니다.
+
+```bash
+./renew-status.sh
+```
+
+90일 뒤에 조용히 끊기는 길이 셋 있고, 셋 다 **터지기 전에는 아무 증상이
+없습니다.** 그래서 만료를 기다리지 않고 지금 물어봅니다.
+
+| 보는 것 | 없으면 |
+|---|---|
+| `certbot.timer` 가 활성·부팅 등록 | 갱신 자체가 안 돈다 |
+| 갱신 훅 (`renew_hook`) | 갱신은 되는데 nginx 가 옛것을 계속 내민다 |
+| 만료까지 남은 날 | 30일 아래로 한참 내려왔으면 갱신이 실패하고 있다 |
+| 마지막 시도의 종료 코드 | 왜 실패했는지 (`journalctl -u certbot.service`) |
+
+만료가 30일 아래인 것 자체는 문제가 아닙니다 — certbot 이 거기서부터 갱신을
+시작하니까요. **20일 아래**로 내려왔다면 열흘 넘게 시도해서 다 실패했다는
+뜻이라, 그때부터 대기로 봅니다.
 
 ## 단지가 여러 개일 때
 
@@ -249,3 +340,8 @@ manager 의 `services/nginx.js` 가 `systemctl` 을 읽기 전용으로만 쓰�
 | staging 을 거침 | 주 5건 제한. 한 번 걸리면 일주일 |
 | 파일이 아니라 접속해서 확인 | 권한 불필요. reload 안 된 상태가 드러남 |
 | `private-ca` 를 warn 으로 | 이관이 안 끝난 것을 잊지 않도록 |
+| 도메인을 `settings.ini` 로 | 단지마다 다른 값. 화면과 스크립트가 같은 것을 읽어야 한다 |
+| 마법사에서 네 단계 다 선택 | LAN 전용·도메인 없는 배치가 실재한다. 잊히는 것은 TLS 카드가 막는다 |
+| 80 포트를 404 로 확인 | 점검은 sudo 없이 돌아야 한다. 404 도 같은 셋을 확인한다 |
+| 발급 여부를 `renewal/*.conf` 로 | `live/` 는 0700 root. 발급의 결과로만 생기는 0644 파일이 그 옆에 있다 |
+| 갱신을 따로 본다 (`renew-status.sh`) | 지금 멀쩡한 것과 90일 뒤 멀쩡한 것은 다르다 |
