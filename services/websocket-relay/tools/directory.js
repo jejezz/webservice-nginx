@@ -270,13 +270,60 @@ async function cmdCheck() {
         }
         process.exit(1);
     }
+    let snap;
     try {
-        const snap = await firestore().collection('regions').get();
+        snap = await firestore().collection('regions').get();
         console.log(`\nFirestore 연결 정상 — regions 문서 ${snap.size}개`
             + (DATABASE_ID ? ` (데이터베이스 ${DATABASE_ID})` : ''));
     } catch (err) {
         die(err.message, await firestoreHint(err, key));
     }
+
+    /*
+     * 올라가 있는 내용이 앱이 쓸 수 있는 상태인지 본다.
+     *
+     * 연결만 확인하고 끝내면, 콘솔에서 _index 를 지운 것 같은 사고를 아무도
+     * 모른다. 실제로 그런 일이 있었다 — 앱은 지역 목록을 받을 데가 없어 첫
+     * 화면부터 멈추는데, check 는 "정상" 이라고 답했다.
+     *
+     * 지역 문서는 코드를 이미 알아야 읽을 수 있으므로, _index 가 없으면
+     * 데이터가 다 있어도 앱에게는 없는 것과 같다.
+     */
+    const ids = snap.docs.map((d) => d.id);
+    const index = snap.docs.find((d) => d.id === '_index');
+    const problems = [];
+
+    if (!index) {
+        problems.push('regions/_index 가 없습니다. 앱이 지역 목록을 받을 수 없습니다.');
+    } else {
+        const listed = (index.data().regions || []).map((r) => String(r.code));
+        if (listed.length === 0) problems.push('_index 에 지역이 하나도 없습니다.');
+
+        // _index 가 가리키는데 문서가 없으면, 그 지역을 고른 사용자가 빈 화면을 본다.
+        for (const code of listed) {
+            if (!ids.includes(code)) problems.push(`_index 는 ${code} 를 가리키는데 그 문서가 없습니다.`);
+        }
+        // 반대쪽. 앱에는 안 보이지만 DB 에는 있는 문서다.
+        for (const id of ids) {
+            if (id !== '_index' && !listed.includes(id)) {
+                problems.push(`${id} 문서는 _index 에 없습니다 — 앱에 보이지 않습니다 (push --prune 으로 정리).`);
+            }
+        }
+    }
+
+    if (problems.length) {
+        console.log('\n⚠️  디렉터리 내용에 문제가 있습니다:');
+        problems.forEach((p) => console.log(`      ${p}`));
+        console.log('\n   대부분 다시 올리면 고쳐집니다: npm run directory -- push tools/directory.json');
+        process.exitCode = 1;
+        return;
+    }
+
+    const listed = (index.data().regions || []).length;
+    const complexes = snap.docs
+        .filter((d) => d.id !== '_index')
+        .reduce((n, d) => n + ((d.data().complexes || []).length), 0);
+    console.log(`디렉터리 정상 — 지역 ${listed}개, 단지 ${complexes}개`);
 }
 
 async function cmdPull() {
@@ -389,5 +436,7 @@ async function cmdPush(file, dryRun, prune) {
         try { key = JSON.parse(fs.readFileSync(KEY_FILE, 'utf8')); } catch { /* 없으면 목록 없이 안내 */ }
         die(err.message, await firestoreHint(err, key));
     }
-    process.exit(0);
+    // cmdCheck 가 내용 문제를 찾으면 exitCode 를 세워 둔다. 여기서 0 으로
+    // 덮어쓰면 크론이나 CI 가 이상을 알아채지 못한다.
+    process.exit(process.exitCode || 0);
 })();
