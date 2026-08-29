@@ -3,7 +3,8 @@
 NAT 안의 인터폰이 Kamailio 를 통해 모바일로 걸 때, 자고 있는 모바일을 깨워
 전화를 받게 하는 흐름입니다.
 
-관련 문서: [websocket-plan.md](websocket-plan.md) (전체 구조·단계)
+관련 문서: [websocket-plan.md](websocket-plan.md) (전체 구조·단계) ·
+[identity.md](../../../docs/identity.md) (세대·단말 번호 체계 — ⑤⑥ 의 `aor` 가 무엇인가)
 
 네 조각이 다 붙었는지 한 번에 보려면:
 

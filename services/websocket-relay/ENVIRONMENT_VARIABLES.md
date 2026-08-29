@@ -68,6 +68,14 @@ nano .env
 - `DEV_MIDDLEWARE` - Enable development middleware (true/false)
 - `TRUST_PROXY` - Trust proxy headers (true/false)
 
+### SIP 내선 계정 (docs/identity.md)
+- `SIP_PROVISION` - 승인된 단말에게 Kamailio 내선 계정을 만들어 줄지 (기본 `true`).
+  끄면 번호는 배정하되 계정은 만들지 않는다 — Kamailio 가 없는 개발기용
+- `SIP_DOMAIN` - 만들 계정의 도메인 (기본 `pluto.org`). **kamctlrc 의 `SIP_DOMAIN`
+  과 같아야 한다** — 다르면 그 계정으로 등록되지 않는다
+- `SIP_SUBSCRIBER_TABLE` - 계정이 사는 표 (기본 `kamailio.subscriber`). 같은
+  MariaDB 의 다른 스키마라 풀을 더 만들지 않고 스키마를 붙여 쓴다
+
 ### Firebase Push Notifications
 - `FCM_CHANNEL_ID` - Firebase notification channel ID
 - `FCM_SOUND_FILE` - Notification sound file name

@@ -11,6 +11,7 @@ import { DbConn } from '../libs/dbConnection';
 import logger from '../libs/logger.js';
 import config from '../config';
 import { createMobileRecord, updateMobileRecord, statusFor } from '../libs/mobileRecord';
+import * as sipAccount from '../libs/sipAccount';
 
 const router = Router();
 
@@ -159,9 +160,12 @@ router.patch('/:id/toggle-active', async (req: Request, res: Response) => {
 // DELETE
 router.delete('/:id', async (req: Request, res: Response) => {
     try {
+        // 지우기 전에 읽는다 — 지운 뒤에는 어느 내선이었는지 알 길이 없다.
+        const sipUser = await sipAccount.sipUserOf({ id: req.params.id });
         const result = await DbConn.execute(
             `DELETE FROM ${config.tables.mobile} WHERE id = ?`, [req.params.id]);
         if (result.affectedRows === 0) return res.status(404).json({ error: 'Mobile record not found' });
+        if (sipUser) await sipAccount.revoke(sipUser);
         logger.info(`Mobile record deleted: ID ${req.params.id}`);
         res.json({ message: 'Mobile record deleted successfully', id: Number(req.params.id) });
     } catch (err: any) {

@@ -33,9 +33,17 @@ import { TokenMessage } from 'firebase-admin/messaging';
 import config from '../config';
 import logger from './logger';
 import * as deviceCert from './deviceCert';
+import { homeNumber, deviceNumber, nextFreeSeq, MOBILE_CAPACITY } from './sipNumber';
+import * as sipAccount from './sipAccount';
 
-/** 한 세대가 인정할 수 있는 단말 수. */
-export const MAX_APPROVED_PER_HOME = 4;
+/**
+ * 한 세대가 인정할 수 있는 단말 수.
+ *
+ * 숫자를 여기 적지 않고 **순번 대역에서 유도한다** (libs/sipNumber.ts 의
+ * `01~04`). 두 곳에 적으면 대역을 넓힐 때 한쪽만 바뀌고, 그러면 승인은 되는데
+ * 줄 번호가 없는 단말이 생긴다.
+ */
+export const MAX_APPROVED_PER_HOME = MOBILE_CAPACITY;
 
 /**
  * 한 세대의 대기 슬롯 수.
@@ -328,6 +336,66 @@ export async function listPending(address?: string): Promise<any[]> {
           ORDER BY requested_at DESC`, params);
 }
 
+/**
+ * 승인된 단말을 `rtc_mobiles` 에 넣으면서 **순번을 배정한다.**
+ *
+ * ── 경합을 제약으로 막는다 ──────────────────────────────────────
+ * "비어 있는 자리를 골라서 쓴다" 는 관리자 둘이 같은 집을 동시에 승인하면 둘
+ * 다 같은 답을 얻는다. 그래서 고르기는 힌트일 뿐이고, 실제 방어는
+ * `uq_rtc_mobiles_sip_seq` 다 (schema/007-sip-number.sql). 중복으로 INSERT 가
+ * 실패하면 다시 골라 넣는다.
+ *
+ * ── 번호를 못 만드는 주소도 있다 ────────────────────────────────
+ * `A동` 처럼 숫자가 아닌 동/호는 SIP 번호를 가질 수 없다 (libs/sipNumber.ts).
+ * 그런 세대는 예전처럼 앱이 보낸 `sip_user` 를 그대로 둔다 — 손으로 만든 내선을
+ * 쓰고 있을 수 있고, 여기서 지우면 그 집만 조용히 착신을 잃는다.
+ */
+async function insertApproved(
+    e: any,
+    grants: { canCall: boolean; canControl: boolean },
+    actor: string,
+): Promise<{ id: number; sipUser: string | null } | { full: true }> {
+    const insert = (sipUser: string | null, seq: number | null) => DbConn.execute(
+        `INSERT INTO ${config.tables.mobile}
+            (uuid, email, complex, complex_id, address, token, phone, image, sip_user, sip_seq,
+             active, can_call, can_control, approved_at, approved_by, token_updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, NOW(), ?, NOW())`,
+        [e.uuid, e.email, e.complex, e.complex_id, e.address, e.token,
+         e.phone, e.image, sipUser, seq,
+         grants.canCall ? 1 : 0, grants.canControl ? 1 : 0, actor]);
+
+    if (homeNumber(e.address) === null) {
+        const inserted = await insert(e.sip_user ?? null, null);
+        logger.warn(`${e.address} 는 SIP 번호를 만들 수 없는 주소입니다 — 앱이 보낸 내선을 그대로 둡니다.`);
+        return { id: Number(inserted.insertId), sipUser: e.sip_user ?? null };
+    }
+
+    for (let attempt = 0; attempt < MOBILE_CAPACITY; attempt++) {
+        const rows = await DbConn.select(
+            `SELECT sip_seq FROM ${config.tables.mobile}
+              WHERE address = ? AND complex_id <=> ? AND sip_seq IS NOT NULL`,
+            [e.address, e.complex_id]);
+
+        const seq = nextFreeSeq(rows.map((r: any) => Number(r.sip_seq)));
+        if (seq === null) return { full: true };
+
+        const sipUser = deviceNumber(e.address, seq) as string;
+        try {
+            const inserted = await insert(sipUser, seq);
+            return { id: Number(inserted.insertId), sipUser };
+        } catch (err: any) {
+            // 그 자리를 누가 먼저 가져갔다. 다음 자리로 다시 시도한다.
+            // uuid 중복 같은 다른 제약은 여기서 다룰 일이 아니므로 그대로 올린다.
+            if (err?.code === 'ER_DUP_ENTRY' && String(err.message).includes('uq_rtc_mobiles_sip_seq')) {
+                logger.info(`${e.address} ${seq} 번 자리를 누가 먼저 가져갔습니다 — 다음 자리로 갑니다.`);
+                continue;
+            }
+            throw err;
+        }
+    }
+    return { full: true };
+}
+
 export type ApproveResult =
     | { ok: true; id: number; address: string; uuid: string }
     | { ok: false; reason: 'not_found' | 'home_full'; message: string };
@@ -361,16 +429,30 @@ export async function approve(
         };
     }
 
-    const inserted = await DbConn.execute(
-        `INSERT INTO ${config.tables.mobile}
-            (uuid, email, complex, complex_id, address, token, phone, image, sip_user,
-             active, can_call, can_control, approved_at, approved_by, token_updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, NOW(), ?, NOW())`,
-        [e.uuid, e.email, e.complex, e.complex_id, e.address, e.token,
-         e.phone, e.image, e.sip_user,
-         grants.canCall ? 1 : 0, grants.canControl ? 1 : 0, actor]);
+    const placed = await insertApproved(e, grants, actor);
+    if ('full' in placed) {
+        // 위에서 센 뒤 승인이 끝나기 전에 자리가 찼다. 대기 행은 그대로 두고
+        // 사람에게 알린다 — 지우면 다시 요청해야 한다.
+        return {
+            ok: false, reason: 'home_full',
+            message: `이 세대는 이미 ${MAX_APPROVED_PER_HOME}대가 등록되어 있습니다. 쓰지 않는 단말을 지우고 다시 승인하세요.`,
+        };
+    }
+    const inserted = { insertId: placed.id };
 
     await DbConn.execute('DELETE FROM mobile_enrollments WHERE id = ?', [enrollmentId]);
+
+    /*
+     * SIP 내선 계정을 만든다. **기다린다** — 승인 화면이 결과를 보여 줄 수
+     * 있어야 하고, 이 왕복은 같은 DB 안이라 짧다.
+     *
+     * 실패해도 승인은 되돌리지 않는다. 계정이 없으면 인터폰 착신만 안 되고
+     * WebRTC 초인종·홈넷 제어는 그대로 동작한다. 남은 것은 사람이
+     * services/kamailio/check-accounts.sh 로 볼 수 있다.
+     */
+    if (placed.sipUser) {
+        await sipAccount.provision(placed.sipUser);
+    }
 
     /*
      * 승인됐다고 알린다. **여기서는 sendToTargets 를 쓴다** — 이 단말은 방금
@@ -387,6 +469,7 @@ export async function approve(
 
     logger.warn(
         `[audit] 단말 승인: ${e.address} ${e.email} (uuid=${e.uuid}) ` +
+        `내선=${placed.sipUser ?? '없음'} ` +
         `통화=${grants.canCall ? '허용' : '불가'} 제어=${grants.canControl ? '허용' : '불가'} (by ${actor})`);
 
     return { ok: true, id: enrollmentId, address: e.address, uuid: e.uuid };

@@ -15,6 +15,7 @@ import { createMobileRecord, updateMobileRecord, statusFor } from '../libs/mobil
 import { saveHomenetRecord } from '../libs/homenetRecord';
 import { Firebase } from '../libs/firebaseAdmin';
 import { sendTest } from '../libs/push';
+import * as sipAccount from '../libs/sipAccount';
 import { Utils } from '../libs/utils';
 import { analyze, install, installedStatus, remove } from '../libs/firebaseKey';
 import logger from '../libs/logger';
@@ -337,9 +338,12 @@ export function createDashboardApi(): Router {
 
     router.delete('/mobiles/:id', async (req: Request, res: Response) => {
         try {
+            // 지우기 **전에** 읽는다. 지운 뒤에는 어느 내선이었는지 알 길이 없다.
+            const sipUser = await sipAccount.sipUserOf({ id: req.params.id });
             const result = await DbConn.execute(
                 `DELETE FROM ${config.tables.mobile} WHERE id = ?`, [req.params.id]);
             if (result.affectedRows === 0) return res.status(404).json({ error: 'not found' });
+            if (sipUser) await sipAccount.revoke(sipUser);
             logger.info(`[dashboard] mobile ${req.params.id} deleted (by ${(req as any).user?.username})`);
             res.json({ id: Number(req.params.id) });
         } catch (err: any) {

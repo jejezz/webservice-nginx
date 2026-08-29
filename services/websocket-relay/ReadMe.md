@@ -256,6 +256,11 @@ node tools/fcm.js selftest          # 단말 없이 발송 경로 전체
 node tools/fcm.js dry <토큰>        # 보내지 않고 토큰만 검증
 ```
 
+## 단말·세대 번호
+
+SIP 내선(`sip_user`)과 동/호(`address`), 그리고 Kamailio·Janus 쪽 ID 가 어떻게
+이어지는지는 [docs/identity.md](../../docs/identity.md) 한 곳에 있습니다.
+
 ## 구조
 
 ```

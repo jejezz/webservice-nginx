@@ -175,6 +175,24 @@ POST https://<서버>/iot/register/mobile
 - 안 보내면 **기존 값을 건드리지 않습니다**(빈 문자열을 보내면 연결이 끊깁니다).
 - 쓸 수 있는 문자는 `A-Z a-z 0-9 . _ -` 64자까지입니다.
 
+> ⚠️ **이 필드는 없어집니다.** 번호를 앱이 정하지 않고 **서버가 승인 시점에
+> 배정합니다** — 규격과 이유는 [identity.md](identity.md) 에 있습니다.
+> 서버 쪽은 이미 그렇게 동작하고, 아래 `sip` 를 쓰면 이 필드를 보내지 않아도
+> 됩니다. 보내던 앱도 그대로 둡니다.
+
+승인된 단말이 다시 등록하면 응답에 **내선 자격**이 실려 옵니다. 이 값으로 Janus
+에 등록하세요(위 3번의 `username`·`authuser`·`secret`).
+
+```jsonc
+{ "result": "success", "status": "approved",
+  "sip": { "user": "0101080501", "domain": "pluto.org", "password": "…" } }
+```
+
+- `username` 은 `sip:<user>@<domain>`, `authuser` 는 `<user>`, `secret` 은 `password` 입니다.
+- `sip` 가 없으면 아직 번호가 배정되지 않은 단말입니다. 예전처럼 동작합니다.
+- 비밀번호는 **바뀔 수 있습니다.** 등록에 실패하면 `/register/mobile` 을 한 번
+  더 불러 새 값을 받으세요.
+
 경로 끝의 **`/mobile` 을 빠뜨리지 마세요** — `/iot/register` 는 404 입니다.
 빈 본문으로 한 번 찔러 보면 붙었는지 바로 압니다.
 

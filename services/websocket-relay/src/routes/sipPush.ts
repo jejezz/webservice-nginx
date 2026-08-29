@@ -47,6 +47,7 @@ import { complexClause } from '../libs/complex';
 import config from '../config';
 import { Utils } from '../libs/utils';
 import logger from '../libs/logger';
+import { isHomeNumber, deviceNumber, DEVICE_NUMBER_LEN, SEQ_WIDTH } from '../libs/sipNumber';
 
 const router = Router();
 
@@ -76,10 +77,48 @@ function loopbackOnly(req: Request, res: Response, next: () => void): void {
 }
 
 /**
+ * 깨울 대상을 좁힌다. Kamailio 가 **누가 안 붙어 있는지** 이미 알고 있다.
+ *
+ * `route[LOCATION]` 은 그 집의 00~04 를 훑어 등록된 것만 분기로 남긴다. 남지
+ * 않은 자리가 곧 자고 있는 단말이므로, 그 목록을 받으면 이미 깨어 있는 단말에
+ * 쓸데없는 알림을 띄우지 않는다 (docs/identity.md).
+ *
+ * 두 가지 표기를 받는다 — 순번 두 자리(`"02"`)와 단말번호 열 자리
+ * (`"0101080502"`). cfg 에서 문자열을 어떻게 조립하든 받아 준다.
+ *
+ * @returns 단말번호 목록. 쓸 만한 값이 하나도 없으면 빈 배열.
+ */
+function resolveMissing(aor: string, raw: any): string[] {
+    if (!Array.isArray(raw) || raw.length === 0) return [];
+
+    const out: string[] = [];
+    for (const item of raw) {
+        const v = String(item ?? '').trim();
+        if (!/^[0-9]+$/.test(v)) continue;
+
+        if (v.length === SEQ_WIDTH && isHomeNumber(aor)) {
+            out.push(aor + v);
+        } else if (v.length === DEVICE_NUMBER_LEN && v.startsWith(aor)) {
+            // 다른 집 단말을 섞어 보내는 것은 받지 않는다. 루프백 전용이라
+            // 악의를 걱정하는 자리는 아니지만, cfg 의 실수는 조용히 남의 집
+            // 폰을 울린다.
+            out.push(v);
+        } else {
+            logger.warn(`sip-push: 알 수 없는 missing 값 "${v}" (aor=${aor})`);
+        }
+    }
+    return out;
+}
+
+/**
  * @brief 착신 푸시.
  *
  * 요청 본문
- *   aor      필수. 불린 SIP 내선 (예: "1001")
+ *   aor      필수. 인터폰이 건 번호. **세대번호**(8자리, 예: "01010805")면 그
+ *            집 단말 전부가 대상이고, 그 밖의 값은 예전처럼 정확히 일치하는
+ *            내선 하나를 찾는다 (docs/identity.md).
+ *   missing  선택. 깨울 자리 목록 (["02","04"] 또는 단말번호 열 자리).
+ *            주면 그 단말들만 깨운다.
  *   caller   선택. 발신자 표시용
  *   callId   선택. 로그 대조용
  *
@@ -95,6 +134,7 @@ router.post('/', loopbackOnly, async (req: Request, res: Response) => {
     const aor = String(req.body?.aor ?? '').trim();
     const caller = String(req.body?.caller ?? '').trim();
     const callId = String(req.body?.callId ?? '').trim();
+    const missing = resolveMissing(aor, req.body?.missing);
 
     if (!aor) {
         res.status(400).json({ error: 'aor_required' });
@@ -111,11 +151,28 @@ router.post('/', loopbackOnly, async (req: Request, res: Response) => {
         // id 와 push_error 를 함께 뽑는 것은 발송 결과를 기본 키로 되쓰기 위해서다
         // (libs/push.ts). 단지 조건은 다른 조회들과 같은 이유다 (libs/complex.ts).
         const c = complexClause();
+
+        // 셋 중 하나로 대상을 고른다. 순서가 좁은 것부터다 —
+        // 지정된 단말 > 그 세대 전부 > 예전처럼 정확히 일치하는 내선 하나.
+        let where: string;
+        let params: any[];
+        if (missing.length > 0) {
+            where = `sip_user IN (${missing.map(() => '?').join(', ')})`;
+            params = missing;
+        } else if (isHomeNumber(aor)) {
+            // 세대번호 + 순번 두 자리. sip_user 인덱스의 앞자리를 그대로 쓴다.
+            where = `sip_user LIKE CONCAT(?, '__')`;
+            params = [aor];
+        } else {
+            where = 'sip_user = ?';
+            params = [aor];
+        }
+
         rows = await DbConn.select(
             // can_call — 이 세대가 인정한 단말만 (libs/enrollment.ts).
             `SELECT id, token, push_error FROM ${config.tables.mobile}
-              WHERE sip_user = ? AND active = 1 AND can_call = 1 AND token <> ''${c.sql}`,
-            [aor, ...c.params]
+              WHERE ${where} AND active = 1 AND can_call = 1 AND token <> ''${c.sql}`,
+            [...params, ...c.params]
         );
     } catch (err: any) {
         logger.error(`sip-push 대상 조회 실패 (${aor}):`, err.message);
@@ -146,7 +203,10 @@ router.post('/', loopbackOnly, async (req: Request, res: Response) => {
             // 등록이 끝나면 Kamailio 가 붙들어 둔 INVITE 를 그 경로로 보낸다.
             // (예전에는 단말이 자기 SIP 스택으로 직접 REGISTER 했다)
             method: 'sip-incoming',
+            // 옛 앱은 이 값으로 등록한다. 새 앱은 **자기 단말번호**로 등록해야
+            // 한다 — 그 값은 /register/mobile 응답으로 받아 둔다 (docs/identity.md).
             sipUser: aor,
+            ...(isHomeNumber(aor) ? { home: aor } : {}),
             ...(JANUS_WS_URL ? { janusUrl: JANUS_WS_URL } : {}),
             caller,
             callId,
@@ -178,7 +238,10 @@ router.post('/', loopbackOnly, async (req: Request, res: Response) => {
     // 무효 토큰 정리는 sendToTargets 안에서 한다.
     void sendToTargets(targets, message, `sip-push ${aor}`);
 
-    logger.info(`sip-push ${aor}: ${targets.length}대에 발송 요청 (caller=${caller || '-'}, callId=${callId || '-'})`);
+    logger.info(
+        `sip-push ${aor}: ${targets.length}대에 발송 요청 ` +
+        `(caller=${caller || '-'}, callId=${callId || '-'}` +
+        (missing.length ? `, missing=${missing.join(',')}` : '') + ')');
     res.status(200).json({ pushed: targets.length });
 });
 

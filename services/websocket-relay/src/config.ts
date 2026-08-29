@@ -193,6 +193,24 @@ export const config = {
         wsUrl: (process.env.JANUS_WS_URL ?? '').trim(),
     },
 
+    /**
+     * SIP 계정 발급. 승인된 단말에게 Kamailio 내선을 만들어 준다
+     * (docs/identity.md).
+     *
+     * 같은 MariaDB 인스턴스의 **다른 스키마**를 쓴다. 접속 계정(jyahn)이 두
+     * 스키마 모두에 권한을 갖고 있으므로 풀을 하나 더 만들지 않고 표 이름에
+     * 스키마를 붙여 쓴다 — 풀이 둘이면 비밀번호·재접속·상태 보고가 두 벌이 된다.
+     *
+     * `provision` 을 끄면 번호는 배정하되 계정은 만들지 않는다. Kamailio 가
+     * 없는 배치(개발기)에서 승인이 막히지 않게 하기 위한 것이다.
+     */
+    sip: {
+        provision: bool(process.env.SIP_PROVISION, true),
+        /** kamctlrc 의 SIP_DOMAIN 과 같아야 한다. 다르면 만든 계정으로 등록되지 않는다. */
+        domain: (process.env.SIP_DOMAIN || 'pluto.org').trim(),
+        subscriberTable: process.env.SIP_SUBSCRIBER_TABLE || 'kamailio.subscriber',
+    },
+
     log: {
         level: process.env.LOG_LEVEL || (isProduction ? 'info' : 'debug'),
         dir: fromRoot(process.env.LOG_DIR || 'logs'),

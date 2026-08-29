@@ -23,6 +23,7 @@ import { getGateway } from '../gateway';
 import logger from '../libs/logger'; // Import your configured logger
 import { normalizeSipUser, SIP_USER_ERROR } from '../libs/sipUser';
 import { requestEnrollment, issueDeviceCert } from '../libs/enrollment';
+import * as sipAccount from '../libs/sipAccount';
 import { saveHomenetRecord } from '../libs/homenetRecord';
 import { onEnrollmentPending } from '../libs/enrollmentEvents';
 import { complexId as serverComplexId, COMPLEX_ID_RE, COMPLEX_ID_ERROR } from '../libs/complex';
@@ -225,6 +226,18 @@ async function handlePostMobile(req: Request, res: Response) {
             if (pem) body.clientCert = pem;
             else body.clientCertError = 'issue_failed';
         }
+
+        /*
+         * SIP 내선 자격. 승인 시점에 서버가 번호를 배정하고 계정을 만들어 두었고
+         * (libs/enrollment.ts), 여기서 내려준다 — 앱이 Janus 에 등록할 때 쓴다
+         * (docs/identity.md).
+         *
+         * 앱이 sip_user 를 정해 보내던 구조를 대신한다. 없으면 싣지 않는다:
+         * 번호를 받기 전에 승인된 옛 단말이거나, 숫자가 아닌 동/호라 번호를
+         * 만들 수 없는 세대다. 둘 다 예전처럼 동작한다.
+         */
+        const sip = await sipAccount.credentialForDevice(uuid);
+        if (sip) body.sip = sip;
 
         res.status(200).json(body);
         return;

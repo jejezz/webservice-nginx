@@ -9,6 +9,7 @@ import express, { Request, Response, NextFunction } from 'express';
 import config from '../config';
 import { DbConn } from '../libs/dbConnection';
 import logger from '../libs/logger'; // Import your configured logger
+import * as sipAccount from '../libs/sipAccount';
 
 const Route2Unregister = express.Router();
 
@@ -35,7 +36,10 @@ async function responseToPostMobile(req: Request, res: Response) {
     }
 
     try {
-        // 조회 없이 바로 지운다. 없으면 affectedRows 가 0 이다.
+        // 내선 번호는 지우기 **전에** 읽어 둔다. 지운 뒤에는 알 길이 없고,
+        // 남겨 두면 표에서 사라진 단말이 SIP 로는 계속 등록할 수 있다.
+        const sipUser = await sipAccount.sipUserOf({ uuid });
+
         const result = await DbConn.execute(
             `DELETE FROM ${config.tables.mobile} WHERE uuid = ?`, [uuid]);
 
@@ -44,6 +48,7 @@ async function responseToPostMobile(req: Request, res: Response) {
             res.status(404).json({ error: 'not registered' });
             return;
         }
+        if (sipUser) await sipAccount.revoke(sipUser);
         logger.info(`unregister: ${uuid}`);
         res.status(200).json({
             title: 'websocket-relay',
