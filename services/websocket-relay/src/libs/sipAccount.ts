@@ -86,6 +86,23 @@ export async function provision(user: string): Promise<SipCredential | null> {
 }
 
 /**
+ * 있으면 그대로 쓰고, 없을 때만 만든다.
+ *
+ * ── 왜 provision 을 그대로 쓰면 안 되는가 ────────────────────────
+ * `provision` 은 부를 때마다 비밀번호를 새로 발급한다. 자리를 다른 단말에게
+ * 물려줄 때는 그것이 맞다 — 지워진 단말이 옛 비밀번호로 계속 등록하면 안 된다.
+ *
+ * 월패드는 반대다. **부팅할 때마다** 등록을 부르므로(`/register/complex_agents`
+ * 는 upsert 다) 그때마다 돌리면, 이미 등록해 둔 값이 매번 어긋난다. 그래서
+ * 되풀이해 불러도 같은 값이 나오는 길을 따로 둔다.
+ */
+export async function ensure(user: string): Promise<SipCredential | null> {
+    const existing = await credentialFor(user);
+    if (existing) return existing;
+    return provision(user);
+}
+
+/**
  * 지금 걸려 있는 자격을 읽는다. 단말이 등록할 때 내려주려고 부른다.
  *
  * 없으면 null 이다 — 발급이 실패했거나, 번호를 받기 전에 만들어진 옛 단말이다.

@@ -12,7 +12,7 @@ import { requireAuth } from '../auth/session';
 import config from '../config';
 import { getGateway } from '../gateway';
 import { createMobileRecord, updateMobileRecord, statusFor } from '../libs/mobileRecord';
-import { saveHomenetRecord } from '../libs/homenetRecord';
+import { saveHomenetRecord, wallpadSipUser } from '../libs/homenetRecord';
 import { Firebase } from '../libs/firebaseAdmin';
 import { sendTest } from '../libs/push';
 import * as sipAccount from '../libs/sipAccount';
@@ -691,9 +691,18 @@ export function createDashboardApi(): Router {
 
     router.delete('/homenet/:id', async (req: Request, res: Response) => {
         try {
+            // 월패드 번호는 동/호에서 계산되므로 지우기 **전에** 동/호를 읽어야 한다.
+            const [place] = await DbConn.select(
+                `SELECT building, unit FROM ${config.tables.homenet} WHERE id = ?`, [req.params.id]);
+
             const result = await DbConn.execute(
                 `DELETE FROM ${config.tables.homenet} WHERE id = ?`, [req.params.id]);
             if (result.affectedRows === 0) return res.status(404).json({ error: 'not found' });
+
+            if (place) {
+                const user = wallpadSipUser(place.building, place.unit);
+                if (user) await sipAccount.revoke(user);
+            }
             logger.info(`[dashboard] homenet ${req.params.id} deleted (by ${(req as any).user?.username})`);
             res.json({ id: Number(req.params.id) });
         } catch (err: any) {

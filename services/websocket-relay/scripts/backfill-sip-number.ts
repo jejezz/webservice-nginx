@@ -23,8 +23,9 @@
  * 중요하다. 끝나면 close() 로 닫으므로 프로세스가 매달리지 않는다.
  */
 import { DbConn } from '../src/libs/dbConnection';
-import { homeNumber, deviceNumber, nextFreeSeq } from '../src/libs/sipNumber';
+import { homeNumber, deviceNumber, nextFreeSeq, WALLPAD_SEQ } from '../src/libs/sipNumber';
 import * as sipAccount from '../src/libs/sipAccount';
+import { formatAddress } from '../src/libs/address';
 import config from '../src/config';
 
 const apply = process.argv.includes('--apply');
@@ -133,6 +134,40 @@ async function main(): Promise<void> {
         used.add(seq);
         const cred = await sipAccount.provision(sipUser);
         console.log(`  o ${label} => ${sipUser}` + (cred ? ' · 계정 발급' : ' · 계정 발급 실패(로그 참고)'));
+        changed++;
+    }
+
+    // ── 월패드 자리(00) ──
+    //
+    // 월패드는 rtc_homenet 에 있고 번호는 동/호에서 계산되므로, 표에 채울 것이
+    // 없고 계정만 만들면 된다. 정상 경로는 월패드가 부팅하며 등록할 때 만들어
+    // 지지만(libs/homenetRecord.ts), 이미 등록해 둔 세대는 그 자리를 다시
+    // 지나가지 않는다.
+    const homes = (await DbConn.select(
+        `SELECT building, unit FROM ${config.tables.homenet} ORDER BY building, unit`)
+    ) as unknown as { building: string; unit: string }[];
+
+    for (const h of homes) {
+        const user = deviceNumber(formatAddress(h.building, h.unit), WALLPAD_SEQ);
+        const label = `${h.building}동 ${h.unit}호 월패드`;
+
+        if (!user) {
+            console.log(`  ! ${label} 번호를 만들 수 없는 주소입니다`);
+            skipped++;
+            continue;
+        }
+        if (await sipAccount.credentialFor(user)) {
+            console.log(`  - ${label} 이미 ${user} (건너뜀)`);
+            continue;
+        }
+        if (!apply) {
+            console.log(`  > ${label} => ${user}`);
+            changed++;
+            continue;
+        }
+
+        const cred = await sipAccount.ensure(user);
+        console.log(`  o ${label} => ${user}` + (cred ? ' · 계정 발급' : ' · 계정 발급 실패(로그 참고)'));
         changed++;
     }
 

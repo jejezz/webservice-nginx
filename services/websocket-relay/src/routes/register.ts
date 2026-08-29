@@ -310,6 +310,14 @@ async function handlePostComplexAgents(req: Request, res: Response) {
         result: 'success',
         message: outcome.value.created ? 'Your registration has been saved successfully.'
                                        : 'Your registration has been updated successfully.',
+        /*
+         * 월패드 자리(`<세대>00`)의 SIP 자격. 모바일과 같은 자리에서 같은 방식으로
+         * 내려준다 (docs/identity.md). 부팅마다 불러도 같은 값이 온다.
+         *
+         * 숫자가 아닌 동/호는 번호를 만들 수 없어 실리지 않는다. 월패드가 SIP 를
+         * 쓰지 않는 배치라면 그냥 무시하면 된다.
+         */
+        ...(outcome.value.sip ? { sip: outcome.value.sip } : {}),
     });
 }
 

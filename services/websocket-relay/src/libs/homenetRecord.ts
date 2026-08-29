@@ -23,7 +23,9 @@
  */
 import { DbConn } from './dbConnection';
 import { complexId } from './complex';
-import { PLACE_PART_RE } from './address';
+import { PLACE_PART_RE, formatAddress } from './address';
+import { deviceNumber, WALLPAD_SEQ } from './sipNumber';
+import * as sipAccount from './sipAccount';
 import config from '../config';
 import logger from './logger';
 
@@ -52,7 +54,7 @@ export const PLACE_ERROR = 'building 과 unit 은 영문·숫자·- 8자 이내�
 export async function saveHomenetRecord(
     body: any,
     mode: 'upsert' | 'create',
-): Promise<HomenetResult<{ id: number; created: boolean }>> {
+): Promise<HomenetResult<{ id: number; created: boolean; sip?: sipAccount.SipCredential }>> {
     const missing = REQUIRED.filter((k) => !body?.[k]);
     if (missing.length > 0) {
         return {
@@ -115,5 +117,35 @@ export async function saveHomenetRecord(
     // affectedRows 는 새로 넣었으면 1, 갱신했으면 2다 (ON DUPLICATE KEY UPDATE).
     const created = result.affectedRows === 1;
     logger.info(`homenet ${created ? 'registered' : 'updated'}: ${complex}/${building}/${unit}`);
-    return { ok: true, value: { id: Number(result.insertId) || 0, created } };
+
+    /*
+     * 월패드 자리(`<세대>00`)의 SIP 계정. 모바일의 01~04 와 같은 대역이다
+     * (docs/identity.md).
+     *
+     * **번호를 표에 저장하지 않는다.** 동/호에서 계산되는 값이라 저장하면 두
+     * 값이 어긋날 수 있고, 어긋나면 인터폰이 건 번호로 월패드를 못 찾는다.
+     * 지울 때도 같은 계산으로 되찾는다.
+     *
+     * 부팅마다 불리는 경로라 `ensure` 를 쓴다 — 이미 있으면 그 값을 그대로
+     * 돌려주므로 월패드가 쥐고 있는 비밀번호가 흔들리지 않는다.
+     *
+     * 실패해도 등록은 성공으로 둔다. 월패드의 본업(WebSocket 으로 붙어 홈넷을
+     * 중계하는 것)은 SIP 와 무관하다.
+     */
+    let sip: sipAccount.SipCredential | undefined;
+    const wallpadUser = deviceNumber(formatAddress(building, unit), WALLPAD_SEQ);
+    if (wallpadUser) {
+        sip = (await sipAccount.ensure(wallpadUser)) ?? undefined;
+    }
+
+    return { ok: true, value: { id: Number(result.insertId) || 0, created, sip } };
+}
+
+/**
+ * 그 세대의 월패드 번호. 지울 때 계정을 회수하려고 부른다.
+ *
+ * 숫자가 아닌 동/호는 번호가 없다 (libs/sipNumber.ts). 그런 세대는 null 이다.
+ */
+export function wallpadSipUser(building: string, unit: string): string | null {
+    return deviceNumber(formatAddress(building, unit), WALLPAD_SEQ);
 }

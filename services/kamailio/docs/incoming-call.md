@@ -28,7 +28,7 @@ services/kamailio/check-push.sh --json   # 구축 마법사가 읽는 형식
 ## 흐름
 
 ```
- ① 인터폰 ──INVITE sip:1001@pluto.org──▶ Kamailio
+ ① 인터폰 ──INVITE sip:0101080501@pluto.org──▶ Kamailio
                                           │
  ② Kamailio ──100 Trying──▶ 인터폰        │   500ms 안에. 안 보내면 발신측이
                                           │   T1(500ms)부터 INVITE 를 재전송하고
@@ -39,9 +39,9 @@ services/kamailio/check-push.sh --json   # 구축 마법사가 읽는 형식
  ④                        ts_store()  ← INVITE 를 붙들어 둔다
                                           │
  ⑤ Kamailio ──POST /sip-push──▶ websocket-relay (127.0.0.1:28099)
-                {aor:"1001", caller:"...", callId:"..."}
+                {aor:"0101080501", caller:"...", callId:"..."}
                                           │
- ⑥                        rtc_mobiles 에서 sip_user='1001' 인 토큰 조회
+ ⑥                        rtc_mobiles 에서 sip_user='0101080501' 인 토큰 조회
                                           │
  ⑦                        FCM ──▶ 단말 기동
                                           │
@@ -107,7 +107,7 @@ services/kamailio/check-push.sh --json   # 구축 마법사가 읽는 형식
 `POST /sip-push` (루프백 전용)
 
 ```json
-{ "aor": "1001", "caller": "1002", "callId": "..." }
+{ "aor": "0101080501", "caller": "1002", "callId": "..." }
 ```
 
 | 응답 | 뜻 |
@@ -144,8 +144,14 @@ services/websocket-relay/schema/002-sip-user.sql
 UNIQUE 를 걸지 않습니다 — 한 내선에 휴대폰·태블릿이 함께 붙을 수 있고, 그때는
 모두에게 푸시를 보내는 것이 맞습니다.
 
-단말이 `/register` 할 때 이 값을 함께 보내야 합니다. **안 보내면 NULL 이고, 그
-단말은 SIP 착신 푸시를 받지 못합니다** (기존 WebRTC 경로는 그대로 동작합니다).
+~~단말이 `/register` 할 때 이 값을 함께 보내야 합니다.~~ **이제 서버가 정합니다.**
+승인 시점에 relay 가 동/호에서 번호(`동4+호4+순번2`)를 계산해 배정하고 Kamailio
+계정까지 만듭니다 — 앱이 보내던 `sip_user` 는 필요 없어졌습니다. 규격은
+[identity.md](../../../docs/identity.md) 에 있습니다.
+
+그래서 아래 ④(`sip_user` 가 비어 조용히 착신 0건)는 새로 승인되는 단말에서는
+생기지 않습니다. 규칙이 생기기 전에 승인된 단말은
+`npm run sip:backfill` 로 채웁니다.
 
 적용:
 
