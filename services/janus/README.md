@@ -96,7 +96,7 @@ nginx              /janus-api → 8088,  /janus/ → 28087
 
 ### 알려진 문제
 
-**영상이 실단말 화면에 나오지 않습니다** (`2001 → 2002` 방향). 서버 쪽은
+**영상이 실단말 화면에 나오지 않습니다** (`9999999901 → 9999999902` 방향). 서버 쪽은
 확인이 끝났습니다 — SDP 협상도, rtpproxy 중계도, 패킷 도달(1416개)도 정상입니다.
 남은 것은 단말이 그 H264 스트림을 디코딩해 그리는 부분입니다. 자세한 단서는
 [docs/plan.md](docs/plan.md) 의 7단계 절에 있습니다.
@@ -105,7 +105,7 @@ nginx              /janus-api → 8088,  /janus/ → 28087
 |---|---|
 | `https://<서버>/manager` | `janus` · `janus-dashboard` 둘 다 정상 |
 | `https://<서버>/janus/dashboard` | 개요 — 버전 · ICE · 올라온 모듈 |
-| `https://<서버>/janus/dashboard/test-call` | 연결 → SIP 등록 → 통화. 탭 둘로 `2001`·`2002` |
+| `https://<서버>/janus/dashboard/test-call` | 연결 → SIP 등록 → 통화. 탭 둘로 `9999999901`·`9999999902` |
 
 ### 다시 세우거나 되돌릴 때
 
@@ -120,7 +120,7 @@ sudo ./install.sh --remove        # 걷어내기 (secrets/ 는 남긴다)
 ./setup-dashboard.sh --build      # 의존성 · janus.js 복사 · 프런트 빌드
 
 ./verify-call.sh                  # 시험 통화 점검 (전화를 걸지 않는다)
-./verify-call.sh --run            # 2001 → 2003 으로 실제로 걸어 본다
+./verify-call.sh --run            # 9999999901 → 9999999903 으로 실제로 걸어 본다
 
 ./verify-bridge.sh                # 브리징 점검
 ./verify-bridge.sh --run          # 브라우저 ↔ 평문 RTP 단말, 양방향

@@ -9,7 +9,7 @@
  * **협상 결과와 패킷 수를 프로그램으로 단언**할 수 있기 때문이다. 사람이 귀로
  * 듣는 대신 payload type 과 inbound 패킷 수를 센다.
  *
- *   node sipua.js --user 2004 --pw-file <경로> --domain pluto.org \
+ *   node sipua.js --user 9999999904 --pw-file <경로> --domain pluto.org \
  *                 --proxy 192.168.0.252:5060 --mode answer --duration 8
  *
  * --mode answer : 등록하고 걸려 오는 전화를 받는다
@@ -26,12 +26,12 @@ const arg = (name, def) => {
   const i = process.argv.indexOf(`--${name}`);
   return i > 0 && process.argv[i + 1] ? process.argv[i + 1] : def;
 };
-const USER = arg('user', '2004');
+const USER = arg('user', '9999999904');
 const DOMAIN = arg('domain', 'pluto.org');
 const [PROXY_HOST, PROXY_PORT] = arg('proxy', '192.168.0.252:5060').split(':');
 const SECRET = fs.readFileSync(arg('pw-file'), 'utf8').trim();
 const MODE = arg('mode', 'answer');
-const PEER = arg('peer', '2001');
+const PEER = arg('peer', '9999999901');
 const DURATION = parseInt(arg('duration', '8'), 10);
 /*
  * 통화가 걸려 오기를 기다리는 시간. DURATION 과 반드시 나눠야 한다.

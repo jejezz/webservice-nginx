@@ -17,8 +17,10 @@ import { initJanus } from '@/lib/janusLib';
  * 4단계  Kamailio 에 SIP 등록                                              ✅
  * 5단계  실제 통화 (브라우저 ↔ 브라우저)                                   ← 지금
  *
- * 브라우저 ↔ 브라우저를 시험하려면 **탭 둘**을 열어 각각 2001 · 2002 로
- * 등록한 뒤 한쪽에서 다른 쪽으로 겁니다.
+ * 브라우저 ↔ 브라우저를 시험하려면 **탭 둘**을 열어 각각 9999999901 · 9999999902 로
+ * 등록한 뒤 한쪽에서 다른 쪽으로 겁니다. 둘 다 **시험용 세대**(9999동 9999호)의
+ * 자리입니다 — 실재하는 세대의 번호를 쓰면 그 집 폰이 울립니다
+ * (docs/identity.md).
  *
  * 비밀번호는 어디에도 저장하지 않습니다. 이 화면에서 Janus 로 바로 넘어가고,
  * Janus 가 Kamailio 에 digest 로 응답합니다. 새로 고치면 다시 입력해야 합니다.
@@ -44,7 +46,7 @@ export default function TestCall() {
   const [logs, setLogs] = useState([]);
 
   // 등록 폼
-  const [user, setUser] = useState('2001');
+  const [user, setUser] = useState('9999999901');
   const [secret, setSecret] = useState('');
   const [proxy, setProxy] = useState('');
   const [regState, setRegState] = useState('idle');
@@ -53,7 +55,7 @@ export default function TestCall() {
 
   // 통화
   const [callState, setCallState] = useState('idle'); // idle|calling|ringing|incoming|incall
-  const [peer, setPeer] = useState('2002');
+  const [peer, setPeer] = useState('9999999902');
   const [incomingFrom, setIncomingFrom] = useState('');
   const [withVideo, setWithVideo] = useState(false);
   const [callError, setCallError] = useState('');
@@ -445,8 +447,8 @@ export default function TestCall() {
         <PhoneCall className="size-4" />
         <AlertTitle>브라우저 ↔ 브라우저 시험 통화 (계획서 5단계)</AlertTitle>
         <AlertDescription>
-          <strong>탭 둘</strong>을 열어 각각 <span className="font-mono">2001</span> ·
-          <span className="font-mono"> 2002</span> 로 등록한 뒤 한쪽에서 다른 쪽으로 겁니다.
+          <strong>탭 둘</strong>을 열어 각각 <span className="font-mono">9999999901</span> ·
+          <span className="font-mono"> 9999999902</span> 로 등록한 뒤 한쪽에서 다른 쪽으로 겁니다.
           미디어는 <span className="font-mono">브라우저 ↔ Janus ↔ rtpproxy ↔ Janus ↔ 브라우저</span> 로
           흐릅니다. 음성부터 확인하고 영상은 그 다음입니다.
         </AlertDescription>
@@ -642,7 +644,7 @@ export default function TestCall() {
                 onChange={(e) => setPeer(e.target.value)}
                 disabled={!registered || callState !== 'idle'}
                 className="w-44 font-mono"
-                placeholder="2002"
+                placeholder="9999999902"
               />
             </div>
 

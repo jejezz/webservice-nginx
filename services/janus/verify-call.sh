@@ -3,8 +3,8 @@
 # 계획서 5단계 — 브라우저 ↔ 브라우저 시험 통화를 사람 없이 돌린다. sudo 가 필요 없다.
 #
 #   ./verify-call.sh                     점검만 (아무 전화도 걸지 않는다)
-#   ./verify-call.sh --run               2001 → 2003 으로 실제 통화
-#   ./verify-call.sh --run --from 2001 --to 2003
+#   ./verify-call.sh --run               9999999901 → 9999999903 으로 실제 통화
+#   ./verify-call.sh --run --from 9999999901 --to 9999999903
 #
 # 무엇을 확인하는가 — 협상이 됐는지가 아니라 **소리가 흘렀는지**까지 본다.
 #
@@ -49,8 +49,10 @@ check_args "$@"
 set -- "${CHECK_REST[@]:-}"
 
 MODE="check"
-FROM_USER="2001"
-TO_USER="2003"
+# 시험용 세대다 — 9999동 9999호(`99999999`)에 순번 01~04.
+# 실재하는 세대의 번호로 걸면 그 집 폰이 울린다 (docs/identity.md).
+FROM_USER="9999999901"
+TO_USER="9999999903"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in

@@ -6,7 +6,7 @@
 #   ./verify-bridge.sh --run          양방향 (발신 · 착신) 다 시험
 #   ./verify-bridge.sh --run --out    브라우저 → 평문 단말 (6-2) 만
 #   ./verify-bridge.sh --run --in     평문 단말 → 브라우저 (6-3) 만
-#   ./verify-bridge.sh --run --device 2002   실단말에 걸어 본다 (7단계 진단)
+#   ./verify-bridge.sh --run --device 9999999902   실단말에 걸어 본다 (7단계 진단)
 #
 # --device 는 상대를 우리가 세우지 않는다. 브라우저가 그 번호로 걸고 **사람이
 # 받아야** 한다. 대신 통화 내내 rtpproxy 에 물어(probe-peer.js) 음성·영상
@@ -57,8 +57,8 @@ check_args "$@"
 set -- "${CHECK_REST[@]:-}"
 
 MODE="check"
-BROWSER_USER="2001"
-UA_USER="2004"
+BROWSER_USER="9999999901"
+UA_USER="9999999904"
 DO_OUT=1
 DO_IN=1
 DEVICE=""       # 비어 있지 않으면 실단말 모드
