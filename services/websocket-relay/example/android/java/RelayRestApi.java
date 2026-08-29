@@ -27,7 +27,10 @@ public final class RelayRestApi {
 
     public RelayRestApi(@NonNull OkHttpClient http, @NonNull String baseUrl) {
         this.http = http;
-        this.baseUrl = baseUrl;
+        // 스킴이 없으면 https 로 본다. Firestore 디렉터리의 `host` 는 스킴 없는
+        // 호스트 이름이라("c-a3f19c04.rtc.example.com") 그대로 넘기면 OkHttp 가
+        // "Expected URL scheme 'http' or 'https'" 로 던진다.
+        this.baseUrl = baseUrl.contains("://") ? baseUrl : "https://" + baseUrl;
     }
 
     /**

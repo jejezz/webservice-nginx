@@ -31,6 +31,9 @@ import okhttp3.ResponseBody;
  * Base URL is the nginx front door, so every path below sits under /relay:
  *   https://relay.example.com   ->  https://relay.example.com/relay/register/mobile
  *
+ * A bare host works too — the directory in Firestore stores `host` without a
+ * scheme ("c-a3f19c04.rtc.example.com") and this client assumes https for it.
+ *
  * Usage (sync — never on the main thread):
  *   WsRelayApiClient client = new WsRelayApiClient("https://relay.example.com");
  *   JSONObject raw = client.register().mobile(uuid, email, "행복단지", "101B203U", fcmToken);
@@ -50,6 +53,17 @@ public class WsRelayApiClient {
     /** Everything the relay serves is mounted under this prefix by nginx. */
     private static final String PREFIX = "/relay";
 
+    /**
+     * Prefix "https://" when the caller passed a bare host.
+     *
+     * The directory value is a hostname only, so the app is expected to build
+     * "https://" + host. Accepting it here too means the directory value can be
+     * passed straight through instead of failing deep inside OkHttp.
+     */
+    private static String withDefaultScheme(String url) {
+        return url.contains("://") ? url : "https://" + url;
+    }
+
     private final String baseUrl;
     private final OkHttpClient httpClient;
     private final Executor callbackExecutor;
@@ -68,7 +82,11 @@ public class WsRelayApiClient {
      *                     pinning, logging interceptors) instead of a new one.
      */
     public WsRelayApiClient(String baseUrl, OkHttpClient customClient) {
-        String trimmed = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
+        // Tolerate a bare host. The complex directory in Firestore stores `host`
+        // without a scheme ("c-a3f19c04.rtc.example.com"), and handing that
+        // straight to OkHttp throws "Expected URL scheme 'http' or 'https'".
+        String withScheme = withDefaultScheme(baseUrl);
+        String trimmed = withScheme.endsWith("/") ? withScheme.substring(0, withScheme.length() - 1) : withScheme;
         // Tolerate callers who already included /relay.
         this.baseUrl = trimmed.endsWith(PREFIX) ? trimmed.substring(0, trimmed.length() - PREFIX.length()) : trimmed;
 

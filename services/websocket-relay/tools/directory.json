@@ -1,6 +1,7 @@
 {
   "_주석": "단지 디렉터리 원본. node tools/directory.js push tools/directory.json 으로 올린다.",
   "_단지ID": "openssl rand -hex 4 로 만든다. 서버 .env 의 COMPLEX_ID 와 반드시 같아야 한다.",
+  "_호스트": "스킴 없는 호스트 이름만 적는다. 앱이 REST 는 https://<host>, WebSocket 은 wss://<host> 로 붙인다.",
   "regions": [
     {
       "code": "41135",

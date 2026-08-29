@@ -158,11 +158,16 @@ public class WsRelayWebSocketClient {
      * http(s):// -> ws(s)://, then append the path.
      * Callers usually hold one base URL for both REST and WebSocket, so accept
      * either scheme rather than making them convert it.
+     *
+     * A bare host is accepted too and becomes wss://. The directory in Firestore
+     * stores `host` without a scheme, and without this it fell through both
+     * branches below and produced a scheme-less URL that never connects.
      */
     private static String toWebSocketUrl(String serverUrl, String path) {
         String base = serverUrl.endsWith("/") ? serverUrl.substring(0, serverUrl.length() - 1) : serverUrl;
         if (base.startsWith("https://")) base = "wss://" + base.substring(8);
         else if (base.startsWith("http://")) base = "ws://" + base.substring(7);
+        else if (!base.contains("://")) base = "wss://" + base;
         return base + path;
     }
 
@@ -371,7 +376,11 @@ public class WsRelayWebSocketClient {
         private SSLSocketFactory sslSocketFactory;
         private X509TrustManager trustManager;
 
-        /** @param serverUrl e.g. "https://relay.example.com" (http/https or ws/wss). */
+        /**
+         * @param serverUrl e.g. "https://relay.example.com" (http/https or ws/wss),
+         *                  or a bare host as stored in the directory
+         *                  ("c-a3f19c04.rtc.example.com") — that becomes wss://.
+         */
         public Builder(String serverUrl) {
             this.serverUrl = serverUrl;
         }

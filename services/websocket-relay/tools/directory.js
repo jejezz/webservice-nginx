@@ -29,6 +29,19 @@ const path = require('path');
 const admin = require('firebase-admin');
 
 const SERVICE_DIR = path.resolve(__dirname, '..');
+
+/**
+ * `.env` 를 읽는다. **`DATABASE_ID` 를 정하기 전에** 불러야 한다.
+ *
+ * src/config.ts 와 scripts/lib/env.ts 는 이미 이렇게 한다. 이 도구만 빠져 있어서
+ * `.env` 에 `FIRESTORE_DATABASE_ID` 를 적어도 조용히 무시되고 `(default)` 를
+ * 봤다. 셸에서 앞에 붙여 준 값(`FIRESTORE_DATABASE_ID=x npm run directory`)은
+ * dotenv 가 이미 있는 값을 덮어쓰지 않으므로 그대로 이긴다.
+ *
+ * cwd 가 아니라 서비스 디렉터리 기준이다 — 어디서 부르든 같은 파일을 본다.
+ */
+require('dotenv').config({ path: path.join(SERVICE_DIR, '.env'), quiet: true });
+
 const KEY_FILE = path.resolve(
     SERVICE_DIR,
     process.env.FIREBASE_SERVICE_ACCOUNT_PATH || 'secrets/firebase-admin.json'
@@ -45,6 +58,21 @@ const DATABASE_ID = (process.env.FIRESTORE_DATABASE_ID || '').trim();
 
 /** 단지 ID 형식 — 32비트를 소문자 16진수 8자로 (src/libs/complex.ts 와 같은 규칙). */
 const COMPLEX_ID_RE = /^[0-9a-f]{8}$/;
+
+/**
+ * 호스트 형식 — **스킴 없는 호스트 이름**이다. 포트는 붙여도 된다.
+ *
+ *   c-a3f19c04.rtc.example.com          ✅
+ *   c-a3f19c04.rtc.example.com:8443     ✅
+ *   https://c-a3f19c04.rtc.example.com  ❌
+ *
+ * 앱은 이 값 앞에 자기가 스킴을 붙여 씁니다 — REST 는 `https://<host>`,
+ * WebSocket 은 `wss://<host>`. 하나의 값으로 두 스킴을 다 만들어야 하므로
+ * 디렉터리에는 스킴을 두지 않습니다. `https://` 가 섞여 들어오면 앱이
+ * `wss://https://...` 를 만들게 되고, 그 단지는 목록에는 보이는데 접속만
+ * 안 되는 상태가 됩니다. 그래서 올릴 때 막습니다.
+ */
+const HOST_RE = /^[A-Za-z0-9.-]+(:\d{1,5})?$/;
 
 function die(msg, hint) {
     console.error(`\n오류: ${msg}`);
@@ -207,7 +235,12 @@ function validate(doc) {
                 problems.push(`${cw}: complexId 는 소문자 16진수 8자여야 합니다 — ${c.complexId}`);
             }
             if (!c.name) problems.push(`${cw}: name 이 없습니다.`);
-            if (!c.host) problems.push(`${cw}: host 가 없습니다.`);
+            if (!c.host) {
+                problems.push(`${cw}: host 가 없습니다.`);
+            } else if (!HOST_RE.test(String(c.host))) {
+                problems.push(`${cw}: host 는 스킴 없는 호스트 이름이어야 합니다`
+                    + ` (https:// · wss:// · 경로 · 끝의 / 를 빼세요) — ${c.host}`);
+            }
             // 단지 ID 는 전체에서 유일해야 한다. 겹치면 두 단지가 같은 서버로 간다.
             if (c.complexId && seenComplex.has(c.complexId)) {
                 problems.push(`${cw}: complexId 가 겹칩니다 — ${c.complexId} (${seenComplex.get(c.complexId)} 와 중복)`);
@@ -223,6 +256,7 @@ async function cmdCheck() {
     console.log(`프로젝트   ${key.project_id}`);
     console.log(`서비스계정 ${key.client_email}`);
     console.log(`키 ID      ${key.private_key_id}`);
+    console.log(`데이터베이스 ${DATABASE_ID || '(default)'}`);
     console.log('\n토큰을 받아 봅니다...');
     try {
         await admin.credential.cert(key).getAccessToken();

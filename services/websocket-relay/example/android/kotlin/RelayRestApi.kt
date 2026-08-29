@@ -15,8 +15,18 @@ import java.io.IOException
  */
 class RelayRestApi(
     private val http: OkHttpClient,
-    private val baseUrl: String, // 예: https://jejezzhome.iptime.org:28099
+    baseUrl: String, // 예: https://jejezzhome.iptime.org:28099
 ) {
+    /**
+     * 스킴이 없으면 https 로 본다.
+     *
+     * Firestore 디렉터리의 `host` 는 스킴 없는 호스트 이름이다
+     * ("c-a3f19c04.rtc.example.com"). 그대로 넘기면 OkHttp 가
+     * "Expected URL scheme 'http' or 'https'" 로 던진다.
+     */
+    private val baseUrl: String =
+        if (baseUrl.contains("://")) baseUrl else "https://$baseUrl"
+
     /**
      * 단말을 등록한다. 같은 uuid 로 다시 부르면 갱신된다.
      *

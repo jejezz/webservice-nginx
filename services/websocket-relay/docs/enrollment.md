@@ -121,9 +121,15 @@ Firebase 콘솔 → 빌드 → **Firestore Database** → 데이터베이스 만
 >        --location=asia-northeast3 --type=firestore-native
 > ```
 >
-> 그리고 도구에 그 이름을 줍니다.
+> 그리고 도구에 그 이름을 줍니다. `.env` 에 적어 두면 매번 붙이지 않아도 됩니다.
 >
 > ```bash
+> # .env 에 한 번 적어 둔다
+> FIRESTORE_DATABASE_ID=directory
+> ```
+>
+> ```bash
+> # 또는 그때만 앞에 붙인다 (.env 값보다 우선한다)
 > FIRESTORE_DATABASE_ID=directory npm run directory -- push tools/directory.json
 > ```
 >
@@ -174,6 +180,10 @@ regions/41135
 }
 ```
 
+`host` 는 **스킴 없는 호스트 이름**입니다. 앞에 `https://` 나 `wss://` 를 넣지
+마세요 — 아래 `<host>` 가 나오는 자리는 전부 이 값을 그대로 끼워 넣는 자리이고,
+스킴이 섞여 있으면 `wss://https://...` 가 됩니다. `push` 가 올리기 전에 막습니다.
+
 ### 1-4. 올린다
 
 콘솔에서 손으로 넣어도 되지만 단지가 늘면 오타가 납니다. 도구가 있습니다.
@@ -183,7 +193,8 @@ cd services/websocket-relay
 cp tools/directory.example.json tools/directory.json   # 편집
 npm run directory -- check                             # 자격·연결만 확인
 
-# 기본 DB 가 Datastore 모드라 별도 DB 를 만든 경우 (1-1 참고)
+# 기본 DB 가 Datastore 모드라 별도 DB 를 만든 경우 (1-1 참고).
+# .env 의 FIRESTORE_DATABASE_ID 를 읽는다. 앞에 붙이면 그 값이 이긴다.
 FIRESTORE_DATABASE_ID=directory npm run directory -- check
 npm run directory -- push tools/directory.json --dry-run
 npm run directory -- push tools/directory.json
@@ -210,6 +221,9 @@ openssl rand -hex 4     # 새 단지 ID
 ---
 
 ## 2. 모바일 앱이 해야 할 것
+
+`<host>` 는 디렉터리에서 받은 `host` 값 그대로입니다 (스킴 없음). 스킴은 앱이
+붙입니다 — REST 는 `https://<host>`, WebSocket 은 `wss://<host>`.
 
 ### 2-1. 등록 요청 — 응답이 늘었습니다
 
