@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { AlertCircle, AlertTriangle, PhoneOff, Pencil, Plus, RefreshCw, Smartphone, Trash2 } from 'lucide-react';
+import { AlertCircle, AlertTriangle, BellRing, PhoneOff, Pencil, Plus, RefreshCw, Smartphone, Trash2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { usePolling } from '@/lib/usePolling';
 import { formatDateTime } from '@/lib/format';
@@ -13,6 +13,7 @@ import { Switch } from '@/components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import MobileForm from '@/components/MobileForm';
 import PendingEnrollments from '@/components/PendingEnrollments';
+import TestPushDialog from '@/components/TestPushDialog';
 import { toKorean } from '@/lib/address';
 
 export default function Mobiles() {
@@ -22,6 +23,8 @@ export default function Mobiles() {
   const [actionError, setActionError] = useState('');
   // null 이면 닫힘, {} 면 추가, 행이면 수정.
   const [editing, setEditing] = useState(null);
+  // 시험 푸시를 보낼 단말. null 이면 닫힘.
+  const [testing, setTesting] = useState(null);
   // 동/호 필터. 빈 값이면 전체.
   const [home, setHome] = useState('');
 
@@ -226,7 +229,7 @@ export default function Mobiles() {
                   <TableHead className="text-center">통화</TableHead>
                   <TableHead className="text-center">제어</TableHead>
                   <TableHead className="text-center">활성</TableHead>
-                  <TableHead className="text-right">수정 · 삭제</TableHead>
+                  <TableHead className="text-right">시험 · 수정 · 삭제</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -299,6 +302,20 @@ export default function Mobiles() {
                       />
                     </TableCell>
                     <TableCell className="text-right whitespace-nowrap">
+                      {/*
+                        토큰이 없으면 눌러 봐야 400 밖에 오지 않는다. 목록은 토큰
+                        자체를 내려받지 않으므로 서버가 준 has_token 으로 가른다.
+                      */}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={busy === r.id || !r.has_token}
+                        onClick={() => setTesting(r)}
+                        aria-label="시험 푸시"
+                        title={r.has_token ? '이 단말에 시험 푸시를 보냅니다' : 'FCM 토큰이 없는 단말입니다'}
+                      >
+                        <BellRing className="size-4" />
+                      </Button>
                       <Button
                         variant="ghost"
                         size="sm"
@@ -331,6 +348,13 @@ export default function Mobiles() {
         record={editing && editing.id ? editing : null}
         onOpenChange={(open) => { if (!open) setEditing(null); }}
         onSaved={reload}
+      />
+
+      <TestPushDialog
+        open={testing !== null}
+        record={testing}
+        onOpenChange={(open) => { if (!open) setTesting(null); }}
+        onChanged={reload}
       />
     </>
   );

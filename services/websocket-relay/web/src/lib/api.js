@@ -71,6 +71,10 @@ export const api = {
   updateMobile: (id, body) => request(`/mobiles/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
   toggleMobile: (id) => request(`/mobiles/${id}/toggle-active`, { method: 'PATCH' }),
   deleteMobile: (id) => request(`/mobiles/${id}`, { method: 'DELETE' }),
+  // 시험 푸시. dryRun 이면 구글에 물어보기만 하고 단말에는 가지 않는다.
+  testPush: (id, dryRun) => request(`/mobiles/${id}/test-push`, {
+    method: 'POST', body: JSON.stringify({ dryRun: Boolean(dryRun) }),
+  }),
 
   homenet: () => request('/homenet'),
   createHomenet: (body) => request('/homenet', { method: 'POST', body: JSON.stringify(body) }),

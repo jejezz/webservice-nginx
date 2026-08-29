@@ -6,6 +6,7 @@
  * 여기 있는 것들은 사람이 보는 대시보드 전용이다. 경로가 겹치지 않게 분리해 둔다.
  */
 import { Router, Request, Response } from 'express';
+import { TokenMessage } from 'firebase-admin/messaging';
 import { DbConn } from '../libs/dbConnection';
 import { requireAuth } from '../auth/session';
 import config from '../config';
@@ -13,6 +14,8 @@ import { getGateway } from '../gateway';
 import { createMobileRecord, updateMobileRecord, statusFor } from '../libs/mobileRecord';
 import { saveHomenetRecord } from '../libs/homenetRecord';
 import { Firebase } from '../libs/firebaseAdmin';
+import { sendTest } from '../libs/push';
+import { Utils } from '../libs/utils';
 import { analyze, install, installedStatus, remove } from '../libs/firebaseKey';
 import logger from '../libs/logger';
 import { complexId, setComplexId, COMPLEX_ID_RE, COMPLEX_ID_ERROR } from '../libs/complex';
@@ -28,7 +31,7 @@ import { normalizeAddress } from '../libs/address';
 // token 은 FCM 자격이라 싣지 않는다. 대신 그 토큰이 쓸 만한지를 알려 주는 값들을
 // 싣는다 — sip_user 가 비어 있으면 인터폰 착신이 조용히 0건이고, push_error 가
 // 있으면 그 단말에는 푸시가 닿지 않고 있다.
-const PUBLIC_COLUMNS = 'id, uuid, email, complex, complex_id, address, phone, active, can_call, can_control, approved_at, approved_by, created, modified, sip_user, token_updated_at, push_error, push_failed_at';
+const PUBLIC_COLUMNS = 'id, uuid, email, complex, complex_id, address, phone, active, can_call, can_control, approved_at, approved_by, created, modified, sip_user, token_updated_at, push_error, push_failed_at, (token IS NOT NULL AND token <> \'\') AS has_token';
 
 function fail(res: Response, err: any, what: string) {
     logger.error(`${what}:`, err.message);
@@ -36,6 +39,35 @@ function fail(res: Response, err: any, what: string) {
         return res.status(503).json({ error: 'database is not configured' });
     }
     res.status(500).json({ error: what });
+}
+
+/**
+ * 시험 푸시로 보낼 메시지.
+ *
+ * 초인종·착신과 **다른 method** 를 쓴다. `invite` 나 `sip-incoming` 으로 보내면
+ * 앱이 통화 화면을 띄우거나 Janus 에 붙으려 든다 — 확인하려다 그 집 사람을
+ * 받을 수 없는 전화 앞에 세우는 셈이다. 모르는 method 는 앱이 무시하고,
+ * notification 이 실려 있으므로 알림 자체는 그대로 뜬다.
+ *
+ * 소리는 지정하지 않는다. 채널(channelId)에 묶인 기본값을 그대로 쓰면 실제
+ * 착신과 같은 경로가 확인되고, 앱이 채널을 안 만들었으면 그 사실도 드러난다.
+ */
+function testMessage(address: string): TokenMessage {
+    return {
+        token: '',
+        notification: {
+            title: `시험 알림 (${Utils.getDateTime()})`,
+            body: '이 알림이 보이면 이 단말로 푸시가 정상 도착합니다.',
+        },
+        data: {
+            method: 'test-push',
+            address: String(address ?? ''),
+        },
+        android: {
+            priority: 'high',
+            notification: { channelId: config.firebase.channelId },
+        },
+    };
 }
 
 export function createDashboardApi(): Router {
@@ -179,6 +211,9 @@ export function createDashboardApi(): Router {
                     active: r.active === 1,
                     can_call: r.can_call === 1,
                     can_control: r.can_control === 1,
+                    // 토큰 자체는 싣지 않지만, **있는지 없는지**는 화면이 알아야 한다 —
+                    // 없으면 시험 푸시를 눌러 봐야 400 밖에 돌아오지 않는다.
+                    has_token: Number(r.has_token) === 1,
                 })),
             });
         } catch (err: any) {
@@ -233,6 +268,70 @@ export function createDashboardApi(): Router {
             res.json({ id: Number(req.params.id), active });
         } catch (err: any) {
             fail(res, err, 'Failed to toggle active status');
+        }
+    });
+
+    /**
+     * 이 단말 **하나에** 시험 푸시를 보낸다.
+     *
+     * ── 왜 필요한가 ──────────────────────────────────────────────
+     * "푸시가 안 온다" 는 신고가 들어오면 확인할 것이 네 겹이다 — 키가 살아
+     * 있는가(푸시 키 화면), 그 단말의 토큰이 이 프로젝트 것인가, 토큰이 아직
+     * 유효한가, 앱이 알림을 띄우는가. 앞의 하나만 화면에 있었고 나머지는
+     * 서버에 들어가 `node tools/fcm.js send <토큰>` 을 쳐야 알 수 있었다.
+     * 그러려면 DB 에서 토큰을 꺼내 와야 하는데, 토큰은 목록 API 가 일부러
+     * 내려보내지 않는 값이다. 그래서 아무도 하지 않았다.
+     *
+     * 여기서는 서버가 토큰을 꺼내 쓰므로 **토큰이 밖으로 나가지 않는다.**
+     *
+     * ── 두 가지 방법 ────────────────────────────────────────────
+     *   dryRun=true   구글에 물어보기만 한다. 단말에는 아무것도 가지 않고
+     *                 DB 도 건드리지 않는다. 한밤중에 남의 폰을 울리지 않고
+     *                 토큰이 살아 있는지 볼 때 쓴다.
+     *   dryRun=false  진짜로 보낸다. 알림이 떠야 그 단말이 정말 받는다는
+     *                 뜻이므로, 마지막 한 겹(앱이 띄우는가)은 이것만 답한다.
+     *                 결과는 다른 발송과 **같은 규칙**으로 기록된다 —
+     *                 무효 토큰이면 그 자리에서 비활성으로 내려간다.
+     *
+     * 기다렸다가 답한다. 사람이 버튼을 누르고 결과를 보려고 서 있기 때문이다.
+     */
+    router.post('/mobiles/:id/test-push', async (req: Request, res: Response) => {
+        const dryRun = Boolean(req.body?.dryRun);
+        const actor = (req as any).user?.username ?? 'unknown';
+
+        try {
+            const [row] = await DbConn.select(
+                `SELECT id, address, email, token, push_error FROM ${config.tables.mobile} WHERE id = ?`,
+                [req.params.id]);
+            if (!row) return res.status(404).json({ error: 'not found' });
+
+            if (!row.token) {
+                return res.status(400).json({
+                    error: 'no_token',
+                    message: '이 단말에는 FCM 토큰이 없습니다. 앱이 /register 로 토큰을 올려야 합니다.',
+                });
+            }
+            // 키가 없으면 sendTest 도 답을 못 준다. 여기서 끊는 편이 화면에 쓸 말이 분명하다.
+            if (!Firebase.getMessaging()) {
+                return res.status(503).json({
+                    error: 'fcm_not_configured',
+                    message: 'FCM 서비스 계정 키가 없습니다 — 푸시 키 화면에서 올리세요.',
+                });
+            }
+
+            const result = await sendTest(
+                { id: Number(row.id), token: row.token, push_error: row.push_error },
+                testMessage(row.address),
+                `시험 푸시 ${row.address} (${row.email})`,
+                dryRun);
+
+            logger.info(
+                `[dashboard] 시험 푸시 ${dryRun ? '(검증만) ' : ''}${row.address} ${row.email}: ` +
+                `${result.ok ? '성공' : result.code} (by ${actor})`);
+
+            res.json({ id: Number(row.id), dryRun, ...result });
+        } catch (err: any) {
+            fail(res, err, 'Failed to send test push');
         }
     });
 
