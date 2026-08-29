@@ -46,6 +46,21 @@ const DATABASE_ID = (process.env.FIRESTORE_DATABASE_ID || '').trim();
 /** 단지 ID 형식 — 32비트를 소문자 16진수 8자로 (src/libs/complex.ts 와 같은 규칙). */
 const COMPLEX_ID_RE = /^[0-9a-f]{8}$/;
 
+/**
+ * 호스트 형식 — **스킴 없는 호스트 이름**이다. 포트는 붙여도 된다.
+ *
+ *   c-a3f19c04.rtc.example.com          ✅
+ *   c-a3f19c04.rtc.example.com:8443     ✅
+ *   https://c-a3f19c04.rtc.example.com  ❌
+ *
+ * 앱은 이 값 앞에 자기가 스킴을 붙여 씁니다 — REST 는 `https://<host>`,
+ * WebSocket 은 `wss://<host>`. 하나의 값으로 두 스킴을 다 만들어야 하므로
+ * 디렉터리에는 스킴을 두지 않습니다. `https://` 가 섞여 들어오면 앱이
+ * `wss://https://...` 를 만들게 되고, 그 단지는 목록에는 보이는데 접속만
+ * 안 되는 상태가 됩니다. 그래서 올릴 때 막습니다.
+ */
+const HOST_RE = /^[A-Za-z0-9.-]+(:\d{1,5})?$/;
+
 function die(msg, hint) {
     console.error(`\n오류: ${msg}`);
     if (hint) console.error(hint);
@@ -207,7 +222,12 @@ function validate(doc) {
                 problems.push(`${cw}: complexId 는 소문자 16진수 8자여야 합니다 — ${c.complexId}`);
             }
             if (!c.name) problems.push(`${cw}: name 이 없습니다.`);
-            if (!c.host) problems.push(`${cw}: host 가 없습니다.`);
+            if (!c.host) {
+                problems.push(`${cw}: host 가 없습니다.`);
+            } else if (!HOST_RE.test(String(c.host))) {
+                problems.push(`${cw}: host 는 스킴 없는 호스트 이름이어야 합니다`
+                    + ` (https:// · wss:// · 경로 · 끝의 / 를 빼세요) — ${c.host}`);
+            }
             // 단지 ID 는 전체에서 유일해야 한다. 겹치면 두 단지가 같은 서버로 간다.
             if (c.complexId && seenComplex.has(c.complexId)) {
                 problems.push(`${cw}: complexId 가 겹칩니다 — ${c.complexId} (${seenComplex.get(c.complexId)} 와 중복)`);

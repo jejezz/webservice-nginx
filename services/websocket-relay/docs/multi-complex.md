@@ -25,6 +25,10 @@
         │  ④ host 를 저장. 이후 Firebase 를 보지 않는다      │
 ```
 
+`host` 는 **스킴이 없는 호스트 이름**입니다 — `c-a3f19c04.rtc.example.com`.
+스킴은 쓰는 쪽이 붙입니다. REST 는 `https://<host>`, WebSocket 은 `wss://<host>`
+입니다. 값 하나로 두 스킴을 다 만들어야 하므로 디렉터리에 스킴을 담지 않습니다.
+
 ## Firebase 에 둘 것 — 지역당 문서 하나
 
 단지당 문서로 나누면 목록을 그릴 때 단지 수만큼 읽기가 발생합니다. **지역
@@ -53,6 +57,10 @@ Firestore  regions/41135
   ]
 }
 ```
+
+`host` 에 `https://` 나 `wss://` 를 넣지 마세요. 넣으면 앱이 `wss://https://...`
+를 만들게 되고, 그 단지는 **목록에는 보이는데 접속만 안 되는** 상태가 됩니다.
+`npm run directory -- push` 가 올리기 전에 막습니다.
 
 보안 규칙:
 
@@ -111,6 +119,7 @@ npm run directory -- push tools/directory.json
 · complexId 는 소문자 16진수 8자여야 합니다 — ZZZ
 · complexId 가 겹칩니다 — a3f19c04 (regions[0].complexes[1] 와 중복)
 · name 이 없습니다.
+· host 는 스킴 없는 호스트 이름이어야 합니다 (https:// · wss:// · 경로 · 끝의 / 를 빼세요) — https://c-a3f19c04.rtc.example.com
 ```
 
 반영은 한 번의 batch 로 합니다. `updatedAt` 은 올리는 쪽 시계를 믿지 않고
@@ -248,6 +257,7 @@ CA 를 받아야 하는데 그 시점엔 신뢰할 통로가 없습니다.
 
 - 지역 → 단지 선택 화면
 - `host` 캐시, 실패했을 때만 디렉터리 재조회
+- 저장한 `host` 앞에 스킴을 붙여 쓰기 — REST `https://<host>`, WS `wss://<host>`
 - `/register` 에 `complexId` 를 함께 보내기
 - 403 `complex_mismatch` 를 받으면 단지 선택으로 되돌리기
 
@@ -262,3 +272,4 @@ CA 를 받아야 하는데 그 시점엔 신뢰할 통로가 없습니다.
 | ID 를 인증으로 쓰지 않음 | 앱이 읽는 값이라 비밀이 될 수 없음 |
 | `COMPLEX_ID` 없으면 검사 안 함 | 단지가 하나인 지금 배치를 그대로 돌리기 위해 |
 | `@` 뒤가 옛 형식이면 무시 | 지금 도는 인터폰을 깨지 않고 옮기기 위해 |
+| `host` 에 스킴을 담지 않음 | 같은 값으로 `https://` 와 `wss://` 를 둘 다 만들어야 함 |
