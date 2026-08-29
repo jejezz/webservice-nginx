@@ -2,6 +2,10 @@
   "_주석": "단지 디렉터리 원본. node tools/directory.js push tools/directory.json 으로 올린다.",
   "_단지ID": "openssl rand -hex 4 로 만든다. 서버 .env 의 COMPLEX_ID 와 반드시 같아야 한다.",
   "_호스트": "스킴 없는 호스트 이름만 적는다. 앱이 REST 는 https://<host>, WebSocket 은 wss://<host> 로 붙인다.",
+
+  "_시험용": "⚠️ isTest 가 붙은 단지는 앱 화면 시험용 더미다. 실제 서버가 없어 host 가 해석되지 않으므로, 고르면 등록 단계에서 접속 실패한다 — 목록·선택 화면을 그리는 데까지만 쓴다. 실제 단지는 a3f19c04 하나뿐이다.",
+  "_정리방법": "시험이 끝나면 isTest 항목과 41171·11680 지역을 지우고 `push tools/directory.json --prune` 으로 올린다. --prune 을 빼면 그 지역 문서가 Firestore 에 남는다 (_index 에는 없어 앱엔 안 보이지만 DB 엔 있는 상태).",
+
   "regions": [
     {
       "code": "41135",
@@ -12,6 +16,53 @@
           "name": "플루토 1단지",
           "host": "c-a3f19c04.rtc.zoomon.art",
           "minAppVersion": "1.0.0"
+        },
+        {
+          "complexId": "b1c2d3e4",
+          "name": "플루토 2단지",
+          "host": "c-b1c2d3e4.rtc.zoomon.art",
+          "minAppVersion": "1.0.0",
+          "isTest": true
+        },
+        {
+          "complexId": "c5d6e7f8",
+          "name": "무지개마을 3단지",
+          "host": "c-c5d6e7f8.rtc.zoomon.art",
+          "minAppVersion": "1.2.0",
+          "isTest": true
+        }
+      ]
+    },
+    {
+      "code": "41171",
+      "name": "안양시 만안구",
+      "complexes": [
+        {
+          "complexId": "1a2b3c4d",
+          "name": "만안 그린빌",
+          "host": "c-1a2b3c4d.rtc.zoomon.art",
+          "minAppVersion": "1.0.0",
+          "isTest": true
+        }
+      ]
+    },
+    {
+      "code": "11680",
+      "name": "서울시 강남구",
+      "complexes": [
+        {
+          "complexId": "5e6f7a8b",
+          "name": "역삼 아이파크",
+          "host": "c-5e6f7a8b.rtc.zoomon.art",
+          "minAppVersion": "2.0.0",
+          "isTest": true
+        },
+        {
+          "complexId": "9c8d7e6f",
+          "name": "대치 래미안",
+          "host": "c-9c8d7e6f.rtc.zoomon.art",
+          "minAppVersion": "1.0.0",
+          "isTest": true
         }
       ]
     }
