@@ -75,7 +75,7 @@ else
         skip "subscriber 테이블을 읽지 못해 확인을 건너뜁니다 (DB 접속 실패)"
     elif [[ "$TOTAL" -eq 0 ]]; then
         pend "계정이 하나도 없습니다 — 아무도 등록할 수 없습니다"
-        info "         sudo /usr/sbin/kamctl add '<인터폰번호>' '<비밀번호>'   (accounts.md)"
+        info "         sudo /usr/sbin/kamctl add '0101990100' '<비밀번호>'   (인터폰. accounts.md)"
     else
         ok "계정 ${TOTAL}개"
 

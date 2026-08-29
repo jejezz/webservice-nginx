@@ -145,12 +145,15 @@ const STEPS = [
       '**여기서 만들 것은 인터폰 계정뿐입니다.** 모바일(`<세대>01~04`)과 ' +
       '월패드(`<세대>00`)는 websocket-relay 가 승인·등록 때 스스로 만들고 ' +
       '비밀번호도 그때 발급합니다 (docs/identity.md). 인터폰은 사람이 장비에 ' +
-      '값을 넣어야 하므로 그 자리만 남습니다. 무엇이 만들어져 있는지는 아래 ' +
-      '점검이 보여 주고, **쓸 것이 다 있는지**는 사람이 판단합니다.',
+      '값을 넣어야 하므로 그 자리만 남습니다.\n\n' +
+      '인터폰도 같은 규칙으로 번호를 받습니다 — 실재하지 않는 호를 그 동에 두고 ' +
+      '순번은 `00` 입니다. **101동 9901호 인터폰이면 `0101990100`.**\n\n' +
+      '무엇이 만들어져 있는지는 아래 점검이 보여 주고, **쓸 것이 다 있는지**는 ' +
+      '사람이 판단합니다.',
     requires: ['kamailio.config'],
     command: {
       cwd: 'services/kamailio',
-      run: "sudo /usr/sbin/kamctl add '<인터폰번호>' '<비밀번호>'\nsudo /usr/sbin/kamctl show",
+      run: "sudo /usr/sbin/kamctl add '0101990100' '<비밀번호>'\nsudo /usr/sbin/kamctl show",
       sudo: true,
     },
     guide: { text: 'kamailio 대시보드에서도 만들 수 있습니다', href: '/kamailio/' },
