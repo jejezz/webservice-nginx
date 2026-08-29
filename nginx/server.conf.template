@@ -17,8 +17,14 @@ server {
     listen __LISTEN_PORT__;
     server_name __SERVER_NAME__;
 __ACME_CHALLENGE__
-    # Redirect HTTP to HTTPS
-    return 301 https://__HTTPS_REDIRECT_HOST__$request_uri;
+    # Redirect HTTP to HTTPS.
+    #
+    # location 안에 둔다. server 레벨의 return 은 location 을 고르기 전 단계
+    # (server rewrite)에서 실행되어 무조건 먼저 이긴다 — 그러면 위의 ACME
+    # 예외가 아무리 구체적이어도 닿지 않는다.
+    location / {
+        return 301 https://__HTTPS_REDIRECT_HOST__$request_uri;
+    }
 }
 
 server {

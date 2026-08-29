@@ -396,15 +396,16 @@ class Stack:
         두어 챌린지 경로만 평문으로 응답하게 한다. Let's Encrypt 는 반드시 80 으로
         들어오고 포트를 지정할 수 없어서, 이 자리가 없으면 검증이 통과하지 못한다.
 
-        `^~` 는 정규식 location 보다 먼저 확정하라는 뜻이다. 이게 없으면 뒤에
-        붙는 다른 규칙에 따라 순서가 흔들릴 수 있다.
+        `^~` 로 잡아 접두사 일치 즉시 확정시킨다. 그리고 리다이렉트 쪽도
+        location 안에 있어야 한다 — server 레벨의 `return` 은 location 을 고르기
+        전 단계에서 실행되므로, 밖에 두면 이 예외에 닿지도 못하고 301 이 나간다.
 
         acme_webroot 를 비우면 아무것도 만들지 않는다 — 예전 동작 그대로다.
         """
         if not self.acme_webroot:
             return ""
         return (
-            "\n    # Let's Encrypt HTTP-01. 아래 301 보다 먼저 잡아야 한다.\n"
+            "\n    # Let's Encrypt HTTP-01. 아래 location / 의 301 보다 구체적이라 먼저 잡힌다.\n"
             f"    location ^~ /.well-known/acme-challenge/ {{\n"
             f"        root {self.acme_webroot};\n"
             "        default_type \"text/plain\";\n"
