@@ -6,6 +6,9 @@
 
 이 문서는 그 설계와, **지금 서버에 들어간 부분 / 아직 남은 부분**을 적습니다.
 
+이 문서는 **왜 그렇게 정했는가**를 적습니다. 실제로 어떻게 하는지(디렉터리에서
+주소를 받아 등록하고 통화하기까지)는 [enrollment.md](enrollment.md) 에 있습니다.
+
 관련: [../ReadMe.md](../ReadMe.md) · [../ANDROID_API_GUIDE.md](../ANDROID_API_GUIDE.md) · [enrollment.md](enrollment.md)
 
 ## 구조
@@ -268,6 +271,9 @@ CN/SAN  : c-a3f19c04.rtc.zoomon.art
 빠뜨리면 회사 메일이 죽습니다.
 
 ### 3. 앱 쪽
+
+절차는 [enrollment.md §2](enrollment.md#2-모바일-앱이-해야-할-것) 에 있습니다.
+여기는 목록만 둡니다.
 
 - 지역 → 단지 선택 화면
 - `host` 캐시, 실패했을 때만 디렉터리 재조회

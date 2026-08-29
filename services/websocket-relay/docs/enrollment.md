@@ -1,13 +1,47 @@
-# 단말 등록 — 남은 작업
+# 단말 등록 — 디렉터리에서 통화까지
 
-서버 쪽 등록·승인은 들어갔습니다. 이 문서는 **아직 남은 세 가지**를 적습니다.
+앱이 **자기 단지 서버를 찾아** 등록하고 통화할 수 있게 되기까지의 전 과정입니다.
+서버 쪽은 다 들어갔고, 남은 것은 앱과 월패드 화면입니다.
 
 1. [Firestore 단지 디렉터리 적용](#1-firestore-단지-디렉터리-적용) — 운영
 2. [모바일 앱이 해야 할 것](#2-모바일-앱이-해야-할-것) — 앱
 3. [월패드가 해야 할 것](#3-월패드가-해야-할-것) — 월패드
 
-설계 배경은 [../ReadMe.md](../ReadMe.md) 의 '단말 등록' 절과
-[multi-complex.md](multi-complex.md) 에 있습니다.
+설계 배경(왜 Firestore인가, 왜 단지 ID가 인증이 아닌가)은
+[multi-complex.md](multi-complex.md) 에 있습니다. 이 문서는 **어떻게 하는가**만
+다룹니다. API 사전은 [../ANDROID_API_GUIDE.md](../ANDROID_API_GUIDE.md) 입니다.
+
+## 전체 흐름
+
+```
+  Firestore                    단지 서버                    앱
+      │                            │                        │
+      │ ① regions/_index           │                        │
+      ├───────────────────────────────────────────────────▶ │  지역 목록
+      │ ② regions/41135            │                        │
+      ├───────────────────────────────────────────────────▶ │  단지 목록
+      │    { complexId, host, name }                        │
+      │                            │                        │
+      │           ③ POST /relay/register/mobile             │  host 에 스킴을
+      │                            │◀───────────────────────┤  붙여 접속
+      │                            │  202 pending           │
+      │                            ├───────────────────────▶│  대기 화면
+      │                            │                        │
+      │          ④ 월패드가 승인    │                        │
+      │                            │  FCM: approved         │
+      │                            ├───────────────────────▶│
+      │                            │                        │
+      │           ⑤ 재등록 (+ CSR) │                        │
+      │                            │◀───────────────────────┤
+      │                            │  200 + clientCert      │
+      │                            ├───────────────────────▶│  인증서 저장
+      │                            │                        │
+      │           ⑥ wss://<host>/relay/rtc                  │  통화
+      │                            │◀──────────────────────▶│
+```
+
+**①②는 등록할 때와 실패했을 때만 합니다.** 시작할 때마다 읽으면 안 됩니다
+([이유](#시작할-때마다-읽지-마세요)).
 
 ---
 
@@ -29,6 +63,9 @@
 | `can_call` 강제 (푸시 4경로) | ✅ |
 | `can_control` 강제 | ⚠️ 세대 단위만 ([한계](#can_control-의-한계)) |
 | 앱에 결과 통보 (승인·거절·만료 FCM) | ✅ |
+| 공인 인증서 (Let's Encrypt) | ✅ 앱이 CA 를 심지 않아도 됨 |
+| 클라이언트 인증서 발급 (mTLS) | ✅ 발급까지. **아직 강제하지 않음** ([2-6](#2-6-클라이언트-인증서-받기)) |
+| 디렉터리에서 단지 고르기 | ❌ 앱에 만들어야 함 ([2-0](#2-0-단지를-고르고-주소를-얻는다)) |
 | 월패드 승인 UI | ❌ 만들어야 함 |
 | 앱의 대기 상태 UI | ❌ 만들어야 함 |
 | 월패드 인증 | ❌ 미정 ([아래](#월패드-인증은-아직-없다)) |
@@ -222,8 +259,91 @@ openssl rand -hex 4     # 새 단지 ID
 
 ## 2. 모바일 앱이 해야 할 것
 
-`<host>` 는 디렉터리에서 받은 `host` 값 그대로입니다 (스킴 없음). 스킴은 앱이
-붙입니다 — REST 는 `https://<host>`, WebSocket 은 `wss://<host>`.
+### 2-0. 단지를 고르고 주소를 얻는다
+
+**여기서부터가 시작입니다.** 앱에는 서버 주소가 들어 있지 않습니다 — 단지마다
+다르기 때문입니다. Firestore 에서 받아 옵니다.
+
+읽기 전용이고 로그인이 필요 없습니다 (`allow read: if true`). 그래서 단지를
+고르는 화면은 로그인 전에 그릴 수 있습니다.
+
+**① 지역 목록** — 문서 하나만 읽습니다.
+
+```
+regions/_index
+{ "regions": [ { "code": "41135", "name": "성남시 분당구" }, ... ] }
+```
+
+**② 그 지역의 단지 목록** — 지역을 고르면 문서 하나를 더 읽습니다.
+
+```
+regions/41135
+{
+  "name": "성남시 분당구",
+  "complexes": [
+    { "complexId": "a3f19c04", "name": "플루토 1단지",
+      "host": "c-a3f19c04.rtc.zoomon.art", "minAppVersion": "1.0.0" }
+  ]
+}
+```
+
+**단지 수가 몇이든 읽기는 2회로 끝납니다.** 단지당 문서로 나누지 않은 이유입니다.
+
+**③ 고른 단지의 `complexId` 와 `host` 를 저장합니다.** 이후 등록과 통화에 씁니다.
+
+```kotlin
+val db = Firebase.firestore
+val index = db.collection("regions").document("_index").get().await()
+// 지역 선택 후
+val region = db.collection("regions").document(code).get().await()
+val complexes = region.get("complexes") as List<Map<String, Any>>
+// 단지 선택 후 저장
+prefs.host = complex["host"] as String            // "c-a3f19c04.rtc.zoomon.art"
+prefs.complexId = complex["complexId"] as String  // "a3f19c04"
+```
+
+#### `host` 에는 스킴이 없습니다
+
+**앱이 붙입니다.** 값 하나로 두 가지를 만들어야 하기 때문입니다.
+
+```kotlin
+val rest = "https://${prefs.host}/relay"        // REST
+val ws   = "wss://${prefs.host}/relay/rtc"      // WebSocket
+```
+
+포트도 붙이지 않습니다. 표준 443 입니다.
+
+> `host` 에 `https://` 가 들어 있는 경우는 없습니다 — 올릴 때 도구가 막습니다.
+> 혹시 들어 있다면 그건 디렉터리 데이터가 잘못된 것이니 `wss://https://...`
+> 같은 것을 만들지 말고 오류로 처리하세요.
+
+#### 시작할 때마다 읽지 마세요
+
+등록이 끝나면 `host` 를 저장하고 **다시 읽지 않습니다.** 다시 읽는 경우는
+두 가지뿐입니다.
+
+| 언제 | 왜 |
+|---|---|
+| 접속·등록이 실패할 때 | 단지 서버 주소가 바뀌었을 수 있습니다 |
+| 사용자가 "단지 변경" 을 할 때 | 이사 등 |
+
+**이 재조회가 중요합니다.** 도메인이나 주소를 옮겨도 앱이 스스로 복구할 수 있는
+유일한 경로입니다. 이게 없으면 주소를 바꾸는 순간 그 단지 전체가 앱을 새로
+배포하기 전까지 복구되지 않습니다.
+
+시작할 때마다 읽으면 안 되는 이유는 따로 있습니다 — 푸시(FCM)와 단지 발견이
+**같은 Firebase 프로젝트**를 씁니다. 그 프로젝트가 흔들릴 때 시작할 때마다
+읽으면 **이미 등록된 사용자까지** 앱이 뜨지 않습니다. 캐시해 두면 새로 등록하는
+사람만 영향을 받습니다.
+
+#### 서버가 맞는지는 저절로 확인됩니다
+
+서버는 Let's Encrypt 공인 인증서를 씁니다. **CA 를 앱에 심을 필요가 없고,
+커스텀 TrustManager 도 필요 없습니다.** 기본 `OkHttpClient()` 로 충분합니다.
+
+인증서 핀닝은 **하지 마세요.** 90일마다 갱신되며 공개키가 바뀝니다 — 핀을 박으면
+분기마다 앱이 통째로 접속 불가가 됩니다. 자세히는
+[../ANDROID_API_GUIDE.md](../ANDROID_API_GUIDE.md) 의 TLS 절.
 
 ### 2-1. 등록 요청 — 응답이 늘었습니다
 
@@ -321,6 +441,75 @@ ERROR:이 세대에 제어가 허용된 단말이 없습니다. 월패드에서 
 
 WebSocket 오류는 **JSON 이 아니라 `ERROR:` 로 시작하는 평문**입니다.
 파싱하지 말고 접두사로 가르세요.
+
+### 2-6. 클라이언트 인증서 받기
+
+서버가 단말에게 **클라이언트 인증서**를 발급합니다. mTLS 로 "우리 앱이 맞나" 를
+가리는 데 씁니다.
+
+> **지금은 없어도 다 됩니다.** 서버가 `verify_client = optional` 이라 인증서
+> 없이도 통과합니다. 앱이 준비되고 돌고 있는 단말이 한 번씩 받아 간 뒤에 켤
+> 예정입니다. **미리 넣어 두면 그때 끊기지 않습니다.**
+
+**개인키는 단말 밖으로 내보내지 않습니다.** Android Keystore 안에서 만들고,
+올려 보내는 것은 CSR(공개), 내려받는 것은 인증서(공개)뿐입니다.
+
+**① 키쌍과 CSR 을 만든다** — 한 번만 합니다. 갱신 때도 같은 키를 씁니다.
+
+```kotlin
+val kpg = KeyPairGenerator.getInstance("RSA", "AndroidKeyStore")
+kpg.initialize(KeyGenParameterSpec.Builder("relay-client", PURPOSE_SIGN)
+    .setDigests(KeyProperties.DIGEST_SHA256)
+    .setSignaturePaddings(KeyProperties.SIGNATURE_PADDING_RSA_PKCS1)
+    .build())
+val pair = kpg.generateKeyPair()
+// CSR 은 BouncyCastle(PKCS10CertificationRequestBuilder) 등으로 만든다.
+```
+
+**② 등록할 때 함께 보낸다** — 2-1 의 본문에 `csr` 한 칸을 더합니다.
+
+```json
+{ "uuid": "...", "email": "...", "complex": "...", "address": "1B101U",
+  "token": "...", "csr": "-----BEGIN CERTIFICATE REQUEST-----\n..." }
+```
+
+**③ 승인된 뒤 받는다** — `200 approved` 응답에 실려 옵니다.
+
+```json
+{ "status": "approved", "clientCert": "-----BEGIN CERTIFICATE-----\n..." }
+```
+
+`202 pending` 일 때는 오지 않습니다. **승인된 단말에만 발급**하기 때문입니다.
+그래서 순서는 늘 이렇습니다 — 등록(202) → 월패드 승인 → 재등록(200 + 인증서).
+2-3 에서 승인 FCM 을 받은 뒤 한 번 더 등록하면 그 자리에서 받습니다.
+
+| 응답 필드 | 뜻 |
+|---|---|
+| `clientCert` | 발급됨. Keystore 의 키와 짝지어 저장 |
+| `clientCertError` | 발급 실패. **등록 자체는 성공이다** — 무시하고 진행 |
+| (없음) | `csr` 을 안 보냈거나 아직 승인 전 |
+
+**④ 90일마다 갱신한다.** 유효기간이 90일입니다. 만료 전에 `csr` 을 다시 실어
+등록하면 새 인증서가 옵니다 — **발급과 갱신이 같은 경로**입니다.
+
+```kotlin
+if (cert == null || cert.notAfter.before(Date(now + 14.days))) {
+    body.put("csr", csrPem)   // 없거나 2주 안에 만료면 다시 받는다
+}
+```
+
+**⑤ 접속할 때 제시한다.**
+
+```kotlin
+val km = KeyManagerFactory.getInstance("X509").apply { init(keyStore, null) }
+OkHttpClient.Builder()
+    .sslSocketFactory(sslContext(km).socketFactory, systemTrustManager)
+    .build()
+```
+
+> **인증서는 "우리 앱이 맞나" 까지만 말합니다.** 어느 세대인지, 통화 권한이
+> 있는지는 서버가 DB 로 판단합니다. A단지에서 받은 인증서로 B단지 서버에 TLS
+> 접속은 되지만 `403 complex_mismatch` 를 받습니다 — 정상입니다.
 
 ---
 
