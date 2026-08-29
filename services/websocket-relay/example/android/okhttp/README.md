@@ -104,6 +104,17 @@ client.register().mobileAsync(
         new ApiCallback<JSONObject>() {
             public void onSuccess(JSONObject result) {
                 RegisterResult r = ResponseParser.registerResult(result);
+
+                // 승인된 단말이면 SIP 내선 자격이 함께 옵니다. 이 값으로
+                // Janus SIP 플러그인에 등록합니다 (docs/client-migration.md).
+                if (r.hasSipCredential()) {
+                    JSONObject register = new JSONObject();
+                    register.put("request",  "register");
+                    register.put("username", r.sip.sipUri());  // sip:0101080501@pluto.org
+                    register.put("authuser", r.sip.user);      // 0101080501
+                    register.put("secret",   r.sip.password);
+                    // … proxy · outbound_proxy 를 채워 Janus 로 보냅니다
+                }
             }
             public void onError(ApiException e) {
                 if (e.isRetryable()) { /* 나중에 다시 */ }
@@ -113,6 +124,11 @@ client.register().mobileAsync(
 
 `address` 가 어긋나면 푸시가 영영 오지 않습니다. 등록은 성공하는데 초인종만
 안 울린다면 여기부터 확인하세요 (서버에서는 `npm run db:status` 로 보입니다).
+
+`sip` 가 **없을 수도 있습니다.** 아직 승인 전이거나, `A동` 처럼 숫자가 아닌
+동/호라 번호를 만들 수 없는 세대입니다. 오류가 아니므로 등록을 실패로 다루면
+안 됩니다 — 그 단말은 인터폰 착신만 못 받고 초인종 호출은 그대로 동작합니다.
+자세한 것은 [docs/client-migration.md](../../../../../docs/client-migration.md).
 
 ### 2. 푸시 수신
 

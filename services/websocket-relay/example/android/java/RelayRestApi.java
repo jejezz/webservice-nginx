@@ -39,6 +39,14 @@ public final class RelayRestApi {
      * token 은 FCM 등록 토큰이다. 착신 푸시가 이 값으로 간다.
      * 토큰은 앱 재설치·데이터 삭제·장기 미사용에 바뀌므로,
      * FirebaseMessagingService.onNewToken 에서 다시 등록해야 한다.
+     *
+     * <p><b>응답의 {@code sip} 로 SIP 내선 자격이 온다</b> (승인된 단말만).
+     * {@link #sipCredential(JSONObject)} 로 꺼내 Janus 에 등록한다. 번호를 앱이
+     * 정하던 구조는 없어졌으므로 {@code sip_user} 는 보내지 않는다
+     * (docs/client-migration.md).
+     *
+     * <p>⚠️ <b>token 을 빈 값으로 부르지 말 것.</b> 저장된 토큰을 덮어쓰므로
+     * 그 단말의 착신 푸시가 조용히 끊긴다.
      */
     public JSONObject registerMobile(String uuid, String email, String complex, String address,
                                      String token, @Nullable String phone, @Nullable String image)
@@ -56,6 +64,30 @@ public final class RelayRestApi {
             throw new IOException(e);
         }
         return postJson("/register/mobile", body);
+    }
+
+    /**
+     * 등록 응답에서 SIP 자격을 꺼낸다. 없으면 null.
+     *
+     * <p>없는 것은 오류가 아니다 — 아직 승인 전이거나({@code status} 가
+     * {@code pending}), {@code A동} 처럼 숫자가 아닌 동/호라 번호를 만들 수 없는
+     * 세대다. 그 단말은 인터폰 착신만 못 받고 WebRTC 초인종 호출은 그대로다.
+     *
+     * <p><b>비밀번호는 바뀔 수 있다.</b> 그 자리를 다른 단말이 물려받으면 새로
+     * 발급되므로, 등록이 401 이면 캐시한 값을 다시 쓰지 말고 registerMobile 을
+     * 한 번 더 불러 새 값을 받는다.
+     *
+     * <p>Janus 에 넘길 때 {@code username}("sip:" + user + "@" + domain)과
+     * {@code authuser}(user)는 <b>같은 계정</b>이어야 한다. Kamailio 가
+     * "digest 사용자명 == To 사용자명" 을 강제하므로 다르면 401 이다.
+     */
+    @Nullable
+    public static JSONObject sipCredential(JSONObject registerResponse) {
+        JSONObject sip = registerResponse == null ? null : registerResponse.optJSONObject("sip");
+        if (sip == null) return null;
+        String user = sip.optString("user", "");
+        String password = sip.optString("password", "");
+        return (user.isEmpty() || password.isEmpty()) ? null : sip;
     }
 
     /** 등록을 지운다. 이 뒤로는 착신 푸시가 오지 않는다. */

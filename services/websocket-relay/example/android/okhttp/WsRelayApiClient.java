@@ -152,6 +152,16 @@ public class WsRelayApiClient {
          * the relay keys on uuid and overwrites the stored token, so re-posting
          * is the update path. There is no separate "update token" endpoint.
          *
+         * <h3>응답에 SIP 자격이 실려 온다</h3>
+         * 승인된 단말이면 {@code sip} 이 함께 온다 ({@link RegisterResult#sip}).
+         * 그 값으로 Janus SIP 플러그인에 등록한다 — 번호를 앱이 정하던 구조는
+         * 없어졌고, <b>{@code sip_user} 는 보내지 않는다.</b>
+         * 자세한 것은 {@code docs/client-migration.md}.
+         *
+         * <h3>⚠️ token 을 빈 값으로 부르지 말 것</h3>
+         * 이 호출은 저장된 토큰을 덮어쓴다. 시험한다고 빈 문자열을 넣으면 그
+         * 단말의 착신 푸시가 조용히 끊긴다.
+         *
          * @param uuid    stable per-install id; the primary key on the server
          * @param email   account this device belongs to (used by targeted push)
          * @param complex apartment complex name

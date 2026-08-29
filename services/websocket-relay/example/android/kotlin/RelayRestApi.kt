@@ -33,6 +33,13 @@ class RelayRestApi(
      * token 은 FCM 등록 토큰이다. 착신 푸시가 이 값으로 간다.
      * 토큰은 앱 재설치·데이터 삭제·장기 미사용에 바뀌므로,
      * FirebaseMessagingService.onNewToken 에서 다시 등록해야 한다.
+     *
+     * **응답의 `sip` 로 SIP 내선 자격이 온다** (승인된 단말만). 그 값으로 Janus
+     * 에 등록한다 — [sipCredential] 로 꺼내면 된다. 번호를 앱이 정하던 구조는
+     * 없어졌으므로 `sip_user` 는 보내지 않는다 (docs/client-migration.md).
+     *
+     * ⚠️ **token 을 빈 값으로 부르지 말 것.** 저장된 토큰을 덮어쓰므로 그 단말의
+     * 착신 푸시가 조용히 끊긴다.
      */
     fun registerMobile(
         uuid: String, email: String, complex: String, address: String,
@@ -46,6 +53,24 @@ class RelayRestApi(
         phone?.let { put("phone", it) }
         image?.let { put("image", it) }
     })
+
+    /**
+     * 등록 응답에서 SIP 자격을 꺼낸다. 없으면 null.
+     *
+     * 없는 것은 오류가 아니다 — 아직 승인 전이거나(`status`가 `pending`),
+     * `A동` 처럼 숫자가 아닌 동/호라 번호를 만들 수 없는 세대다. 그 단말은
+     * 인터폰 착신만 못 받고 WebRTC 초인종 호출은 그대로 동작한다.
+     *
+     * **비밀번호는 바뀔 수 있다.** 그 자리를 다른 단말이 물려받으면 새로
+     * 발급되므로, 등록이 401 이면 캐시한 값을 다시 쓰지 말고 registerMobile 을
+     * 한 번 더 불러 새 값을 받는다.
+     */
+    fun sipCredential(response: JSONObject): SipCredential? {
+        val sip = response.optJSONObject("sip") ?: return null
+        val user = sip.optString("user").takeIf { it.isNotEmpty() } ?: return null
+        val password = sip.optString("password").takeIf { it.isNotEmpty() } ?: return null
+        return SipCredential(user, sip.optString("domain"), password)
+    }
 
     /** 등록을 지운다. 이 뒤로는 착신 푸시가 오지 않는다. */
     fun unregisterMobile(uuid: String): JSONObject =
@@ -113,4 +138,23 @@ class RelayRestApi(
     private companion object {
         val JSON = "application/json; charset=utf-8".toMediaType()
     }
+}
+
+/**
+ * SIP 내선 자격. 서버가 승인 시점에 배정한다 (동4+호4+순번2 —
+ * 101동 805호 1번이면 `0101080501`). 규격은 docs/identity.md.
+ *
+ * Janus SIP 플러그인에 넘길 때 `username` 과 `authuser` 는 **같은 계정**이어야
+ * 한다. Kamailio 가 "digest 사용자명 == To 사용자명" 을 강제하므로 다르면 401 이다.
+ *
+ *     put("username", cred.sipUri)   // sip:0101080501@pluto.org
+ *     put("authuser", cred.user)     // 0101080501
+ *     put("secret",   cred.password)
+ */
+data class SipCredential(
+    val user: String,
+    val domain: String,
+    val password: String,
+) {
+    val sipUri: String get() = "sip:$user@$domain"
 }

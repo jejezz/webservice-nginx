@@ -116,11 +116,15 @@ implementation 'org.json:json:20240303'   // Android 에 기본 포함(org.json)
 
 ## REST
 
+> 등록 응답의 `sip`(내선 번호·비밀번호)은 서버가 배정합니다. 앱이 `sip_user` 를
+> 정해 보내던 구조는 없어졌습니다 —
+> [docs/client-migration.md](../../../../docs/client-migration.md) 를 보세요.
+
 | 메서드 | 경로 | 본문 |
 |---|---|---|
-| POST | `/register/mobile` | `{uuid, email, complex, address, token, phone?, image?}` |
+| POST | `/register/mobile` | `{uuid, email, complex, address, token, phone?, image?}` — 응답에 `sip` |
 | POST | `/unregister/mobile` | `{uuid}` |
-| POST | `/register/complex_agents` | `{complex, type, building, unit, ipaddress}` |
+| POST | `/register/complex_agents` | `{complex, type, building, unit, ipaddress}` — 응답에 `sip` |
 | GET | `/register/findip?address=rtc:...@...` | — |
 | GET | `/status/rooms` | — |
 | POST | `/room/invite` | `{target, source}` |
