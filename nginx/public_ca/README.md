@@ -23,7 +23,8 @@ nginx/
 └── public_ca/
     ├── README.md            이 문서
     ├── setup_letsencrypt.sh 공인 인증서 발급      ← 배포용
-    └── cert-status.sh       지금 무엇을 내밀고 있나
+    ├── cert-status.sh       지금 무엇을 내밀고 있나
+    └── check-dns.sh         이름이 아직 이 서버를 가리키나
 ```
 
 ## 무엇이 달라지나
@@ -126,6 +127,42 @@ sudo ../install_nginx_stack.sh --skip-install
 ```bash
 ./cert-status.sh
 ```
+
+## ⚠️ 유동 IP — 사람이 고쳐야 합니다
+
+이 회선은 **유동 IP** 인데 A 레코드는 등록기관에 **고정값**으로 들어 있습니다.
+예전에는 공유기의 DDNS 가 따라갔지만 그 이름은 삭제됐습니다. **지금은 자동으로
+따라가는 장치가 없습니다.**
+
+IP 가 바뀌면 고칠 때까지 이렇게 됩니다:
+
+| | 언제 |
+|---|---|
+| 앱이 디렉터리 주소로 못 붙음 | **즉시, 전면** |
+| SIP·Janus 의 ICE 후보 주소가 틀어짐 | 즉시 |
+| certbot 갱신 실패 | 만료 30일 전부터 조용히 |
+
+첫째가 즉시 터지니 알아차리기는 합니다. 문제는 **왜인지 모른다**는 것입니다.
+
+```bash
+./check-dns.sh          # 인증서의 이름이 아직 이 서버를 가리키나
+```
+
+manager 대시보드의 TLS 카드에도 같은 판단이 나옵니다. 어긋나면 `critical` 이고,
+고칠 IP 를 함께 보여 줍니다.
+
+크론에 걸어 두면 사람보다 먼저 압니다:
+
+```
+*/10 * * * * /home/jejezz/Public/webservices/nginx/public_ca/check-dns.sh --quiet || echo "DNS 가 이 서버를 가리키지 않습니다" | logger -t dns-drift
+```
+
+TTL 이 600초라 고치면 10분 안에 퍼집니다.
+
+> **근본 해결은 DNS 를 API 로 고칠 수 있게 만드는 것입니다.** 가비아는 네임서버만
+> 옮기면 되고(`zoomon.art` 는 메일도 웹도 없어 위험이 없습니다), 그러면 IP 가
+> 바뀔 때 스크립트가 레코드를 갱신할 수 있습니다. 나중에 `ptype.co.kr` 을
+> `_acme-challenge` 위임으로 붙일 때도 같은 것이 필요합니다.
 
 ## 갱신은 어떻게 도나
 

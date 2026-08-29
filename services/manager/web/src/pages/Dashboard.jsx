@@ -69,6 +69,14 @@ function CertCard({ cert }) {
     ['만료', `${formatDateTime(cert.expiresAt)} (${cert.daysLeft}일)`],
     ['자동 갱신', cert.renewTimer === 'active' ? 'certbot.timer 동작 중' : `certbot.timer — ${cert.renewTimer}`],
   ];
+  if (cert.dns) {
+    rows.push([
+      'DNS',
+      cert.dns.ok
+        ? `이 서버를 가리킴 (${cert.dns.current})`
+        : `${cert.dns.resolved || '레코드 없음'} — 지금은 ${cert.dns.current || '?'}`,
+    ]);
+  }
 
   // 무엇을 해야 하는지까지 적는다. 상태만 보여 주면 결국 문서를 뒤지게 된다.
   const notes = [];
@@ -83,6 +91,12 @@ function CertCard({ cert }) {
   }
   if (cert.daysLeft != null && cert.daysLeft < 30) {
     notes.push('만료가 가깝습니다. 갱신이 도는지 확인하세요.');
+  }
+  if (cert.dns && !cert.dns.ok) {
+    // 유동 IP 인데 A 레코드가 고정이라 생기는 일이다. 지금 아무도 못 붙는 상태다.
+    notes.push(
+      `이름이 이 서버를 가리키지 않습니다. 앱이 접속하지 못합니다 — 등록기관에서 A 레코드를 ${cert.dns.current || '현재 공인 IP'} 로 고치세요.`,
+    );
   }
 
   return (

@@ -17,6 +17,7 @@
  */
 
 const tls = require('tls');
+const dns = require('dns').promises;
 const { execFile } = require('child_process');
 const { promisify } = require('util');
 const log = require('../logger');
@@ -76,6 +77,34 @@ async function renewTimerState() {
   }
 }
 
+/**
+ * 인증서의 이름이 아직 이 서버를 가리키는지 본다.
+ *
+ * 이 회선은 유동 IP 인데 A 레코드는 등록기관에 고정값으로 들어 있고, 따라가는
+ * 장치가 없다. 어긋나면 앱이 통째로 못 붙는다 — 사람은 "안 된다" 는 것만 알고
+ * 이유는 모르는 상태가 된다. 그 답을 여기서 준다.
+ *
+ * 공인 IP 는 바깥 서비스에 묻는다. DNS 로는 알 수 없다 — DNS 가 맞는지를 보는
+ * 것이 목적이라 DNS 를 근거로 쓰면 아무것도 검사하지 못한다.
+ */
+async function dnsPointsHere(name) {
+  if (!name) return null;
+  try {
+    const res = await fetch('https://api.ipify.org', { signal: AbortSignal.timeout(4000) });
+    const current = (await res.text()).trim();
+    if (!/^[0-9.]+$/.test(current)) return null;
+
+    const records = await dns.resolve4(name);
+    return { ok: records.includes(current), current, resolved: records[0] || null };
+  } catch (err) {
+    // 못 물어봤을 때와 어긋났을 때는 다르다. 모르면 모른다고 한다.
+    if (err?.code === 'ENOTFOUND' || err?.code === 'NODATA') {
+      return { ok: false, current: null, resolved: null };
+    }
+    return null;
+  }
+}
+
 async function status(server) {
   const port = server?.sslPort || 443;
   const servername = server?.serverName || 'localhost';
@@ -91,7 +120,10 @@ async function status(server) {
   const expiresAt = new Date(cert.valid_to);
   const daysLeft = Math.floor((expiresAt.getTime() - Date.now()) / 86400000);
   const kind = classify(cert.issuer || {});
-  const renewTimer = await renewTimerState();
+  const [renewTimer, dnsCheck] = await Promise.all([
+    renewTimerState(),
+    dnsPointsHere(cert.subject?.CN),
+  ]);
 
   let level = 'ok';
   if (daysLeft < WARN_DAYS) level = 'warn';
@@ -102,6 +134,8 @@ async function status(server) {
   if (kind === 'private-ca') level = 'warn';
   // 타이머가 꺼져 있으면 갱신이 조용히 멈춘다.
   if (kind === 'letsencrypt' && renewTimer !== 'active') level = 'warn';
+  // 이름이 이 서버를 안 가리키면 지금 아무도 못 붙는다. 가장 급한 상태다.
+  if (dnsCheck && !dnsCheck.ok) level = 'critical';
 
   return {
     ok: true,
@@ -114,6 +148,7 @@ async function status(server) {
     expiresAt: Number.isNaN(expiresAt.getTime()) ? null : expiresAt.toISOString(),
     daysLeft: Number.isNaN(daysLeft) ? null : daysLeft,
     renewTimer,
+    dns: dnsCheck,
   };
 }
 
