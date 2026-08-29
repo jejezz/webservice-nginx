@@ -132,7 +132,7 @@ npm run directory -- push tools/directory.json
 |---|---|
 | `npm run directory -- check` | 자격과 연결만 확인. 아무것도 쓰지 않음 |
 | `npm run directory -- pull` | 지금 올라가 있는 내용 |
-| `npm run directory -- push <파일>` | 올림 (`--dry-run` 으로 미리 보기) |
+| `npm run directory -- push <파일>` | 올림 (`--dry-run` 미리 보기 · `--prune` 빠진 지역 문서 삭제) |
 
 **4. `complexId` 를 서버 `.env` 와 맞춥니다**
 

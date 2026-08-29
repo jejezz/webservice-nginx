@@ -7,6 +7,7 @@
  *   node tools/directory.js pull                   지금 올라가 있는 내용을 보여준다
  *   node tools/directory.js push directory.json    파일 내용을 올린다
  *   node tools/directory.js push directory.json --dry-run
+ *   node tools/directory.js push directory.json --prune   빠진 지역 문서를 지운다
  *
  * ── 왜 이 서비스에 있나 ──────────────────────────────────────────
  * Firebase 서비스 계정 키를 가진 곳이 여기뿐이기 때문입니다(secrets/).
@@ -295,7 +296,7 @@ async function cmdPull() {
     }
 }
 
-async function cmdPush(file, dryRun) {
+async function cmdPush(file, dryRun, prune) {
     if (!file) die('올릴 JSON 파일을 지정하세요.', '예: node tools/directory.js push directory.json');
     if (!fs.existsSync(file)) die(`파일이 없습니다: ${file}`);
 
@@ -336,20 +337,50 @@ async function cmdPush(file, dryRun) {
     }
     await batch.commit();
     console.log('\n올렸습니다.');
+
+    /*
+     * 파일에서 빠진 지역 문서를 찾는다.
+     *
+     * set 은 덮어쓸 뿐 지우지 않는다. 그래서 지역을 하나 빼고 올리면 그 문서가
+     * 그대로 남는데, _index 에는 없으므로 **앱에는 안 보이고 DB 에만 있는**
+     * 상태가 된다. 콘솔을 열어 본 사람은 살아 있는 단지로 오해한다.
+     *
+     * 자동으로 지우지는 않는다. 일부만 담은 파일을 올렸을 때 나머지가 조용히
+     * 사라지면 그게 더 위험하다. 알려 주고 --prune 을 준 경우에만 지운다.
+     */
+    const known = new Set(doc.regions.map((r) => String(r.code)));
+    const snap = await db.collection('regions').get();
+    const orphans = snap.docs.filter((d) => d.id !== '_index' && !known.has(d.id));
+
+    if (orphans.length === 0) return;
+
+    console.log(`\n⚠️  파일에 없는 지역 문서가 ${orphans.length}개 남아 있습니다:`);
+    orphans.forEach((d) => console.log(`      ${d.id}  ${(d.data() || {}).name || ''}`));
+
+    if (!prune) {
+        console.log('\n   _index 에 없으므로 앱에는 보이지 않습니다. 지우려면 --prune 을 주세요.');
+        return;
+    }
+
+    const del = db.batch();
+    orphans.forEach((d) => del.delete(d.ref));
+    await del.commit();
+    console.log(`\n   --prune: ${orphans.length}개를 지웠습니다.`);
 }
 
 (async () => {
     const [cmd, arg] = process.argv.slice(2);
     const dryRun = process.argv.includes('--dry-run');
+    const prune = process.argv.includes('--prune');
     try {
         if (cmd === 'check') await cmdCheck();
         else if (cmd === 'pull') await cmdPull();
-        else if (cmd === 'push') await cmdPush(arg, dryRun);
+        else if (cmd === 'push') await cmdPush(arg, dryRun, prune);
         else {
             console.log('사용법:');
             console.log('  node tools/directory.js check');
             console.log('  node tools/directory.js pull');
-            console.log('  node tools/directory.js push <파일.json> [--dry-run]');
+            console.log('  node tools/directory.js push <파일.json> [--dry-run] [--prune]');
             process.exit(1);
         }
     } catch (err) {
