@@ -287,7 +287,13 @@ async function checkHealth(): Promise<void> {
         const body: any = await res.json();
 
         if (body.service !== APP_NAME) {
-            report.bad(`/health 의 service 가 '${body.service}' 입니다 — '${APP_NAME}' 이어야 합니다.`);
+            // 주소를 함께 말한다. 이 오보의 원인은 대개 "서비스가 고장났다" 가
+            // 아니라 "엉뚱한 데를 찔렀다" 이고, 주소가 없으면 그것이 안 보인다.
+            // PORT 가 다른 서비스의 값으로 덮여 있으면 여기로 나온다.
+            report.bad(
+                `${url} 의 service 가 '${body.service}' 입니다 — '${APP_NAME}' 이어야 합니다.`,
+                'PORT 가 다른 서비스의 값으로 덮여 있지 않은지 보세요 (.env 의 PORT=28099).',
+            );
         }
 
         if (body.status === 'ok') {

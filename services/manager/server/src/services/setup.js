@@ -26,6 +26,44 @@ const settings = require('./setup-settings');
 const DEFAULT_TIMEOUT_MS = 30000;
 const MAX_OUTPUT_BYTES = 1024 * 1024;
 
+/**
+ * 점검에게 넘길 환경 변수. **process.env 를 그대로 주지 않는다.**
+ *
+ * manager 는 pm2 가 띄운 프로세스라 **자기 pm2 선언의 [env] 를 달고 있다**.
+ * 그것을 자식에게 물려주면 점검이 manager 의 값을 자기 값으로 읽는다.
+ *
+ * 실제로 그랬다. manager 의 pm2-conf/app.ini 에 `PORT = 28084` 가 있고,
+ * websocket-relay 의 doctor 는 PORT 로 자기 /health 주소를 만든다. 그래서
+ * 마법사가 부르면 manager 의 /health 를 찔러 보고 "service 가 'manager'
+ * 입니다" 라고 보고했다 — **점검은 옳았고 환경이 틀렸다.** 같은 점검을
+ * 터미널에서 돌리면 통과했으므로 원인을 짚기도 어려웠다.
+ *
+ * 그 서비스의 .env 도 이기지 못한다. dotenv 는 이미 있는 값을 덮지 않는다.
+ *
+ * 그래서 **사람이 터미널에서 돌릴 때 있을 법한 것만** 넘긴다. 점검은 사람이
+ * 직접 친 것과 같은 결과를 내야 한다 — 아래 resolveCheck 가 절대 경로 대신
+ * 상대 경로로 실행하는 것과 같은 이유다.
+ *
+ * 여기에 없는 것이 필요한 점검이 생기면, 그 점검이 자기 설정 파일에서 읽게
+ * 하는 편이 맞다. 환경 변수로 넘기기 시작하면 이 사고가 되돌아온다.
+ */
+const ENV_PASSTHROUGH = [
+  'PATH',            // node · curl · dig · systemctl · mariadb 를 찾는다
+  'HOME',            // pm2 가 ~/.pm2/dump.pm2 를 읽는다
+  'USER', 'LOGNAME',
+  'LANG', 'LC_ALL', 'LC_MESSAGES',
+  'TZ',
+  'TERM', 'TMPDIR',
+];
+
+function childEnv() {
+  const env = {};
+  for (const key of ENV_PASSTHROUGH) {
+    if (process.env[key] !== undefined) env[key] = process.env[key];
+  }
+  return env;
+}
+
 const STATES = new Set(['complete', 'incomplete', 'problem']);
 const LEVELS = new Set(['ok', 'skip', 'pending', 'problem']);
 
@@ -466,7 +504,8 @@ function runScript(step) {
         timeout: step.check.timeoutMs || DEFAULT_TIMEOUT_MS,
         maxBuffer: MAX_OUTPUT_BYTES,
         killSignal: 'SIGKILL',
-        env: process.env,
+        // manager 의 pm2 [env] 가 새어 들어가지 않게 추린다 (위 ENV_PASSTHROUGH).
+        env: childEnv(),
       },
       (err, stdout, stderr) => {
         resolve({
