@@ -195,7 +195,20 @@ if ! command -v certbot >/dev/null 2>&1; then
     run_root apt-get install -y certbot
 fi
 
-args=(certonly --webroot -w "$WEBROOT" --non-interactive --agree-tos)
+primary="${DOMAINS[0]}"
+
+# staging 과 실제 인증서에 다른 이름을 준다.
+#
+# 같은 이름을 쓰면 --prod 로 넘어갈 때 certbot 이 같은 계보를 갱신하려 들어,
+# 먼저 지우지 않으면 걸린다. 이름을 나누면 staging 이 남아 있어도 실제 발급이
+# 그냥 되고, 무엇이 시험용인지도 이름만 보고 안다.
+if [[ "$MODE" == "staging" ]]; then
+    CERT_NAME="${primary}-staging"
+else
+    CERT_NAME="${primary}"
+fi
+
+args=(certonly --webroot -w "$WEBROOT" --non-interactive --agree-tos --cert-name "$CERT_NAME")
 for d in "${DOMAINS[@]}"; do args+=(-d "$d"); done
 
 if [[ -n "$EMAIL" ]]; then
@@ -222,8 +235,7 @@ echo
 run_root certbot "${args[@]}"
 
 echo
-primary="${DOMAINS[0]}"
-live="/etc/letsencrypt/live/${primary}"
+live="/etc/letsencrypt/live/${CERT_NAME}"
 
 if [[ "$MODE" == "staging" ]]; then
     cat <<EOF
@@ -232,7 +244,8 @@ if [[ "$MODE" == "staging" ]]; then
   다음: ./setup_letsencrypt.sh --prod -m <메일주소> ${DOMAINS[*]}
 
 staging 인증서는 브라우저가 믿지 않으므로 nginx 에 물리지 마세요.
-지우려면: sudo certbot delete --cert-name ${primary}
+이름이 달라서(${CERT_NAME}) 그냥 두어도 실제 발급에 걸리지 않습니다.
+지우려면: sudo certbot delete --cert-name ${CERT_NAME}
 EOF
 else
     cat <<EOF
