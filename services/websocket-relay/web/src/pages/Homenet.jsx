@@ -1,7 +1,8 @@
 import { useCallback, useState } from 'react';
-import { AlertCircle, House, RefreshCw, Trash2 } from 'lucide-react';
+import { AlertCircle, House, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { usePolling } from '@/lib/usePolling';
+import HomenetForm from '@/components/HomenetForm';
 import { formatDateTime } from '@/lib/format';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -13,6 +14,7 @@ export default function Homenet() {
   const { data, error, loading, refreshing, reload, setData } = usePolling(api.homenet, 15000);
   const [busy, setBusy] = useState(null);
   const [actionError, setActionError] = useState('');
+  const [adding, setAdding] = useState(false);
 
   const remove = useCallback(async (record) => {
     if (!window.confirm(`홈넷 장치 등록을 삭제합니다.\n\n${record.complex} ${record.building}동 ${record.unit}호`)) return;
@@ -55,18 +57,28 @@ export default function Homenet() {
             등록 {data.records.length} · 단지·동·호 조합이 장치의 신원입니다
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={reload} disabled={refreshing}>
-          <RefreshCw className={refreshing ? 'animate-spin' : undefined} />
-          새로고침
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={reload} disabled={refreshing}>
+            <RefreshCw className={refreshing ? 'animate-spin' : undefined} />
+            새로고침
+          </Button>
+          <Button size="sm" onClick={() => { setActionError(''); setAdding(true); }}>
+            <Plus className="size-4" />
+            장치 추가
+          </Button>
+        </div>
       </div>
 
       {data.records.length === 0 ? (
         <Card>
-          <CardContent className="py-10 text-center text-sm text-muted-foreground">
+          <CardContent className="space-y-3 py-10 text-center text-sm text-muted-foreground">
             <span className="inline-flex items-center gap-2">
               <House className="size-4" /> 등록된 홈넷 장치가 없습니다.
             </span>
+            {/* 여기가 비어 있으면 그 단지의 모바일 등록은 전부 409 no_wallpad 다. */}
+            <p className="text-xs">
+              세대가 하나도 없으면 앱의 등록 요청이 모두 거부됩니다 (<code>no_wallpad</code>).
+            </p>
           </CardContent>
         </Card>
       ) : (
@@ -105,6 +117,14 @@ export default function Homenet() {
           </CardContent>
         </Card>
       )}
+
+      <HomenetForm
+        open={adding}
+        // 이미 있는 행의 단지 표기를 물려준다 (HomenetForm 주석 참고).
+        defaultComplex={data.records[0]?.complex}
+        onOpenChange={setAdding}
+        onSaved={reload}
+      />
     </>
   );
 }

@@ -19,13 +19,11 @@
  */
 
 import express, { Request, Response, NextFunction } from 'express';
-import config from '../config';
 import { getGateway } from '../gateway';
-import { DbConn } from '../libs/dbConnection';
 import logger from '../libs/logger'; // Import your configured logger
 import { normalizeSipUser, SIP_USER_ERROR } from '../libs/sipUser';
 import { requestEnrollment, issueDeviceCert } from '../libs/enrollment';
-import { PLACE_PART_RE } from '../libs/address';
+import { saveHomenetRecord } from '../libs/homenetRecord';
 import { onEnrollmentPending } from '../libs/enrollmentEvents';
 import { complexId as serverComplexId, COMPLEX_ID_RE, COMPLEX_ID_ERROR } from '../libs/complex';
 
@@ -273,53 +271,33 @@ async function handlePostComplexAgents(req: Request, res: Response) {
     }
 
     /*
-     * ── 동/호 형식을 본다 ────────────────────────────────────────
+     * 행을 만드는 규칙은 libs/homenetRecord.ts 에 있다.
      *
-     * 이 경로도 무인증이다. 예전에는 building·unit 이 자유 문자열이라 아무 값이나
-     * 넣어 행을 **끝없이 만들 수 있었다.** 그리고 이 표는 "그 집에 월패드가
-     * 있는가" 를 판단하는 근거이므로, 여기가 무제한이면 모바일 등록의 상한도
-     * 함께 무너진다 (공격자가 게이트를 직접 심고 그 주소로 등록하면 된다).
-     *
-     * 형식을 좁히면 행 수가 실제 동/호 조합으로 묶인다.
+     * 관리 화면에도 같은 일을 하는 입구가 있어서(대시보드의 '홈넷 장치 추가'),
+     * 동/호 형식 검사와 단지 채우기가 두 곳으로 갈라지면 이 표가 지키는 상한이
+     * 조용히 무너진다. 이 경로는 장치가 부팅할 때마다 부르므로 upsert 다 —
+     * 같은 세대가 다시 오면 IP 를 갱신한다.
      */
-    if (!PLACE_PART_RE.test(String(building)) || !PLACE_PART_RE.test(String(unit))) {
-        res.status(400).json({
-            error: 'invalid_place',
-            message: 'building 과 unit 은 영문·숫자·- 8자 이내여야 합니다.',
-        });
-        return;
-    }
-
-    /*
-     * complex_id — 이 서버의 단지로 못박는다.
-     *
-     * 표시용 `complex` 는 자유 문자열이라 그것만으로는 단지를 셀 수 없었다.
-     * 모바일과 같은 규칙이다 (schema/004-complex-id.sql).
-     */
-    const serverId = serverComplexId();
-
-    // (complex, building, unit) 에 UNIQUE 가 걸려 있다.
-    const sql = `INSERT INTO ${config.tables.homenet}
-                    (complex, complex_id, type, building, unit, ipaddress)
-                 VALUES (?, ?, ?, ?, ?, ?)
-                 ON DUPLICATE KEY UPDATE
-                    complex_id = COALESCE(VALUES(complex_id), complex_id),
-                    type = VALUES(type), ipaddress = VALUES(ipaddress)`;
-
+    let outcome;
     try {
-        const result = await DbConn.execute(sql, [complex, serverId, type, building, unit, ipaddress]);
-        const created = result.affectedRows === 1;
-        logger.info(`homenet ${created ? 'registered' : 'updated'}: ${complex}/${building}/${unit}`);
-        res.status(200).json({
-            title: 'websocket-relay',
-            result: 'success',
-            message: created ? 'Your registration has been saved successfully.'
-                             : 'Your registration has been updated successfully.',
-        });
+        outcome = await saveHomenetRecord(req.body, 'upsert');
     } catch (err: any) {
         logger.error('homenet 등록 실패:', err.message);
         res.status(500).json({ error: 'registration failed' });
+        return;
     }
+
+    if (!outcome.ok) {
+        res.status(400).json({ error: outcome.code, message: outcome.message });
+        return;
+    }
+
+    res.status(200).json({
+        title: 'websocket-relay',
+        result: 'success',
+        message: outcome.value.created ? 'Your registration has been saved successfully.'
+                                       : 'Your registration has been updated successfully.',
+    });
 }
 
 /**

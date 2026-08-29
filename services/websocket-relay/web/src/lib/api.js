@@ -73,6 +73,7 @@ export const api = {
   deleteMobile: (id) => request(`/mobiles/${id}`, { method: 'DELETE' }),
 
   homenet: () => request('/homenet'),
+  createHomenet: (body) => request('/homenet', { method: 'POST', body: JSON.stringify(body) }),
   deleteHomenet: (id) => request(`/homenet/${id}`, { method: 'DELETE' }),
 
   // 등록 승인

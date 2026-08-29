@@ -11,6 +11,7 @@ import { requireAuth } from '../auth/session';
 import config from '../config';
 import { getGateway } from '../gateway';
 import { createMobileRecord, updateMobileRecord, statusFor } from '../libs/mobileRecord';
+import { saveHomenetRecord } from '../libs/homenetRecord';
 import { Firebase } from '../libs/firebaseAdmin';
 import { analyze, install, installedStatus, remove } from '../libs/firebaseKey';
 import logger from '../libs/logger';
@@ -556,6 +557,32 @@ export function createDashboardApi(): Router {
             res.json({ records: rows });
         } catch (err: any) {
             fail(res, err, 'Failed to fetch homenet records');
+        }
+    });
+
+    /**
+     * 홈넷 장치를 손으로 넣는다.
+     *
+     * 정상 경로는 월패드가 스스로 `POST /register/complex_agents` 를 부르는
+     * 것이다. 이 화면은 **그 전에** 세대를 열어 둬야 할 때 쓴다 — 월패드가 아직
+     * 없는 집의 모바일 등록을 시험하려면, 이 표에 그 동/호가 있어야 `409
+     * no_wallpad` 를 넘어설 수 있기 때문이다 (libs/enrollment.ts).
+     *
+     * ⚠️ 여기에 넣은 세대는 **그 집 사람이 아닌 단말도 등록 대기까지 올 수 있게**
+     *    한다. 대기는 아무 권한이 없고 승인이 있어야 통화·제어가 열리므로
+     *    (schema/005-enrollment.sql) 곧바로 위험해지지는 않지만, 시험이 끝나면
+     *    지우는 편이 맞다.
+     *
+     * 규칙은 장치 경로와 같은 것을 쓴다 (libs/homenetRecord.ts).
+     */
+    router.post('/homenet', async (req: Request, res: Response) => {
+        try {
+            const result = await saveHomenetRecord(req.body, 'create');
+            if (!result.ok) return res.status(statusFor(result.kind)).json({ error: result.message });
+            logger.info(`[dashboard] homenet ${result.value.id} created (by ${(req as any).user?.username})`);
+            res.status(201).json({ id: result.value.id });
+        } catch (err: any) {
+            fail(res, err, 'Failed to create homenet record');
         }
     });
 
