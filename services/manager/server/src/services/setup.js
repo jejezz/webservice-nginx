@@ -140,22 +140,27 @@ const STEPS = [
   {
     id: 'sip.accounts',
     service: 'kamailio',
-    title: 'SIP 계정 만들기',
+    title: 'SIP 계정 만들기 (인터폰)',
     why:
-      '인터폰과 단말이 쓸 내선을 만듭니다. **비밀번호는 사람이 정합니다** — ' +
-      '기계가 대신 정할 수 없습니다. 무엇이 만들어져 있는지는 아래 점검이 보여 주고, ' +
-      '**쓸 것이 다 있는지**는 사람이 판단합니다.',
+      '**여기서 만들 것은 인터폰 계정뿐입니다.** 모바일(`<세대>01~04`)과 ' +
+      '월패드(`<세대>00`)는 websocket-relay 가 승인·등록 때 스스로 만들고 ' +
+      '비밀번호도 그때 발급합니다 (docs/identity.md). 인터폰은 사람이 장비에 ' +
+      '값을 넣어야 하므로 그 자리만 남습니다. 무엇이 만들어져 있는지는 아래 ' +
+      '점검이 보여 주고, **쓸 것이 다 있는지**는 사람이 판단합니다.',
     requires: ['kamailio.config'],
     command: {
       cwd: 'services/kamailio',
-      run: "sudo /usr/sbin/kamctl add 1001 '내선1001비밀번호'\nsudo /usr/sbin/kamctl show",
+      run: "sudo /usr/sbin/kamctl add '<인터폰번호>' '<비밀번호>'\nsudo /usr/sbin/kamctl show",
       sudo: true,
     },
     guide: { text: 'kamailio 대시보드에서도 만들 수 있습니다', href: '/kamailio/' },
     // 무엇이 있는지는 기계가 보여 주고(도메인이 어긋난 계정·비밀번호가 빈 계정도
     // 잡는다), **쓸 것이 다 있는지**는 사람이 판단한다. 그 판단만은 대신할 수 없다.
+    //
+    // 모바일·월패드가 relay 로 넘어간 뒤에도 이 단계를 남기는 이유는, 인터폰이
+    // 없으면 걸 사람이 없기 때문이다 — 그 계정은 여전히 사람이 만든다.
     check: { cwd: 'services/kamailio', file: './check-accounts.sh', args: ['--check', '--json'] },
-    attest: { question: '위 목록에 쓸 내선이 다 있습니까? (인터폰·모바일 각각)' },
+    attest: { question: '인터폰이 쓸 계정이 위 목록에 있습니까? (모바일·월패드는 relay 가 만듭니다)' },
   },
   {
     id: 'janus.deps',

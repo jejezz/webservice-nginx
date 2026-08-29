@@ -201,7 +201,7 @@ janus 의 '설정' 화면에서 이미 이 방식을 썼고 동작을 확인했�
 전부를 기계가 확인할 수는 없습니다.
 
 - 공유기에 UDP 포워딩을 열었는가
-- SIP 계정을 만들었는가 (비밀번호는 사람이 정합니다 — `kamailio/accounts.md`)
+- 인터폰이 쓸 SIP 계정을 만들었는가 (모바일·월패드는 relay 가 만듭니다 — `docs/identity.md`)
 - 인터폰을 설치했는가
 
 이런 단계는 `manualOnly: true` 로 두고, 사람의 확인을 **시각과 함께 기록**하되
@@ -231,7 +231,7 @@ database ─┬─────────────────────�
 | 2 | pm2 설치·부팅 등록 | `pm2.apps` | ✅ | `pm2/ecosystem.config.js --check-json` |
 | 3 | Kamailio 패키지·그룹·DB | `kamailio.deps` | ✅ | `services/kamailio/bootstrap.sh` |
 | 4 | Kamailio 설정 포크 설치 | `kamailio.config` | ✅ | `services/kamailio/install.sh` |
-| 5 | SIP 계정 만들기 | `sip.accounts` | ❌ 사람 | `check-accounts.sh` ⭐ + **쓸 것이 다 있는지는 사람의 확인** |
+| 5 | SIP 계정 만들기 (인터폰) | `sip.accounts` | ❌ 사람 | `check-accounts.sh` ⭐ + **인터폰 계정이 있는지는 사람의 확인** |
 | 6 | Janus 빌드 의존성 | `janus.deps` | ✅ | `services/janus/bootstrap.sh` |
 | 7 | **Janus 소스 빌드** | `janus.build` | ✅ 사람 | **사람의 확인만** — 오래 걸리고 실패 지점이 많음 |
 | 8 | Janus 설정·유닛 | `janus.config` | ✅ | `services/janus/install.sh` |

@@ -13,8 +13,10 @@
 #   ③ 깨우러 갈 상대가 살아 있는가             (websocket-relay /health)
 #   ④ 깨울 단말을 찾을 수 있는가               (rtc_mobiles.sip_user)
 #
-# ④ 가 이 흐름에서 가장 자주 비어 있는 자리입니다 — 단말 앱이 /register 에
-# sipUser 를 함께 보내야 채워지고, 안 보내면 조용히 아무 일도 일어나지 않습니다.
+# ④ 는 예전에 이 흐름에서 가장 자주 비어 있는 자리였습니다 — 단말 앱이 /register
+# 에 sipUser 를 보내야 채워졌고, 안 보내면 조용히 아무 일도 일어나지 않았습니다.
+# 지금은 **서버가 승인 시점에 배정합니다** (docs/identity.md). 규칙이 생기기 전에
+# 승인된 단말만 비어 있고, 그것은 npm run sip:backfill 로 채웁니다.
 #
 set -euo pipefail
 
@@ -139,7 +141,8 @@ else
         if [[ "${mapped:-0}" -gt 0 ]]; then
             ok "SIP 내선이 연결된 단말: ${mapped}대 (등록 단말 ${total:-0}대)"
         else
-            pend "SIP 내선이 연결된 단말이 없습니다 (등록 단말 ${total:-0}대) — 앱이 /register 에 sipUser 를 함께 보내야 합니다"
+            pend "SIP 내선이 연결된 단말이 없습니다 (등록 단말 ${total:-0}대) — 승인이 한 번도 없었거나, 규칙이 생기기 전에 승인된 단말입니다"
+            info "         cd services/websocket-relay && npm run sip:backfill   (docs/identity.md)"
         fi
     elif [[ -z "$has_column" ]]; then
         skip "${DB_NAME} 에 접속하지 못해 확인을 건너뜁니다"

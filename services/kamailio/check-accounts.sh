@@ -75,7 +75,7 @@ else
         skip "subscriber 테이블을 읽지 못해 확인을 건너뜁니다 (DB 접속 실패)"
     elif [[ "$TOTAL" -eq 0 ]]; then
         pend "계정이 하나도 없습니다 — 아무도 등록할 수 없습니다"
-        info "         sudo /usr/sbin/kamctl add 1001 '<비밀번호>'   (accounts.md)"
+        info "         sudo /usr/sbin/kamctl add '<인터폰번호>' '<비밀번호>'   (accounts.md)"
     else
         ok "계정 ${TOTAL}개"
 
@@ -101,4 +101,5 @@ fi
 check_finish
 
 echo ""
-echo "계정을 만드는 것은 사람의 몫입니다 — accounts.md 를 보세요."
+echo "모바일(<세대>01~04)과 월패드(<세대>00)는 websocket-relay 가 만듭니다 — docs/identity.md"
+echo "사람이 만들 것은 인터폰 계정입니다 — accounts.md 를 보세요."
