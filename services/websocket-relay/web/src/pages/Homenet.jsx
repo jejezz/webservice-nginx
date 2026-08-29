@@ -17,7 +17,7 @@ export default function Homenet() {
   const [adding, setAdding] = useState(false);
 
   const remove = useCallback(async (record) => {
-    if (!window.confirm(`홈넷 장치 등록을 삭제합니다.\n\n${record.complex} ${record.building}동 ${record.unit}호`)) return;
+    if (!window.confirm(`홈넷 장치 등록을 삭제합니다.\n\n${record.building}동 ${record.unit}호`)) return;
     setBusy(record.id);
     setActionError('');
     try {
@@ -87,7 +87,7 @@ export default function Homenet() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>단지</TableHead>
+                  <TableHead>단지 ID</TableHead>
                   <TableHead>동</TableHead>
                   <TableHead>호</TableHead>
                   <TableHead>종류</TableHead>
@@ -99,7 +99,13 @@ export default function Homenet() {
               <TableBody>
                 {data.records.map((r) => (
                   <TableRow key={r.id}>
-                    <TableCell className="text-xs">{r.complex}</TableCell>
+                    {/*
+                      표시 이름 대신 단지코드를 보여준다. 이름은 월패드가 보내던
+                      자유 문자열이었고 오타가 세대를 복제했다 (schema/008).
+                    */}
+                    <TableCell className="font-mono text-xs">
+                      {r.complex_id || <span className="text-muted-foreground">미설정</span>}
+                    </TableCell>
                     <TableCell className="font-mono text-xs">{r.building}</TableCell>
                     <TableCell className="font-mono text-xs">{r.unit}</TableCell>
                     <TableCell className="text-xs">{r.type}</TableCell>
@@ -120,8 +126,6 @@ export default function Homenet() {
 
       <HomenetForm
         open={adding}
-        // 이미 있는 행의 단지 표기를 물려준다 (HomenetForm 주석 참고).
-        defaultComplex={data.records[0]?.complex}
         onOpenChange={setAdding}
         onSaved={reload}
       />

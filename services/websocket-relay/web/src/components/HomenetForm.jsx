@@ -15,13 +15,16 @@ import { Label } from '@/components/ui/label';
  * 모바일 등록이 `409 no_wallpad` 로 끝나서, 월패드가 없는 집에서는 앱의 등록
  * 흐름을 한 걸음도 볼 수 없기 때문이다.
  *
- * 수정은 없다. 단지·동·호가 곧 이 행의 신원이고 나머지(종류·IP)는 장치가
- * 붙으면서 제 값으로 덮어쓰므로, 고칠 것이 있으면 지우고 다시 넣는 편이 낫다.
+ * 수정은 없다. 동·호가 곧 이 행의 신원이고 나머지(종류·IP)는 장치가 붙으면서
+ * 제 값으로 덮어쓰므로, 고칠 것이 있으면 지우고 다시 넣는 편이 낫다.
+ *
+ * **단지는 묻지 않는다.** 한 서버가 한 단지를 맡으므로 이 서버에 넣는 행은
+ * 정의상 이 단지다 — 서버가 자기 단지 ID 를 채운다 (schema/008).
  */
 
-const EMPTY = { complex: '', type: 'wallpad', building: '', unit: '', ipaddress: '' };
+const EMPTY = { type: 'wallpad', building: '', unit: '', ipaddress: '' };
 
-export default function HomenetForm({ open, defaultComplex, onOpenChange, onSaved }) {
+export default function HomenetForm({ open, onOpenChange, onSaved }) {
   const [form, setForm] = useState(EMPTY);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -29,10 +32,8 @@ export default function HomenetForm({ open, defaultComplex, onOpenChange, onSave
   useEffect(() => {
     if (!open) return;
     setError('');
-    // 단지 이름은 이미 등록된 행의 값을 물려준다 — 표기가 갈리면 같은 집이 두
-    // 행이 되고, 등록 검사는 (단지 ID, 동, 호) 로 보므로 둘 다 문을 열어 둔다.
-    setForm({ ...EMPTY, complex: defaultComplex ?? '' });
-  }, [open, defaultComplex]);
+    setForm(EMPTY);
+  }, [open]);
 
   const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
 
@@ -41,7 +42,6 @@ export default function HomenetForm({ open, defaultComplex, onOpenChange, onSave
     setError('');
 
     const body = {
-      complex: form.complex.trim(),
       type: form.type.trim() || 'wallpad',
       building: form.building.trim(),
       unit: form.unit.trim(),
@@ -49,9 +49,9 @@ export default function HomenetForm({ open, defaultComplex, onOpenChange, onSave
       ipaddress: form.ipaddress.trim(),
     };
 
-    const missing = ['complex', 'building', 'unit'].filter((k) => !body[k]);
+    const missing = ['building', 'unit'].filter((k) => !body[k]);
     if (missing.length > 0) {
-      setError('단지 이름, 동, 호를 채우세요.');
+      setError('동, 호를 채우세요.');
       return;
     }
 
@@ -86,11 +86,9 @@ export default function HomenetForm({ open, defaultComplex, onOpenChange, onSave
       )}
 
       <form onSubmit={submit} className="grid gap-3 sm:grid-cols-2">
-        <div className="grid gap-1.5 sm:col-span-2">
-          <Label htmlFor="h-complex">단지 이름</Label>
-          <Input id="h-complex" value={form.complex} onChange={set('complex')} placeholder="플루토 1단지" />
-          <p className="text-xs text-muted-foreground">단지 ID 는 서버가 자기 값으로 채웁니다.</p>
-        </div>
+        <p className="text-xs text-muted-foreground sm:col-span-2">
+          단지는 묻지 않습니다 — 서버가 자기 단지 ID 를 채웁니다.
+        </p>
 
         <div className="grid gap-1.5">
           <Label htmlFor="h-building">동</Label>

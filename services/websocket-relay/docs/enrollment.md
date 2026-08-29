@@ -561,13 +561,21 @@ POST https://<host>/relay/register/complex_agents
 Content-Type: application/json
 
 {
-  "complex":   "플루토 1단지",
   "type":      "wallpad",
   "building":  "1",              // 영문·숫자·- 8자 이내
   "unit":      "101",            // 영문·숫자·- 8자 이내
   "ipaddress": "192.168.0.9"
 }
 ```
+
+> **단지는 보내지 않습니다.** 예전에는 `complex`(표시 이름)가 필수였는데, 그 값이
+> 세대의 열쇠에까지 들어가 있어 오타 하나가 같은 집을 두 행으로 만들었습니다
+> (schema/008-homenet-complex-id.sql). 한 서버가 한 단지를 맡으므로 이 서버에 온
+> 등록은 정의상 이 단지입니다 — 서버가 자기 단지 ID 를 채웁니다. 옛 월패드가
+> `complex` 를 보내와도 오류가 아니며, 그냥 무시됩니다.
+>
+> 응답에는 이 월패드의 SIP 자격(`sip`)이 실려 옵니다 —
+> [identity.md](../../../docs/identity.md) 를 보세요.
 
 | 응답 | 뜻 |
 |---|---|

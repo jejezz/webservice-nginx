@@ -655,9 +655,11 @@ export function createDashboardApi(): Router {
     router.get('/homenet', async (req: Request, res: Response) => {
         try {
             const rows = await DbConn.select(
-                `SELECT id, complex, type, building, unit, ipaddress, created, modified
-                   FROM ${config.tables.homenet} ORDER BY complex, building, unit`);
-            res.json({ records: rows });
+                `SELECT id, complex_id, type, building, unit, ipaddress, created, modified
+                   FROM ${config.tables.homenet} ORDER BY building, unit`);
+            // 표시 이름(complex)은 더 이상 채우지 않는다. 화면은 단지코드를 보여준다
+            // (schema/008-homenet-complex-id.sql).
+            res.json({ complexId: complexId(), records: rows });
         } catch (err: any) {
             fail(res, err, 'Failed to fetch homenet records');
         }

@@ -124,7 +124,7 @@ implementation 'org.json:json:20240303'   // Android 에 기본 포함(org.json)
 |---|---|---|
 | POST | `/register/mobile` | `{uuid, email, complex, address, token, phone?, image?}` — 응답에 `sip` |
 | POST | `/unregister/mobile` | `{uuid}` |
-| POST | `/register/complex_agents` | `{complex, type, building, unit, ipaddress}` — 응답에 `sip` |
+| POST | `/register/complex_agents` | `{type, building, unit, ipaddress}` — 단지는 서버가, 응답에 `sip` |
 | GET | `/register/findip?address=rtc:...@...` | — |
 | GET | `/status/rooms` | — |
 | POST | `/room/invite` | `{target, source}` |

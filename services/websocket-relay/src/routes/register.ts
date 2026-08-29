@@ -277,9 +277,12 @@ async function handlePostMobile(req: Request, res: Response) {
  * @return JSON response with success/error status
  */
 async function handlePostComplexAgents(req: Request, res: Response) {
-    const { complex, type, building, unit, ipaddress } = req.body ?? {};
-    if (!complex || !type || !building || !unit || !ipaddress) {
-        res.status(400).json({ error: 'complex, type, building, unit, ipaddress 는 필수입니다.' });
+    // complex(표시 이름)는 더 이상 받지 않는다. 단지는 서버가 안다 —
+    // 이 서버에 온 등록은 정의상 이 서버의 단지다 (libs/homenetRecord.ts).
+    // 옛 월패드가 보내와도 무시할 뿐 오류로 만들지 않는다.
+    const { type, building, unit, ipaddress } = req.body ?? {};
+    if (!type || !building || !unit || !ipaddress) {
+        res.status(400).json({ error: 'type, building, unit, ipaddress 는 필수입니다.' });
         return;
     }
 

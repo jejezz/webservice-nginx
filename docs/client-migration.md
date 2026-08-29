@@ -143,8 +143,19 @@ INVITE 를 붙들고 있는 시간이 60초입니다. 등록이 끝나면 붙들
 
 ## ③ 월패드
 
-`POST /register/complex_agents` 응답에 `sip` 가 실립니다. 모바일과 같은 모양이고,
-번호는 `<세대>00` 입니다.
+보내는 값에서 **`complex`(단지 표시 이름)가 빠졌습니다.**
+
+```jsonc
+POST /register/complex_agents
+{ "type": "wallpad", "building": "101", "unit": "805", "ipaddress": "192.168.0.9" }
+```
+
+단지는 서버가 압니다 — 한 서버가 한 단지를 맡고 서버 간 통화가 없으므로, 이
+서버에 온 등록은 정의상 이 단지입니다. 월패드는 인트라넷에만 있어 단지 정보를
+바깥에서 받아 올 수도 없고, 사람에게 입력시킬 이유도 없습니다. 옛 월패드가
+`complex` 를 계속 보내와도 오류가 아니며 무시됩니다.
+
+응답에 `sip` 가 실립니다. 모바일과 같은 모양이고, 번호는 `<세대>00` 입니다.
 
 - **부팅마다 불러도 같은 값이 옵니다.** 이미 있으면 비밀번호를 새로 발급하지
   않습니다 (`libs/sipAccount.ts` 의 `ensure`)
@@ -208,12 +219,13 @@ services/janus/verify-call.sh --run
 | 월패드 자리 | `services/websocket-relay/src/libs/homenetRecord.ts` |
 | 착신 푸시 | `services/websocket-relay/src/routes/sipPush.ts` |
 | 기존 단말 백필 | `services/websocket-relay/scripts/backfill-sip-number.ts` (`npm run sip:backfill`) |
-| 안드로이드 예제 | `services/websocket-relay/example/android/` — `okhttp/WsRelayApiClient.java` 의 `RegisterApi.mobile()`, `okhttp/models/RegisterResult.java` (둘 다 `sip` 를 아직 모릅니다) |
+| 안드로이드 예제 | `services/websocket-relay/example/android/` — `okhttp/models/SipCredential.java`(새로 만듦) · `RegisterResult.java` 가 `sip` 를 읽습니다. kotlin·java 쪽은 `RelayRestApi.sipCredential()` |
 | Janus 등록 절차 | `docs/client-guide.md` 3절 |
 
 ## 지금 서버 상태 (2026-08-29)
 
-- 마이그레이션 `007-sip-number` 적용됨 (`sip_seq` + `UNIQUE(complex_id, address, sip_seq)`)
+- 마이그레이션 `007-sip-number` (`sip_seq` + `UNIQUE(complex_id, address, sip_seq)`) 와
+  `008-homenet-complex-id` (홈넷 열쇠를 표시 이름에서 단지코드로) 적용됨
 - 계정 6개 — `0101080500`(101동 805호 월패드) · `0101080501`(같은 세대 모바일) ·
   `9999999901`~`04`(시험용 세대 9999동 9999호)
 - 인터폰 계정은 **아직 없습니다.** 번호 규칙만 정해져 있습니다

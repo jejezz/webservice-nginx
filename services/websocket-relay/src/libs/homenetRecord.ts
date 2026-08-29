@@ -36,8 +36,16 @@ export type HomenetResult<T> =
     /** 그 세대가 이미 있다 → 409 */
     | { ok: false; kind: 'duplicate'; code: string; message: string };
 
-/** 이 표에 반드시 있어야 하는 값. `ipaddress` 는 빠져 있다 — 아래 참고. */
-const REQUIRED = ['complex', 'type', 'building', 'unit'] as const;
+/**
+ * 이 표에 반드시 있어야 하는 값. `ipaddress` 는 빠져 있다 — 아래 참고.
+ *
+ * **`complex`(표시 이름)도 빠져 있다.** 예전에는 필수였고 월패드가 보내 줬는데,
+ * 그것이 세대의 열쇠에까지 들어가 있어서 오타 하나가 같은 집을 두 행으로
+ * 만들었다 (schema/008-homenet-complex-id.sql). 단지는 **서버가 아는 것**이다 —
+ * 한 서버가 한 단지를 맡고 서버 간 통화가 없으므로, 이 서버에 등록하는 장치는
+ * 정의상 이 단지다. 월패드에게 물을 이유가 없다.
+ */
+const REQUIRED = ['type', 'building', 'unit'] as const;
 
 export const PLACE_ERROR = 'building 과 unit 은 영문·숫자·- 8자 이내여야 합니다.';
 
@@ -63,7 +71,6 @@ export async function saveHomenetRecord(
         };
     }
 
-    const complex = String(body.complex).trim();
     const type = String(body.type).trim();
     const building = String(body.building).trim();
     const unit = String(body.unit).trim();
@@ -83,13 +90,11 @@ export async function saveHomenetRecord(
     const id = complexId();
 
     /*
-     * 중복 판정은 **표의 UNIQUE 가 아니라 등록이 보는 것**으로 한다.
+     * 이미 있는지는 **등록이 보는 것과 같은 조건**으로 확인한다.
      *
-     * UNIQUE 는 (complex, building, unit) — 표시 이름이 열쇠에 들어 있다.
-     * 그래서 같은 집을 "플루토 1단지" 와 "플루토1단지" 로 두 번 넣을 수 있고,
-     * 모바일 등록은 (complex_id, building, unit) 으로 찾으므로 **둘 다 맞는
-     * 세대로 본다.** 화면에서 지울 때 하나만 지우면 남은 행이 계속 문을 열어
-     * 둔다. 그래서 손으로 넣는 쪽은 등록이 보는 것과 같은 조건으로 막는다.
+     * 표의 UNIQUE 도 이제 같은 조합이다 (schema/008). 그래도 여기서 먼저 보는
+     * 이유는 사람에게 "이미 있습니다" 라고 말해 주기 위해서다 — 제약에 걸린
+     * 예외를 그대로 올리면 화면에 뜨는 말이 SQL 오류가 된다.
      */
     if (mode === 'create') {
         const existing = await DbConn.select(
@@ -104,19 +109,26 @@ export async function saveHomenetRecord(
         }
     }
 
-    // (complex, building, unit) 에 UNIQUE 가 걸려 있다.
+    /*
+     * 열쇠는 (complex_key, building, unit) 이다 — complex_key 는 complex_id 의
+     * NULL 을 빈 문자열로 접은 가상 컬럼이다 (schema/008).
+     *
+     * `complex`(표시 이름)는 **쓰지 않는다.** 월패드가 보내와도 저장하지 않는다 —
+     * 그 값이 무엇이든 이 서버에 온 등록은 이 서버의 단지이기 때문이다. 컬럼은
+     * 옛 데이터를 위해 남아 있을 뿐이다.
+     */
     const result = await DbConn.execute(
         `INSERT INTO ${config.tables.homenet}
-            (complex, complex_id, type, building, unit, ipaddress)
-         VALUES (?, ?, ?, ?, ?, ?)
+            (complex_id, type, building, unit, ipaddress)
+         VALUES (?, ?, ?, ?, ?)
          ON DUPLICATE KEY UPDATE
             complex_id = COALESCE(VALUES(complex_id), complex_id),
             type = VALUES(type), ipaddress = VALUES(ipaddress)`,
-        [complex, id, type, building, unit, ipaddress]);
+        [id, type, building, unit, ipaddress]);
 
     // affectedRows 는 새로 넣었으면 1, 갱신했으면 2다 (ON DUPLICATE KEY UPDATE).
     const created = result.affectedRows === 1;
-    logger.info(`homenet ${created ? 'registered' : 'updated'}: ${complex}/${building}/${unit}`);
+    logger.info(`homenet ${created ? 'registered' : 'updated'}: ${id ?? '(단지 미설정)'}/${building}/${unit}`);
 
     /*
      * 월패드 자리(`<세대>00`)의 SIP 계정. 모바일의 01~04 와 같은 대역이다
