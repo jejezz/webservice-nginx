@@ -71,8 +71,63 @@
 Firebase 콘솔 → 빌드 → **Firestore Database** → 데이터베이스 만들기.
 
 - 위치: `asia-northeast3` (서울)
-- 모드: **프로덕션 모드** (테스트 모드는 30일 뒤 전부 잠깁니다)
+- **Native 모드** ← 아래 참고. 여기서 잘못 고르면 되돌리기 번거롭습니다
+- 보안 규칙: **프로덕션 모드**로 시작 (테스트 모드는 30일 뒤 전부 잠깁니다)
 - Realtime Database 가 아니라 **Firestore** 입니다
+
+> ⚠️ **Native 모드 / Datastore 모드**
+>
+> 데이터베이스를 만들 때 고르는 값인데, 나중에 이 도구를 돌릴 때에야 잘못을
+> 알게 됩니다. Datastore 모드로 만들면 이렇게 실패합니다.
+>
+> ```
+> 9 FAILED_PRECONDITION: The Cloud Firestore API is not available for
+> Firestore in Datastore Mode database projects/<프로젝트>/databases/(default).
+> ```
+>
+> Firestore 클라이언트 SDK(= `firebase-admin` 의 `firestore()`)는 **Native
+> 모드에서만** 동작합니다. GCP 콘솔에서 만들면 Datastore 모드가 기본으로 잡히는
+> 경우가 있습니다.
+>
+> **고치는 법 ① — 모드를 바꾼다 (비어 있을 때)**
+>
+> ```bash
+> gcloud firestore databases update --type=firestore-native --database='(default)'
+> ```
+>
+> - 데이터가 **하나라도 있으면 거부됩니다.** 전부 지우고 다시 하세요
+> - 몇 분 걸리고 그동안 쓰기가 거부됩니다
+> - `gcloud` 를 깔지 않았다면 브라우저의 **Cloud Shell** 에서 그대로 실행하면 됩니다
+>
+> **고치는 법 ② — 지우고 다시 만든다**
+>
+> ```bash
+> gcloud firestore databases delete --database='(default)'
+> # 삭제한 ID 는 약 5분 뒤에 다시 쓸 수 있습니다
+> gcloud firestore databases create --database='(default)' \
+>        --location=asia-northeast3 --type=firestore-native
+> ```
+>
+> ①과 결과는 같습니다. 비어 있다면 ①이 더 간단합니다 — 삭제도 대기도 없습니다.
+> **콘솔에서 다시 만들지 마세요.** 애초에 Datastore 모드가 된 경로가 그쪽이라
+> 같은 실수를 반복하기 쉽습니다. `--type` 을 명시하는 편이 확실합니다.
+>
+> **고치는 법 ③ — Native 모드 DB 를 따로 만든다**
+>
+> 기본 DB 를 Datastore 모드로 쓰고 있어 건드릴 수 없을 때입니다.
+>
+> ```bash
+> gcloud firestore databases create --database=directory \
+>        --location=asia-northeast3 --type=firestore-native
+> ```
+>
+> 그리고 도구에 그 이름을 줍니다.
+>
+> ```bash
+> FIRESTORE_DATABASE_ID=directory npm run directory -- push tools/directory.json
+> ```
+>
+> `npm run directory -- check` 가 실패하면 이 안내를 그대로 출력합니다.
 
 ### 1-2. 보안 규칙
 
@@ -127,6 +182,9 @@ regions/41135
 cd services/websocket-relay
 cp tools/directory.example.json tools/directory.json   # 편집
 npm run directory -- check                             # 자격·연결만 확인
+
+# 기본 DB 가 Datastore 모드라 별도 DB 를 만든 경우 (1-1 참고)
+FIRESTORE_DATABASE_ID=directory npm run directory -- check
 npm run directory -- push tools/directory.json --dry-run
 npm run directory -- push tools/directory.json
 npm run directory -- pull                              # 올라간 내용 확인
