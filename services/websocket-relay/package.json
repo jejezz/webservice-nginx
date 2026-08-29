@@ -43,7 +43,8 @@
     "nginx:check": "../../nginx/install_nginx_stack.sh --check",
     "nginx:apply": "sudo ../../nginx/install_nginx_stack.sh --skip-install",
     "directory": "node tools/directory.js",
-    "fcm": "node tools/fcm.js"
+    "fcm": "node tools/fcm.js",
+    "sip:backfill": "tsx scripts/backfill-sip-number.ts"
   },
   "repository": {
     "type": "git",
