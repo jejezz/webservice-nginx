@@ -16,7 +16,7 @@ __UPSTREAMS__
 server {
     listen __LISTEN_PORT__;
     server_name __SERVER_NAME__;
-
+__ACME_CHALLENGE__
     # Redirect HTTP to HTTPS
     return 301 https://__HTTPS_REDIRECT_HOST__$request_uri;
 }

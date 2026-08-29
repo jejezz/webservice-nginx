@@ -380,6 +380,7 @@ class Stack:
         client_ca = t("client_ca")
         self.client_ca = os.path.join(cert_dir, client_ca) if client_ca else ""
         self.verify_client = t("verify_client")
+        self.acme_webroot = t("acme_webroot")
 
     def check_files(self):
         missing = [p for p in (self.cert, self.key) if not os.path.isfile(p)]
@@ -387,6 +388,29 @@ class Stack:
             missing.append(self.client_ca)
         if missing:
             die("인증서 파일이 없습니다:\n  " + "\n  ".join(missing))
+
+    def acme_challenge_block(self):
+        """Let's Encrypt HTTP-01 챌린지 예외.
+
+        80 포트 서버는 조건 없이 301 로 HTTPS 에 넘긴다. 그 앞에 이 location 을
+        두어 챌린지 경로만 평문으로 응답하게 한다. Let's Encrypt 는 반드시 80 으로
+        들어오고 포트를 지정할 수 없어서, 이 자리가 없으면 검증이 통과하지 못한다.
+
+        `^~` 는 정규식 location 보다 먼저 확정하라는 뜻이다. 이게 없으면 뒤에
+        붙는 다른 규칙에 따라 순서가 흔들릴 수 있다.
+
+        acme_webroot 를 비우면 아무것도 만들지 않는다 — 예전 동작 그대로다.
+        """
+        if not self.acme_webroot:
+            return ""
+        return (
+            "\n    # Let's Encrypt HTTP-01. 아래 301 보다 먼저 잡아야 한다.\n"
+            f"    location ^~ /.well-known/acme-challenge/ {{\n"
+            f"        root {self.acme_webroot};\n"
+            "        default_type \"text/plain\";\n"
+            "        try_files $uri =404;\n"
+            "    }\n"
+        )
 
     def redirect_map(self):
         """공유기 포트 포워딩 대응.
@@ -458,6 +482,7 @@ def render(stack, services, template_text):
         ("__SSL_CERTIFICATE__", stack.cert),
         ("__MAX_BODY__", stack.max_body_block()),
         ("__SSL_CLIENT_VERIFY__", stack.client_verify_block()),
+        ("__ACME_CHALLENGE__", stack.acme_challenge_block()),
         ("__DEFAULT_ROUTE__", stack.default_route_block()),
     ):
         output = output.replace(placeholder, value)
