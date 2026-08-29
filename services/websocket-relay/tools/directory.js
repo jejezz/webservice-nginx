@@ -29,6 +29,19 @@ const path = require('path');
 const admin = require('firebase-admin');
 
 const SERVICE_DIR = path.resolve(__dirname, '..');
+
+/**
+ * `.env` 를 읽는다. **`DATABASE_ID` 를 정하기 전에** 불러야 한다.
+ *
+ * src/config.ts 와 scripts/lib/env.ts 는 이미 이렇게 한다. 이 도구만 빠져 있어서
+ * `.env` 에 `FIRESTORE_DATABASE_ID` 를 적어도 조용히 무시되고 `(default)` 를
+ * 봤다. 셸에서 앞에 붙여 준 값(`FIRESTORE_DATABASE_ID=x npm run directory`)은
+ * dotenv 가 이미 있는 값을 덮어쓰지 않으므로 그대로 이긴다.
+ *
+ * cwd 가 아니라 서비스 디렉터리 기준이다 — 어디서 부르든 같은 파일을 본다.
+ */
+require('dotenv').config({ path: path.join(SERVICE_DIR, '.env'), quiet: true });
+
 const KEY_FILE = path.resolve(
     SERVICE_DIR,
     process.env.FIREBASE_SERVICE_ACCOUNT_PATH || 'secrets/firebase-admin.json'
@@ -243,6 +256,7 @@ async function cmdCheck() {
     console.log(`프로젝트   ${key.project_id}`);
     console.log(`서비스계정 ${key.client_email}`);
     console.log(`키 ID      ${key.private_key_id}`);
+    console.log(`데이터베이스 ${DATABASE_ID || '(default)'}`);
     console.log('\n토큰을 받아 봅니다...');
     try {
         await admin.credential.cert(key).getAccessToken();

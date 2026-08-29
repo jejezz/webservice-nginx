@@ -121,9 +121,15 @@ Firebase 콘솔 → 빌드 → **Firestore Database** → 데이터베이스 만
 >        --location=asia-northeast3 --type=firestore-native
 > ```
 >
-> 그리고 도구에 그 이름을 줍니다.
+> 그리고 도구에 그 이름을 줍니다. `.env` 에 적어 두면 매번 붙이지 않아도 됩니다.
 >
 > ```bash
+> # .env 에 한 번 적어 둔다
+> FIRESTORE_DATABASE_ID=directory
+> ```
+>
+> ```bash
+> # 또는 그때만 앞에 붙인다 (.env 값보다 우선한다)
 > FIRESTORE_DATABASE_ID=directory npm run directory -- push tools/directory.json
 > ```
 >
@@ -187,7 +193,8 @@ cd services/websocket-relay
 cp tools/directory.example.json tools/directory.json   # 편집
 npm run directory -- check                             # 자격·연결만 확인
 
-# 기본 DB 가 Datastore 모드라 별도 DB 를 만든 경우 (1-1 참고)
+# 기본 DB 가 Datastore 모드라 별도 DB 를 만든 경우 (1-1 참고).
+# .env 의 FIRESTORE_DATABASE_ID 를 읽는다. 앞에 붙이면 그 값이 이긴다.
 FIRESTORE_DATABASE_ID=directory npm run directory -- check
 npm run directory -- push tools/directory.json --dry-run
 npm run directory -- push tools/directory.json
