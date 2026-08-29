@@ -275,7 +275,9 @@ node pm2/ecosystem.config.js --check-json
 
 셸이 아니라 node 라 `lib/check-report.sh` 를 쓸 수 없어 같은 형식을 직접 냅니다.
 `nginx` 도 마찬가지로 파이썬 생성기가 직접 냅니다 (래퍼는 `--json` 을 그쪽으로
-넘기기만 합니다).
+넘기기만 합니다). `websocket-relay` 는 TypeScript 라 `scripts/lib/ui.ts` 의
+`Reporter` 가 같은 형식을 냅니다 — 그쪽은 `ok`·`warn`·`bad` 셋만 알던 것에
+`pend` 를 더해 `pending` 과 `problem` 을 갈랐습니다.
 
 ### `cert-status.sh` 는 `--check` 를 더해서 갈랐습니다
 
@@ -330,6 +332,7 @@ node pm2/ecosystem.config.js --check-json
 | `nginx/public_ca/cert-status.sh` | `public_ca.nginx` | ✅ **`--check --json`** (위 예외) |
 | `nginx/public_ca/renew-status.sh` | `public_ca.renew` | ✅ 확인 전용 |
 | `nginx/public_ca/check-dns.sh` | `public_ca.dns` | ✅ 확인 전용 |
+| `services/websocket-relay/check-relay.sh` | `relay.service` | ✅ 확인 전용 (`npm run doctor` 를 감싼다) |
 
 **"확인 전용"** 은 적용 기능이 없는 스크립트라는 뜻입니다. 나머지는 원래
 적용도 하는 스크립트에 점검 모드가 함께 있는 것들입니다.

@@ -3,9 +3,9 @@
 서비스를 **어떤 순서로 무엇을 채워야 하는지** 화면이 안내하고, 사람이 한 일을
 **실제로 됐는지 확인한 뒤** 다음으로 넘기는 웹 화면의 설계입니다.
 
-> 상태: **다섯 단계 모두 구현됨. 열린 질문 다섯도 닫혔습니다.**
-> 점검 규약(`--json`)이 진입점 16곳에 붙었고 ([check-contract.md](check-contract.md)),
-> manager 의 `/manager/setup` 이 **17단계 전부**(필수 11 · 선택 6)를 돌립니다.
+> 상태: **여섯 단계 모두 구현됨. 열린 질문 다섯도 닫혔습니다.**
+> 점검 규약(`--json`)이 진입점 17곳에 붙었고 ([check-contract.md](check-contract.md)),
+> manager 의 `/manager/setup` 이 **18단계 전부**(필수 12 · 선택 6)를 돌립니다.
 > 뒤의 넷은 공인 인증서(Let's Encrypt)입니다 — 발급 · nginx 에 물리기 ·
 > 90일 갱신 · 이름이 이 서버를 가리키나 (아래 '5단계에서 정한 것'). 기계가 확인할 수
 > 없는 것은 사람의 확인을 기록하되 `attested` 로 따로 표시하고, 장비마다 다른
@@ -237,19 +237,21 @@ database ─┬─────────────────────�
 | 8 | Janus 설정·유닛 | `janus.config` | ✅ | `services/janus/install.sh` |
 | 9 | 대시보드 빌드 | `janus.dashboard` | ❌ | `services/janus/setup-dashboard.sh` |
 | 10 | nginx 라우트 반영 | `nginx.routes` | ✅ | `nginx/install_nginx_stack.sh` |
-| 11 | 시험 통화 | `janus.verify.call` | ❌ | `verify-call.sh --check` — **`--run` 이 남긴 결과 파일을 읽는다** |
-| 12 | 외부 브라우저 (선택) | `janus.publicip` | ❌ | `check-public-ip.sh` + **포워딩은 사람의 확인** |
-| 13 | 착신 푸시 (선택) | `push.incoming` | ✅ | `services/kamailio/check-push.sh` ⭐ |
-| 14 | 공인 인증서 발급 (선택) | `public_ca.issue` | ✅ | `nginx/public_ca/setup_letsencrypt.sh` ⭐ |
-| 15 | nginx 에 물리기 (선택) | `public_ca.nginx` | ✅ | `nginx/public_ca/cert-status.sh` ⭐ |
-| 16 | 90일 자동 갱신 (선택) | `public_ca.renew` | ✅ | `nginx/public_ca/renew-status.sh` ⭐ |
-| 17 | 이름이 이 서버를 가리키나 (선택) | `public_ca.dns` | ❌ | `nginx/public_ca/check-dns.sh` |
+| 11 | **websocket-relay 설치·기동** | `relay.service` | ❌ | `services/websocket-relay/check-relay.sh` (= `npm run doctor`) |
+| 12 | 시험 통화 | `janus.verify.call` | ❌ | `verify-call.sh --check` — **`--run` 이 남긴 결과 파일을 읽는다** |
+| 13 | 외부 브라우저 (선택) | `janus.publicip` | ❌ | `check-public-ip.sh` + **포워딩은 사람의 확인** |
+| 14 | 착신 푸시 (선택) | `push.incoming` | ✅ | `services/kamailio/check-push.sh` ⭐ |
+| 15 | 공인 인증서 발급 (선택) | `public_ca.issue` | ✅ | `nginx/public_ca/setup_letsencrypt.sh` ⭐ |
+| 16 | nginx 에 물리기 (선택) | `public_ca.nginx` | ✅ | `nginx/public_ca/cert-status.sh` ⭐ |
+| 17 | 90일 자동 갱신 (선택) | `public_ca.renew` | ✅ | `nginx/public_ca/renew-status.sh` ⭐ |
+| 18 | 이름이 이 서버를 가리키나 (선택) | `public_ca.dns` | ❌ | `nginx/public_ca/check-dns.sh` |
 
-⭐ 는 3단계(1·5·13)와 5단계(14·15·16)에서 새로 쓴 점검입니다. 1·13 은 붙일 곳이 없었습니다 —
+⭐ 는 3단계(1·5·14)와 5단계(15·16·17)에서 새로 쓴 점검입니다. 1·14 는 붙일 곳이 없었습니다 —
 `setup_mariadb.sh` 는 root 로 도는 적용 스크립트고, 착신 푸시는 네 조각이
 서로 다른 서비스에 흩어져 있어 주인이 없었습니다.
 
-14~17 은 공인 인증서(Let's Encrypt)입니다. 넷 다 **선택**입니다 — LAN 전용
+11 은 websocket-relay 입니다. 모바일이 이 게이트웨이와 만나는 유일한 자리라
+필수로 둡니다 (아래 '6단계에서 정한 것'). 15~18 은 공인 인증서(Let's Encrypt)입니다. 넷 다 **선택**입니다 — LAN 전용
 설치는 사설 CA 로 계속 도는 것이 옳고, 공인 이름을 받을 수 없는 배치도 있기
 때문입니다. 자세한 것은 아래 '5단계에서 정한 것' 과
 [nginx/public_ca/README.md](../nginx/public_ca/README.md) 에 있습니다.
@@ -624,6 +626,72 @@ LAN 전용 설치는 사설 CA 로 계속 도는 것이 옳고, 공인 이름을
 `--prod` 가 성공하면 무엇을 발급했는지 `.applied-settings` 에 남기므로,
 도메인이나 메일을 바꿔 놓고 다시 받지 않은 상태가 `pending` 으로 드러납니다.
 
+## 6단계에서 정한 것 — websocket-relay 를 붙이면서
+
+점검은 이미 있었습니다. `npm run doctor` 가 여덟 자리(설정·의존성·대시보드
+빌드·FCM·DB·pm2·nginx·`/health`)를 보고 문제마다 해결 명령을 붙여 줍니다.
+**판정을 낼 통로만 없었습니다.**
+
+그래서 착신 푸시(`push.incoming`)가 relay 의 `/health` 한 줄만 보고 있었습니다.
+그 서비스가 제대로 설치됐는지 — `.env` 가 있는지, 마이그레이션이 다 돌았는지,
+재부팅 뒤에도 뜰지 — 는 마법사 어디에도 없었습니다.
+
+### 필수로 둡니다
+
+모바일이 이 게이트웨이와 만나는 **유일한 자리**입니다. WebRTC 시그널링도
+IoT 도 착신 푸시도 전부 여기를 지나고, 깨울 단말을 찾는 표(`rtc_mobiles`)도
+이 서비스가 들고 있습니다. 이것이 없으면 Kamailio 가 INVITE 를 붙들어 둔 채
+깨우러 갈 데가 없습니다.
+
+`push.incoming` 의 `requires` 를 `nginx.routes` 에서 `relay.service` 로 바꿨습니다.
+깨우러 갈 상대가 서 있어야 그 단계가 의미를 갖고, `relay.service` 가 이미
+`nginx.routes` 를 걸고 있어 순서는 그대로입니다.
+
+### `bad` 하나를 `pend` 와 `bad` 로 쪼갰습니다
+
+`Reporter` 는 `ok`·`warn`·`bad` 셋만 알았습니다. 규약에는 넷이 있고, 그중
+**`pending`(아직 안 한 것)과 `problem`(잘못된 것)의 차이가 판정을 가릅니다.**
+
+```
+✗ .env 가 없습니다.            → npm run setup      ← 아직 안 한 것   pending
+✗ COMPLEX_ID 형식이 잘못됐습니다                      ← 잘못된 것      problem
+```
+
+앞은 새로 세우는 장비의 정상적인 상태이고, 뒤는 고장입니다. 한 레벨로 묶으면
+처음 세우는 사람에게 마법사가 온통 "문제" 라고 말하게 됩니다.
+
+**사람이 보는 출력은 둘 다 그대로 `✗` 입니다** — `check-report.sh` 가 `skip` 과
+`pend` 를 둘 다 `[--]` 로 두는 것과 같은 이유입니다. `contract()` 를 부르지
+않으면 `Reporter` 는 예전과 똑같이 동작하므로 `setup`·`db-migrate`·`db-status`
+는 아무것도 달라지지 않았습니다.
+
+`warn` 은 `skip` 이 됩니다. doctor 의 `warn` 은 원래 "선택 기능이 꺼져 있다"
+(FCM 키 없음)거나 "확인하지 못했다"(DB 비밀번호를 못 읽음) 였고, 둘 다
+판정에 넣으면 안 되는 것들입니다.
+
+### 껍데기를 한 겹 둘렀습니다 — `check-relay.sh`
+
+`doctor.ts` 는 `tsx` 로 도는데 `tsx` 는 `node_modules` 안에 있습니다. **아직
+`npm install` 을 안 한 장비에서는 점검이 실행조차 되지 않습니다.** 그대로 두면
+마법사는 `unknown` 과 함께 "실행할 수 없습니다 (ENOENT)" 만 말합니다 — 사실이지만
+무엇을 해야 하는지는 알려 주지 않습니다.
+
+셸 껍데기가 그 한 경우만 먼저 잡아 `pending` 으로 바꿔 줍니다.
+
+```json
+{ "level": "pending", "text": "node_modules 가 없어 점검을 돌릴 수 없습니다 → cd services/websocket-relay && npm install" }
+```
+
+이유가 하나 더 있습니다. 마법사의 실행기는 **셸 스크립트와 node 만** 압니다
+(`setup.js` 의 `resolveCheck`). `tsx` 는 모릅니다.
+
+### 값을 받는 폼은 두지 않았습니다
+
+`settings.ini` 는 `키 = 값` 이고 `.env` 는 dotenv 형식이라 같은 파일이 될 수
+없습니다. 그리고 무엇을 물어야 하는지는 `npm run setup` 이 이미 알고 있습니다
+(DB 비밀번호 확인, 단지 ID 생성까지 합니다). 마법사는 **그 결과**를 봅니다 —
+`.env` 가 있는가, `COMPLEX_ID` 가 소문자 16진수 8자인가, 세션 시크릿이 있는가.
+
 ## 설치본이 낡은 것을 잡는다 — 열린 질문 4
 
 `wt_timer` 가 그렇게 걸렸습니다. 저장소에는 있는데 설치본에는 없었고, 훅이
@@ -708,6 +776,7 @@ DB 비밀번호가 박히고 있었습니다.
 | 3 | 13단계 전부 + `manualOnly` 확인 기록 | ✅ |
 | 4 | 파라미터 입력 폼 (janus `settings.ini` 방식을 다른 서비스로) | ✅ |
 | 5 | **공인 인증서** 발급·물리기·갱신·DNS 네 단계 (`nginx/public_ca/`) | ✅ |
+| 6 | **websocket-relay** — 이미 있던 `npm run doctor` 를 규약에 잇는다 | ✅ |
 
 **1단계를 앞으로 당긴 것이 이번 설계의 가장 큰 변경입니다.** 판정 근거 없이 화면을
 먼저 만들면, 마법사가 "완료" 라고 말하는데 실제로는 안 된 상태를 만들어 냅니다.
@@ -716,9 +785,9 @@ DB 비밀번호가 박히고 있었습니다.
 2단계도 위험합니다 — manager 가 자식 프로세스를 돌리는 것이 처음이라, 거기서
 경계를 잘못 잡으면 나머지가 다 그 위에 쌓입니다.
 
-## 지금 어디까지 왔나 (2026-08-22 확인 · 공인 인증서 넷은 2026-08-29)
+## 지금 어디까지 왔나 (2026-08-22 확인 · 11 과 15~18 은 2026-08-29)
 
-이 장비에서 마법사를 한 바퀴 돌린 결과입니다. **필수 11단계 중 9 통과.**
+이 장비에서 마법사를 한 바퀴 돌린 결과입니다. **필수 12단계 중 10 통과.**
 
 | # | 단계 | 상태 |
 |---|---|---|
@@ -732,15 +801,16 @@ DB 비밀번호가 박히고 있었습니다.
 | 8 | `janus.config` | ✅ |
 | 9 | `janus.dashboard` | ✅ |
 | 10 | `nginx.routes` | ✅ |
-| 11 | `janus.verify.call` | ✅ 실제 통화 통과 (양방향 297패킷, opus) |
-| 12 | `janus.publicip` (선택) | 공인 IP 일치 — **포워딩 확인만 남음** |
-| 13 | `push.incoming` (선택) | 서버 쪽 네 자리 다 붙음 — **단말이 `sipUser` 를 보내면 채워짐** |
-| 14 | `public_ca.issue` (선택) | ✅ `c-a3f19c04.rtc.zoomon.art` 운영 서버에서 발급됨 |
-| 15 | `public_ca.nginx` (선택) | ✅ 설정도 실물도 공인 인증서 (`fullchain.pem`) |
-| 16 | `public_ca.renew` (선택) | ✅ 타이머 활성·부팅 등록 · 갱신 훅 있음 · 89일 남음 |
-| 17 | `public_ca.dns` (선택) | ✅ A 레코드가 현재 공인 IP 와 같음 |
+| 11 | `relay.service` | ✅ 여덟 자리 전부 — `.env` · 의존성 · 대시보드 빌드 · FCM 키 · 마이그레이션 6개 · pm2 · nginx · `/health` |
+| 12 | `janus.verify.call` | ✅ 실제 통화 통과 (양방향 297패킷, opus) |
+| 13 | `janus.publicip` (선택) | 공인 IP 일치 — **포워딩 확인만 남음** |
+| 14 | `push.incoming` (선택) | 서버 쪽 네 자리 다 붙음 — **단말이 `sipUser` 를 보내면 채워짐** |
+| 15 | `public_ca.issue` (선택) | ✅ `c-a3f19c04.rtc.zoomon.art` 운영 서버에서 발급됨 |
+| 16 | `public_ca.nginx` (선택) | ✅ 설정도 실물도 공인 인증서 (`fullchain.pem`) |
+| 17 | `public_ca.renew` (선택) | ✅ 타이머 활성·부팅 등록 · 갱신 훅 있음 · 89일 남음 |
+| 18 | `public_ca.dns` (선택) | ✅ A 레코드가 현재 공인 IP 와 같음 |
 
-14~17 은 **이미 되어 있던 것을 마법사가 확인한 것**입니다. 이 장비는 이관이
+11 과 15~18 은 **이미 되어 있던 것을 마법사가 확인한 것**입니다. 이 장비는 이관이
 끝나 있었고, 마법사는 그것을 판정할 통로가 없었을 뿐입니다. 넷 다 돌리는 데
 1.3초입니다 (대부분 DNS·80 포트 확인의 네트워크 왕복).
 
@@ -776,6 +846,7 @@ nginx/install_nginx_stack.sh --check
 services/janus/verify-call.sh            # --run 은 실제로 90초 걸린다
 services/janus/check-public-ip.sh
 services/kamailio/check-push.sh
+services/websocket-relay/check-relay.sh          # = npm run doctor
 nginx/public_ca/setup_letsencrypt.sh --check    # 발급 전 준비 + 발급 여부
 nginx/public_ca/cert-status.sh --check          # 지금 무엇이 나가고 있나
 nginx/public_ca/renew-status.sh                 # 90일 뒤에도 나갈 것인가
@@ -790,8 +861,11 @@ nginx/public_ca/check-dns.sh                    # 이름이 아직 이 서버를
    DB 를 세우는 것이 1단계이기 때문입니다 (위 '확인 기록은 파일에').
 3. ~~**다른 서비스의 설정도 `settings.ini` 방식으로 옮길지**~~ — 답했습니다.
    스키마를 데이터로 내리고 kamailio 에도 붙였습니다 (위 '스키마를 데이터로').
-   `websocket-relay` 는 아직 두었습니다 — 자기 `.env` 로 값을 받고 있고,
-   13단계 어디에서도 파라미터를 묻지 않습니다.
+   `websocket-relay` 는 아직 두었습니다. 11단계로 들어왔지만 값은 여전히
+   자기 `.env` 가 받습니다 — `settings.ini` 는 `키 = 값` 이고 `.env` 는
+   dotenv 형식이라 같은 파일이 될 수 없고, 무엇을 물어야 하는지는
+   `npm run setup` 이 이미 알고 있습니다. 점검은 그 결과(`.env` 가 있는가,
+   `COMPLEX_ID` 형식이 맞는가)를 봅니다.
 4. ~~**설치본이 저장소보다 낡은 것을 어떻게 알아챌지**~~ — 답했습니다.
    `lib/config-diff.sh` 로 파일 단위 비교를 넣었고, 붙이자마자 nginx 에서
    하나 더 나왔습니다 (위 '설치본이 낡은 것을 잡는다').

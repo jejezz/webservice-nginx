@@ -263,6 +263,7 @@ tools/            디렉터리 등록·FCM 시험용 일회성 도구
 |---|---|
 | `npm run setup` | 처음부터 끝까지. 여러 번 돌려도 안전합니다 |
 | `npm run doctor` | 고치지 않고 상태만 점검. 문제마다 해결 명령을 붙여 줍니다 |
+| `./check-relay.sh` | 같은 점검을 구축 마법사가 읽는 형식으로 (`--check --json`) |
 | `npm run db:migrate` | `schema/*.sql` 중 아직 적용되지 않은 것을 적용 |
 | `npm run db:status` | 마이그레이션·표별 행 수·인덱스·최근 등록 |
 | `npm run web:build` | 관리 대시보드 빌드 (`web/dist`) |
@@ -281,6 +282,14 @@ npm run setup                                # 3. .env → 대시보드 빌드 �
 npm run nginx:apply                          # 4. nginx 반영 (최초 1회, 라우팅 변경 시)
 npm run doctor                               # 5. 점검
 ```
+
+`/manager/setup` 의 **11단계 `relay.service`** 가 같은 점검을 돌립니다
+([setup-wizard.md](../../docs/setup-wizard.md)). 마법사는 `./check-relay.sh` 를
+부르는데, 그것은 `node_modules` 가 아직 없는 경우만 따로 잡고(그때는 `doctor`
+자체가 실행되지 않습니다) 나머지는 `doctor` 에게 넘기는 껍데기입니다.
+
+착신 푸시(`push.incoming`)가 이 단계를 `requires` 로 겁니다 — Kamailio 가
+붙들어 둔 INVITE 를 들고 깨우러 가는 상대가 이 서비스이기 때문입니다.
 
 **DB 와 계정은 이 서비스가 만들지 않습니다.** `database/database.ini` 가
 선언하고 `sudo database/setup_mariadb.sh` 가 적용합니다 — 계정과 권한을 정하는

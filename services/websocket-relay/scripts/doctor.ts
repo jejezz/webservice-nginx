@@ -5,6 +5,17 @@
  * 문제가 있으면 항목마다 해결 명령을 붙이고 종료 코드 1로 끝난다.
  *
  * 몇 달 뒤 "왜 안 되지" 싶을 때 제일 먼저 돌릴 것.
+ *
+ * ── 구축 마법사도 이것을 읽는다 ──────────────────────────────────
+ *
+ *     npm run doctor -- --check --json
+ *
+ * 같은 점검을 docs/check-contract.md 의 형식으로 낸다 (단계 relay.service).
+ * 마법사가 부르는 자리는 ../check-relay.sh 다 — node_modules 가 없으면 이
+ * 파일은 실행조차 되지 않으므로, 그 경우를 셸 쪽에서 먼저 말해 준다.
+ *
+ * 그래서 여기서는 `bad`(잘못된 것)와 `pend`(아직 안 한 것)를 가른다. 사람이
+ * 보는 출력은 둘 다 똑같이 ✗ 다 — 갈라지는 것은 마법사가 읽는 판정뿐이다.
  */
 
 import fs from 'fs';
@@ -21,6 +32,10 @@ import { Reporter } from './lib/ui';
 const report = new Reporter();
 
 async function main(): Promise<void> {
+    const argv = process.argv.slice(2);
+    const asJson = argv.includes('--json');
+    if (asJson || argv.includes('--check')) report.contract('relay.service', asJson);
+
     loadEnv();
 
     checkEnv();
@@ -40,7 +55,7 @@ function checkEnv(): void {
     report.step('설정');
 
     if (!envExists()) {
-        report.bad('.env 가 없습니다.', 'npm run setup');
+        report.pend('.env 가 없습니다.', 'npm run setup');
         return;
     }
     report.ok('.env 있음');
@@ -49,7 +64,7 @@ function checkEnv(): void {
     report.ok(`DB 대상: ${db.user}@${db.host}:${db.port}/${db.database}`);
 
     if (!db.password) {
-        report.bad(`DB 비밀번호를 읽을 수 없습니다: ${db.passwordFile}`, `sudo ${DB_SETUP}`);
+        report.pend(`DB 비밀번호를 읽을 수 없습니다: ${db.passwordFile}`, `sudo ${DB_SETUP}`);
     } else {
         report.info(`비밀번호 출처: ${db.passwordFrom}`);
     }
@@ -67,7 +82,7 @@ function checkEnv(): void {
     // manager 로그인 세션을 이 시크릿으로 검증한다. 없으면 대시보드가 전부 막힌다.
     const secret = resolveFromRoot(process.env.SESSION_SECRET_FILE || '../.session-secret');
     if (fs.existsSync(secret)) report.ok('manager 세션 시크릿 있음');
-    else report.bad(`세션 시크릿이 없어 대시보드 접근이 모두 거부됩니다: ${secret}`, 'services/manager 를 먼저 기동하세요.');
+    else report.pend(`세션 시크릿이 없어 대시보드 접근이 모두 거부됩니다: ${secret}`, 'services/manager 를 먼저 기동하세요.');
 }
 
 // ── 의존성 ───────────────────────────────────────────
@@ -75,7 +90,7 @@ function checkDeps(): void {
     report.step('의존성');
 
     if (!fs.existsSync(path.join(ROOT, 'node_modules'))) {
-        report.bad('node_modules 가 없습니다.', 'npm install');
+        report.pend('node_modules 가 없습니다.', 'npm install');
         return;
     }
     report.ok('node_modules 있음');
@@ -83,7 +98,7 @@ function checkDeps(): void {
     // pm2 는 tsx 로 src/index.ts 를 바로 실행한다 (pm2-conf/app.ini).
     // 그래서 dist/ 는 필요 없지만 tsx 는 반드시 있어야 한다.
     if (fs.existsSync(path.join(ROOT, 'node_modules', '.bin', 'tsx'))) report.ok('tsx 있음');
-    else report.bad('tsx 가 없습니다 — pm2 가 서비스를 실행할 수 없습니다.', 'npm install');
+    else report.pend('tsx 가 없습니다 — pm2 가 서비스를 실행할 수 없습니다.', 'npm install');
 }
 
 // ── 대시보드 ─────────────────────────────────────────
@@ -92,14 +107,14 @@ function checkDashboard(): void {
 
     const indexHtml = path.join(DASHBOARD_DIR, 'index.html');
     if (!fs.existsSync(indexHtml)) {
-        report.bad('web/dist 빌드가 없습니다 — /dashboard 가 503 을 줍니다.', 'npm run web:build');
+        report.pend('web/dist 빌드가 없습니다 — /dashboard 가 503 을 줍니다.', 'npm run web:build');
         return;
     }
 
     // 소스가 빌드보다 새로우면 화면이 옛것이다. 눈에 안 보이는 종류의 문제라 표시한다.
     const builtAt = fs.statSync(indexHtml).mtimeMs;
     const newest = newestFileTime(path.join(ROOT, 'web', 'src'));
-    if (newest > builtAt) report.bad('web/dist 가 소스보다 오래됐습니다.', 'npm run web:build');
+    if (newest > builtAt) report.pend('web/dist 가 소스보다 오래됐습니다.', 'npm run web:build');
     else report.ok(`빌드 있음 (${BASE_PATH}${process.env.DASHBOARD_PATH || '/dashboard'})`);
 }
 
@@ -176,17 +191,17 @@ async function checkDatabase(): Promise<void> {
 
         for (const table of [mobile, homenet]) {
             if (present.has(table)) report.ok(`표 ${table}`);
-            else report.bad(`표 ${table} 이 없습니다.`, 'npm run db:migrate');
+            else report.pend(`표 ${table} 이 없습니다.`, 'npm run db:migrate');
         }
 
         if (!present.has('schema_migrations')) {
-            report.bad('schema_migrations 가 없습니다 — 스키마가 적용되지 않았습니다.', 'npm run db:migrate');
+            report.pend('schema_migrations 가 없습니다 — 스키마가 적용되지 않았습니다.', 'npm run db:migrate');
         } else {
             const [applied] = await conn.query<mysql.RowDataPacket[]>('SELECT version FROM schema_migrations');
             const have = new Set(applied.map((r) => String(r.version)));
             const missing = migrations().filter((m) => !have.has(m.version));
             if (missing.length > 0) {
-                report.bad(`미적용 마이그레이션 ${missing.length}개: ${missing.map((m) => m.file).join(', ')}`, 'npm run db:migrate');
+                report.pend(`미적용 마이그레이션 ${missing.length}개: ${missing.map((m) => m.file).join(', ')}`, 'npm run db:migrate');
             } else {
                 report.ok(`마이그레이션 ${have.size}개 모두 적용됨`);
             }
@@ -197,6 +212,10 @@ async function checkDatabase(): Promise<void> {
 }
 
 // ── pm2 ──────────────────────────────────────────────
+// pm2 가 이 서비스를 아직 안 띄웠으면 /health 가 안 되는 것은 결과이지 원인이
+// 아니다. 그때 '고장' 이라고 말하면 엉뚱한 데를 뒤지게 만든다.
+let started = true;
+
 function checkPm2(): void {
     report.step('pm2');
 
@@ -204,15 +223,19 @@ function checkPm2(): void {
     try {
         list = JSON.parse(execFileSync('pm2', ['jlist'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }));
     } catch {
-        report.bad('pm2 를 실행할 수 없습니다.', 'npm install -g pm2');
+        report.pend('pm2 를 실행할 수 없습니다.', 'npm install -g pm2');
+        started = false;
         return;
     }
 
     const app = list.find((a) => a.name === APP_NAME);
     if (!app) {
-        report.bad(`'${APP_NAME}' 가 pm2 목록에 없습니다.`, 'npm start');
+        // 아직 안 띄운 것이지 고장이 아니다. 아래 '동작 확인' 도 이것을 본다.
+        report.pend(`'${APP_NAME}' 가 pm2 목록에 없습니다.`, 'npm start');
+        started = false;
     } else if (app.pm2_env.status !== 'online') {
         report.bad(`'${APP_NAME}' 가 ${app.pm2_env.status} 입니다.`, 'npm run logs');
+        started = false;
     } else {
         report.ok(`'${APP_NAME}' online (재시작 ${app.pm2_env.restart_time}회)`);
     }
@@ -229,7 +252,7 @@ function checkPm2(): void {
     if (fs.existsSync(dump) && fs.readFileSync(dump, 'utf8').includes(`"${APP_NAME}"`)) {
         report.ok('재부팅 복원 목록에 포함됨');
     } else {
-        report.bad('pm2 스냅샷에 없습니다 — 재부팅하면 안 뜹니다.', 'pm2 save');
+        report.pend('pm2 스냅샷에 없습니다 — 재부팅하면 안 뜹니다.', 'pm2 save');
     }
 }
 
@@ -247,7 +270,7 @@ function checkNginx(): void {
         if (fs.readFileSync(NGINX_LIVE_CONF, 'utf8').includes(`location ${BASE_PATH}/`)) {
             report.ok(`nginx 에 ${BASE_PATH}/ 반영됨`);
         } else {
-            report.bad('nginx 에 아직 반영되지 않았습니다.', 'npm run nginx:apply');
+            report.pend('nginx 에 아직 반영되지 않았습니다.', 'npm run nginx:apply');
         }
     } catch {
         report.warn('nginx 설정을 읽을 수 없어 반영 여부를 확인하지 못했습니다.');
@@ -276,7 +299,8 @@ async function checkHealth(): Promise<void> {
         if (body.details?.database?.error) report.fix(`DB: ${body.details.database.error}`);
         if (body.details?.dashboardBuild === false) report.fix('npm run web:build');
     } catch (err) {
-        report.bad(`${url} 응답 없음: ${message(err)}`, 'npm run logs');
+        if (started) report.bad(`${url} 응답 없음: ${message(err)}`, 'npm run logs');
+        else report.pend(`${url} 응답 없음 — 아직 뜨지 않았습니다 (위 pm2 항목을 먼저)`, 'npm start');
     }
 }
 
