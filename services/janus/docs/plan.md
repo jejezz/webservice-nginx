@@ -1354,7 +1354,7 @@ a=candidate:1 1 udp … 192.168.0.252 20000 typ host
 ./check-public-ip.sh --write  # settings.ini 의 public_ip 만 갈아 끼운다 (적용은 별개)
 ```
 
-공인 IP 는 **공개 이름(`www.zoomon.art`)을 DNS 로 풀어** 알아냅니다.
+공인 IP 는 **이 단지의 공개 이름(`c-a3f19c04.rtc.zoomon.art`)을 DNS 로 풀어** 알아냅니다.
 외부 IP 확인 서비스에 묻지 않습니다 — 바깥으로 요청을 하나 덜 보냅니다.
 `JANUS_DDNS_NAME` 으로 다른 이름을 줄 수 있습니다.
 

@@ -71,7 +71,7 @@ dig +short A <도메인>         # 같은 값이 나와야 한다
 ### 1. 점검 — 아무것도 바꾸지 않습니다
 
 ```bash
-./setup_letsencrypt.sh --check www.zoomon.art
+./setup_letsencrypt.sh --check c-a3f19c04.rtc.zoomon.art
 ```
 
 DNS·80 포트·webroot·certbot 넷을 봅니다. **여기서 막히는 것을 먼저 없애세요.**
@@ -80,7 +80,7 @@ DNS·80 포트·webroot·certbot 넷을 봅니다. **여기서 막히는 것을 
 ### 2. 시험 발급
 
 ```bash
-./setup_letsencrypt.sh --staging www.zoomon.art
+./setup_letsencrypt.sh --staging c-a3f19c04.rtc.zoomon.art
 ```
 
 **staging 을 건너뛰지 마세요.** Let's Encrypt 는 같은 이름 조합에 **주 5건**
@@ -95,7 +95,7 @@ certbot 이 같은 계보를 갱신하려 들어 먼저 지워야 하는데, 나
 ### 3. 실제 발급
 
 ```bash
-./setup_letsencrypt.sh --prod -m <메일주소> www.zoomon.art
+./setup_letsencrypt.sh --prod -m <메일주소> c-a3f19c04.rtc.zoomon.art
 ```
 
 `-m` 은 만료 알림을 받을 주소입니다. 없으면 **자동 갱신이 조용히 멈춘 것을

@@ -31,7 +31,7 @@ INSTALLED_CFG="/opt/janus/etc/janus/janus.jcfg"
 # 예전에는 공유기의 DDNS(jejezzhome.iptime.org)를 봤지만 그 이름은 삭제됐다.
 # 지금은 등록기관에 둔 A 레코드를 본다. 이름이 고정값이라 회선 IP 가 바뀌면
 # 레코드를 갱신해 주어야 한다 — 공유기가 알아서 하던 일이 사라졌다.
-DDNS_NAME="${JANUS_DDNS_NAME:-www.zoomon.art}"
+DDNS_NAME="${JANUS_DDNS_NAME:-c-a3f19c04.rtc.zoomon.art}"
 
 # 점검 출력은 공용 규약을 따른다 (docs/check-contract.md).
 source "${SCRIPT_DIR}/../../lib/check-report.sh"

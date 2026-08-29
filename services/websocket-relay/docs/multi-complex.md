@@ -242,7 +242,7 @@ rtc:1B101U@호스트이름    ← 옛 형식. 판단하지 않고 통과
 
 ```
 issuer  : Let's Encrypt          (공인)
-CN/SAN  : www.zoomon.art
+CN/SAN  : c-a3f19c04.rtc.zoomon.art
 검증    : Verify return code 0   ← 시스템 신뢰 저장소만으로
 갱신    : certbot.timer active   ← 90일마다 자동
 ```
@@ -259,10 +259,13 @@ CN/SAN  : www.zoomon.art
   "이 기기가 진짜인가" 는 사설 CA 가 계속 맡되, 공인 인증서가 생긴 덕분에
   단말 인증서를 안전하게 내려보낼 통로가 생겼습니다.
 
-남은 것은 **이름**입니다. 지금 인증서는 시험용 `www.zoomon.art` 이고,
-실제로는 단지마다 `c-<complexId>.rtc.<도메인>` 이 필요합니다. 배포용 도메인
-(`ptype.co.kr`)으로 옮길 때는 네임서버를 옮기지 말고 `rtc.` 하위 존만
-위임하세요 — apex 에 회사 메일이 걸려 있습니다.
+이름은 설계대로 `c-<complexId>.rtc.<도메인>` 입니다. 단지 ID 는 서버 `.env` 의
+`COMPLEX_ID` 와 같은 값이라 인증서 이름만 보고도 어느 단지인지 압니다.
+
+남은 것은 **도메인**입니다. 지금은 개인 도메인(`zoomon.art`)으로 운용 중이고,
+배포용(`ptype.co.kr`)으로 옮길 때는 **네임서버를 옮기지 말고** `rtc.` 하위 존만
+위임하세요 — apex 에 회사 메일(mailplug)과 SPF 가 걸려 있어, 레코드를 하나라도
+빠뜨리면 회사 메일이 죽습니다.
 
 ### 3. 앱 쪽
 

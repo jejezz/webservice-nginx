@@ -42,8 +42,8 @@ usage() {
   -h, --help           도움말
 
 예:
-  ./setup_letsencrypt.sh --check   www.zoomon.art
-  ./setup_letsencrypt.sh --staging www.zoomon.art
+  ./setup_letsencrypt.sh --check   c-a3f19c04.rtc.zoomon.art
+  ./setup_letsencrypt.sh --staging c-a3f19c04.rtc.zoomon.art
   ./setup_letsencrypt.sh --prod -m you@example.com c-a3f19c04.rtc.zoomon.art
 
 순서: --check 로 막힌 데를 먼저 없애고, --staging 으로 전 과정을 확인한 뒤,
