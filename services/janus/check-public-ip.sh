@@ -25,9 +25,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SETTINGS_FILE="${SCRIPT_DIR}/settings.ini"
 APPLIED_FILE="${SCRIPT_DIR}/.applied-settings"
 INSTALLED_CFG="/opt/janus/etc/janus/janus.jcfg"
-# 이 회선의 DDNS 이름. 외부 IP 확인 서비스에 묻지 않고 DNS 로만 알아낸다 —
-# 어차피 공유기가 갱신하고 있고, 바깥에 요청을 하나 덜 보낸다.
-DDNS_NAME="${JANUS_DDNS_NAME:-jejezzhome.iptime.org}"
+# 이 회선을 가리키는 공개 이름. 외부 IP 확인 서비스에 묻지 않고 DNS 로만
+# 알아낸다 — 바깥에 요청을 하나 덜 보낸다.
+#
+# 예전에는 공유기의 DDNS(jejezzhome.iptime.org)를 봤지만 그 이름은 삭제됐다.
+# 지금은 등록기관에 둔 A 레코드를 본다. 이름이 고정값이라 회선 IP 가 바뀌면
+# 레코드를 갱신해 주어야 한다 — 공유기가 알아서 하던 일이 사라졌다.
+DDNS_NAME="${JANUS_DDNS_NAME:-www.zoomon.art}"
 
 # 점검 출력은 공용 규약을 따른다 (docs/check-contract.md).
 source "${SCRIPT_DIR}/../../lib/check-report.sh"
