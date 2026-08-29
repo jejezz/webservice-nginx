@@ -4,6 +4,10 @@
 #
 #   ./cert-status.sh              사람이 읽는 형식
 #   ./cert-status.sh --json       manager 대시보드용
+#   ./cert-status.sh --check      구축 마법사의 판정 (docs/check-contract.md)
+#   ./cert-status.sh --check --json   같은 것을 기계가 읽는 형식으로
+#
+# --json 은 이미 대시보드 형식에 쓰이고 있어서, 점검 규약은 --check 로 가른다.
 #
 # ── 왜 파일을 읽지 않고 접속해서 보나 ────────────────────────────
 # 두 가지 이유가 있다.
@@ -22,10 +26,42 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-STACK_CONF="$(cd "${SCRIPT_DIR}/.." && pwd)/nginx-stack.conf"
+NGINX_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+REPO_ROOT="$(cd "${NGINX_DIR}/.." && pwd)"
+STACK_CONF="${NGINX_DIR}/nginx-stack.conf"
+SETTINGS_FILE="${SCRIPT_DIR}/settings.ini"
+
+# 점검 규약 (docs/check-contract.md). --check 일 때만 쓴다.
+source "${REPO_ROOT}/lib/check-report.sh"
+check_init "public_ca.nginx"
 
 JSON=0
-[[ "${1:-}" == "--json" ]] && JSON=1
+CHECK=0
+for a in "$@"; do
+    case "$a" in
+        --json)  JSON=1 ;;
+        --check) CHECK=1 ;;
+        -h|--help) sed -n '2,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        *) echo "모르는 옵션: $a" >&2; exit 2 ;;
+    esac
+done
+
+# --check --json 은 점검 규약이지 대시보드 형식이 아니다.
+if [[ $CHECK -eq 1 ]]; then
+    CHECK_JSON=$JSON
+    JSON=0
+fi
+
+# 절(section)은 쓰지 않는다 — node 쪽(lib/settings.js)도 같은 파일을 파싱한다.
+settings_get() {
+    local key="$1" v=""
+    if [[ -r "$SETTINGS_FILE" ]]; then
+        v="$(sed -n "s/^[[:space:]]*${key}[[:space:]]*=[[:space:]]*\(.*\)$/\1/p" "$SETTINGS_FILE" | tail -1)"
+        v="${v%%[;#]*}"
+    fi
+    echo "${v//[[:space:]]/}"
+}
+WANT_DOMAIN="$(settings_get domain)"
 
 # 접속할 포트와 SNI 이름을 설정에서 가져온다.
 read_conf() {
@@ -39,6 +75,16 @@ print(g("general", "server_name", "localhost"))
 PY
 }
 
+# [tls] 의 값 하나. cert_file 이 무엇을 가리키는지 보는 데 쓴다.
+read_tls() {
+    python3 - "$STACK_CONF" "$1" <<'TLSPY' 2>/dev/null || true
+import configparser, sys
+p = configparser.ConfigParser(interpolation=None)
+p.read(sys.argv[1], encoding="utf-8")
+print((p.get("tls", sys.argv[2], fallback="") or "").strip())
+TLSPY
+}
+
 mapfile -t _conf < <(read_conf)
 SSL_PORT="${_conf[0]:-443}"
 SERVER_NAME="${_conf[1]:-localhost}"
@@ -50,6 +96,11 @@ PEM="$(echo | openssl s_client -connect "127.0.0.1:${SSL_PORT}" \
         | openssl x509 2>/dev/null || true)"
 
 if [[ -z "$PEM" ]]; then
+    if [[ $CHECK -eq 1 ]]; then
+        warn "127.0.0.1:${SSL_PORT} 에서 인증서를 받지 못했습니다 — nginx 가 떠 있는지 보세요 (systemctl is-active nginx)"
+        check_finish
+        exit 1
+    fi
     if [[ $JSON -eq 1 ]]; then
         echo '{"ok":false,"error":"tls_unreachable"}'
     else
@@ -95,6 +146,76 @@ STATUS="ok"
 [[ "$KIND" == "private-ca" ]] && STATUS="warn"
 [[ "$KIND" == "letsencrypt" && "$TIMER" != "active" ]] && STATUS="warn"
 
+# ── 구축 마법사의 판정 (docs/check-contract.md) ─────────────────────────
+#
+# 이 단계가 묻는 것은 "발급받았나" 가 아니라 **"발급받은 것을 nginx 가 실제로
+# 내밀고 있나"** 다. 둘은 다르다. 설정 파일을 바꿔 놓고 reload 를 잊으면 설정은
+# 새것인데 나가는 것은 옛것이고, 그 상태는 파일만 봐서는 절대 보이지 않는다.
+if [[ $CHECK -eq 1 ]]; then
+    # nginx-stack.conf 가 무엇을 가리키는가 (설정 쪽)
+    CERT_FILE="$(read_tls cert_file)"
+
+    case "$CERT_FILE" in
+        /etc/letsencrypt/live/*/fullchain.pem)
+            configured="${CERT_FILE#/etc/letsencrypt/live/}"
+            configured="${configured%%/*}"
+            ok "nginx-stack.conf 의 [tls] 가 ${configured} 의 fullchain.pem 을 가리킵니다"
+            ;;
+        /etc/letsencrypt/live/*/cert.pem)
+            # 브라우저는 멀쩡한데 일부 안드로이드 기기에서만 실패하는, 찾기 아주
+            # 어려운 버그가 여기서 난다.
+            configured="${CERT_FILE#/etc/letsencrypt/live/}"
+            configured="${configured%%/*}"
+            warn "[tls] cert_file 이 cert.pem 입니다 — 중간 인증서가 빠집니다. fullchain.pem 으로 바꾸세요"
+            ;;
+        "")
+            configured=""
+            pend "nginx-stack.conf 에 [tls] cert_file 이 없습니다"
+            ;;
+        *)
+            configured=""
+            pend "nginx-stack.conf 의 [tls] 가 아직 공인 인증서를 가리키지 않습니다 (${CERT_FILE}) — /etc/letsencrypt/live/<도메인>/fullchain.pem 으로 바꾸고 sudo ../install_nginx_stack.sh --skip-install"
+            ;;
+    esac
+
+    # 지금 실제로 나가고 있는 것 (실물 쪽)
+    case "$KIND" in
+        letsencrypt)
+            ok "지금 내밀고 있는 것: 공인 인증서 (${ISSUER})"
+            ;;
+        letsencrypt-staging)
+            warn "지금 내밀고 있는 것이 시험(staging) 인증서입니다 — 브라우저와 앱이 거부합니다. sudo ./setup_letsencrypt.sh --prod 로 다시 받으세요"
+            ;;
+        private-ca)
+            if [[ -n "$configured" ]]; then
+                # 설정은 바꿨는데 아직 안 읽혔다. reload 를 잊은 자리다.
+                pend "설정은 ${configured} 를 가리키는데 아직 사설 CA 를 내밀고 있습니다 — sudo ../install_nginx_stack.sh --skip-install 로 반영하세요"
+            else
+                pend "아직 사설 CA 인증서를 내밀고 있습니다 — 앱이 CA 를 미리 심어야만 접속됩니다"
+            fi
+            ;;
+        *)
+            skip "내밀고 있는 인증서의 종류를 가리지 못했습니다 (${ISSUER})"
+            ;;
+    esac
+
+    # 앱이 접속하는 이름이 이 인증서에 들어 있는가. 없으면 TLS 는 붙는데 이름
+    # 검증에서 떨어진다 — 앱에서는 그냥 "안 된다" 로만 보인다.
+    if [[ -z "$WANT_DOMAIN" ]]; then
+        skip "settings.ini 에 domain 이 없어 이름 대조를 건너뜁니다"
+    elif [[ ",${SANS}," == *",DNS:${WANT_DOMAIN},"* ]]; then
+        ok "${WANT_DOMAIN} 가 이 인증서의 SAN 에 있습니다"
+    else
+        warn "${WANT_DOMAIN} 가 내밀고 있는 인증서의 SAN 에 없습니다 (SAN: ${SANS:-없음})"
+    fi
+
+    info ""
+    info "만료 ${NOT_AFTER} (${DAYS_LEFT}일 남음) — 갱신은 renew-status.sh 가 봅니다."
+
+    check_finish
+    [[ "$(check_state)" == "complete" ]] && exit 0 || exit 1
+fi
+
 if [[ $JSON -eq 1 ]]; then
     python3 - <<PY
 import json
@@ -128,7 +249,7 @@ echo
 case "$KIND" in
     letsencrypt-staging)
         echo "  ❌ staging 인증서가 물려 있습니다. 브라우저와 앱이 거부합니다."
-        echo "     실제 발급으로 바꾸세요: ./setup_letsencrypt.sh --prod -m <메일> <도메인>"
+        echo "     실제 발급으로 바꾸세요: sudo ./setup_letsencrypt.sh --prod"
         ;;
     private-ca)
         echo "  ⚠️  사설 CA 인증서입니다. 앱이 CA 를 미리 심어야만 접속됩니다."

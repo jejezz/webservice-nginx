@@ -1,0 +1,30 @@
+{
+  "service": "public_ca",
+  "applyCommand": "sudo ./setup_letsencrypt.sh --prod",
+  "settingsFile": "settings.ini",
+  "appliedFile": ".applied-settings",
+  "fields": [
+    {
+      "key": "domain",
+      "label": "인증서를 받을 도메인",
+      "help": "앱이 실제로 접속하는 이름입니다. DDNS 이름(*.iptime.org)으로는 안 됩니다 — 그 존의 레코드를 만들 권한이 없습니다.",
+      "placeholder": "c-a3f19c04.rtc.zoomon.art",
+      "optional": false,
+      "type": "text",
+      "pattern": "^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)+$",
+      "patternHint": "점이 든 도메인 (예: c-a3f19c04.rtc.zoomon.art)",
+      "effect": "이 이름으로 발급받습니다. A 레코드가 이 서버를 가리켜야 하고, 발급 뒤에는 nginx-stack.conf 의 [tls] 가 /etc/letsencrypt/live/<도메인>/fullchain.pem 을 가리켜야 합니다. 단지마다 이름 하나·인증서 하나입니다 — 와일드카드로 묶지 마세요."
+    },
+    {
+      "key": "email",
+      "label": "만료 알림을 받을 메일 주소",
+      "help": "Let's Encrypt 가 만료 전에 알림을 보냅니다. 비워 둘 수는 있지만 배포용에서는 넣으세요.",
+      "placeholder": "you@example.com",
+      "optional": true,
+      "type": "text",
+      "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$",
+      "patternHint": "메일 주소 (예: you@example.com)",
+      "effect": "certbot 의 -m 으로 들어갑니다. 비우면 --register-unsafely-without-email 로 등록되고, 자동 갱신이 조용히 멈춘 것을 인증서가 만료된 뒤에야 알게 됩니다."
+    }
+  ]
+}

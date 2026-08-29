@@ -36,7 +36,8 @@ const LEVELS = new Set(['ok', 'skip', 'pending', 'problem']);
  *               interpreter: 'node' 면 node 로 돌린다 (pm2 선언은 셸 스크립트가 아니다).
  *   attest      사람만 확인할 수 있는 것. 있으면 사람의 확인까지 있어야 문이 열린다.
  *   manualOnly  자동 점검이 아예 불가능한 단계 (check 가 없다).
- *   optional    선택 기능. 아무 단계도 이것을 requires 로 걸지 않는다.
+ *   optional    선택 기능. **필수 단계**가 이것을 requires 로 걸지 않는다
+ *               (선택 단계끼리는 건다 — 공인 인증서 넷이 그렇다).
  */
 const STEPS = [
   {
@@ -227,6 +228,111 @@ const STEPS = [
     optional: true,
     command: { cwd: 'services/kamailio', run: 'sudo ./install.sh --apply', sudo: true },
     check: { cwd: 'services/kamailio', file: './check-push.sh', args: ['--check', '--json'] },
+  },
+  // ── 공인 인증서 (Let's Encrypt) ─────────────────────────────────────
+  //
+  // 사설 CA(nginx/generate_certs.sh)로도 TLS 는 돕니다. 아래 넷은 그것을
+  // **공인 인증서로 옮기는** 절차입니다 — 앱이 CA 를 미리 심지 않아도 되게.
+  //
+  // 넷 다 선택으로 둡니다. LAN 전용 설치는 사설 CA 로 계속 도는 것이 옳고,
+  // 공인 이름을 받을 수 없는 배치(도메인 없음·80 포트 막힘)도 있기 때문입니다.
+  // 배포용에서는 넷 다 해야 하고, 안 끝났다는 사실은 대시보드의 TLS 카드가
+  // 사설 CA 를 계속 warn 으로 두어 잊히지 않게 합니다.
+  {
+    id: 'public_ca.issue',
+    service: 'nginx',
+    title: "공인 인증서 발급 (Let's Encrypt)",
+    why:
+      '사설 CA 는 단지마다 CA 를 운영하고 앱마다 그것을 심어야 합니다. 공인 인증서로 ' +
+      '옮기면 앱의 커스텀 TrustManager 가 통째로 없어지고, 갱신은 90일마다 certbot 이 ' +
+      '알아서 합니다. **staging 을 건너뛰지 마세요** — 같은 이름 조합에 주 5건 제한이 ' +
+      '있고, 설정을 더듬다 보면 놀랄 만큼 빨리 소진됩니다. 한 번 걸리면 일주일을 ' +
+      '기다립니다.',
+    // HTTP-01 챌린지는 반드시 80 으로 들어오는데, 80 은 전부 HTTPS 로 301 합니다.
+    // 그 예외(acme_webroot)를 만드는 것이 nginx.routes 입니다. 뒤집으면 챌린지가
+    // 301 로 튕겨 발급이 통과하지 못합니다.
+    requires: ['nginx.routes'],
+    optional: true,
+    // 장비·단지마다 다른 값 — 도메인·알림 메일 (settings-schema.json)
+    settings: { dir: 'nginx/public_ca' },
+    command: {
+      cwd: 'nginx/public_ca',
+      run:
+        './setup_letsencrypt.sh --check\n' +
+        'sudo ./setup_letsencrypt.sh --staging\n' +
+        'sudo ./setup_letsencrypt.sh --prod',
+      sudo: true,
+    },
+    check: { cwd: 'nginx/public_ca', file: './setup_letsencrypt.sh', args: ['--check', '--json'] },
+  },
+  {
+    id: 'public_ca.nginx',
+    service: 'nginx',
+    title: '발급받은 인증서를 nginx 에 물리기',
+    why:
+      '**발급받은 것과 내밀고 있는 것은 다릅니다.** nginx-stack.conf 의 [tls] 를 바꾸고 ' +
+      '반영해야 바뀝니다. 그리고 `cert.pem` 이 아니라 **`fullchain.pem`** 입니다 — 중간 ' +
+      '인증서가 빠지면 브라우저는 멀쩡한데 일부 안드로이드 기기에서만 실패하는, 찾기 아주 ' +
+      '어려운 버그가 납니다. 점검은 파일이 아니라 **실제 접속해서** 무엇이 나가고 있는지 ' +
+      '읽습니다.',
+    requires: ['public_ca.issue'],
+    optional: true,
+    command: {
+      cwd: 'nginx',
+      run:
+        '# nginx-stack.conf 의 [tls] 를 이렇게 바꾼 뒤 반영합니다.\n' +
+        '#   cert_file = /etc/letsencrypt/live/<도메인>/fullchain.pem\n' +
+        '#   key_file  = /etc/letsencrypt/live/<도메인>/privkey.pem\n' +
+        '# 절대경로여도 됩니다 — 생성기가 cert_dir 을 무시합니다.\n' +
+        'sudo ./install_nginx_stack.sh --skip-install',
+      sudo: true,
+    },
+    check: { cwd: 'nginx/public_ca', file: './cert-status.sh', args: ['--check', '--json'] },
+  },
+  {
+    id: 'public_ca.renew',
+    service: 'nginx',
+    title: '90일 자동 갱신',
+    why:
+      'certbot 은 설치될 때 자기 systemd 타이머를 함께 깝니다 — 유닛을 만들 필요가 ' +
+      '없습니다. 문제는 **갱신 훅**입니다. 그것이 없으면 certbot 이 조용히 갱신해 두어도 ' +
+      'nginx 는 메모리에 올린 옛 인증서를 계속 내밉니다. 파일은 최신인데 접속은 만료로 ' +
+      '끊기는, 원인을 찾기 아주 어려운 상태가 됩니다. 셋 다 **터지기 전에는 아무 증상이 ' +
+      '없어서** 만료를 기다리지 않고 지금 물어봅니다.',
+    requires: ['public_ca.nginx'],
+    optional: true,
+    command: {
+      cwd: 'nginx/public_ca',
+      run:
+        '# 타이머가 꺼져 있을 때만. 발급이 훅까지 함께 걸어 둡니다.\n' +
+        'sudo systemctl enable --now certbot.timer\n' +
+        '# 실제로 갱신되는지 미리 돌려 봅니다 (rate limit 을 쓰지 않습니다).\n' +
+        'sudo certbot renew --dry-run',
+      sudo: true,
+    },
+    check: { cwd: 'nginx/public_ca', file: './renew-status.sh', args: ['--check', '--json'] },
+  },
+  {
+    id: 'public_ca.dns',
+    service: 'nginx',
+    title: '이름이 아직 이 서버를 가리키나',
+    why:
+      '이 회선은 유동 IP 인데 A 레코드는 등록기관에 고정값으로 들어 있고, 따라가는 장치가 ' +
+      '없습니다. 어긋나면 앱이 **즉시, 전면** 못 붙고, certbot 갱신도 만료 30일 전부터 ' +
+      '조용히 실패합니다. 앞엣것이 즉시 터지니 알아차리기는 하는데 **왜인지 모르는** ' +
+      '상태가 됩니다. 이 점검이 그 답을 한 줄로 줍니다.',
+    requires: ['public_ca.nginx'],
+    optional: true,
+    command: {
+      cwd: 'nginx/public_ca',
+      run:
+        '# IP 가 바뀌면 등록기관에서 A 레코드를 고칩니다. TTL 이 600초라 10분 안에 퍼집니다.\n' +
+        '# 크론에 걸어 두면 사람보다 먼저 압니다 (경로는 절대경로로):\n' +
+        '#   */10 * * * * .../nginx/public_ca/check-dns.sh --quiet || echo "DNS 가 이 서버를 가리키지 않습니다" | logger -t dns-drift\n' +
+        './check-dns.sh',
+      sudo: false,
+    },
+    check: { cwd: 'nginx/public_ca', file: './check-dns.sh', args: ['--check', '--json'] },
   },
 ];
 

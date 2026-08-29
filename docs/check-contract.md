@@ -260,7 +260,7 @@ check_finish                  # JSON 이면 여기서 출력하고 종료
 `ok` · `warn` · `info` 는 이름과 동작이 예전과 같습니다. **바꿔야 하는 것은
 기존 `no()` 호출뿐입니다** — 각 자리에서 `skip` 인지 `pend` 인지 판단해 나눕니다.
 
-## ⚠️ 예외 하나 — pm2 는 `--check-json` 입니다
+## ⚠️ 예외 — `--json` 이 이미 다른 뜻이던 두 자리
 
 `pm2/ecosystem.config.js` 는 **`--json` 을 이미 다른 뜻으로 쓰고 있습니다.**
 `--check --json` 이 "pm2 에 실제로 넘어가는 앱 객체를 덤프한다" 는 뜻으로
@@ -276,6 +276,25 @@ node pm2/ecosystem.config.js --check-json
 셸이 아니라 node 라 `lib/check-report.sh` 를 쓸 수 없어 같은 형식을 직접 냅니다.
 `nginx` 도 마찬가지로 파이썬 생성기가 직접 냅니다 (래퍼는 `--json` 을 그쪽으로
 넘기기만 합니다).
+
+### `cert-status.sh` 는 `--check` 를 더해서 갈랐습니다
+
+`nginx/public_ca/cert-status.sh --json` 은 **manager 대시보드가 읽는 형식**으로
+이미 쓰이고 있었습니다. 같은 상황인데 여기서는 플래그 이름을 바꾸는 대신
+`--check` 를 하나 더 받게 했습니다.
+
+```bash
+./cert-status.sh                  사람이 읽는 형식
+./cert-status.sh --json           대시보드용
+./cert-status.sh --check --json   점검 규약 (이 문서)
+```
+
+`check_args` 가 `--json` 만 걸러 가므로 두 형식이 한 파일에서 공존합니다.
+**기존 두 모드는 손대지 않았습니다.** 마법사가 다른 단계에도 `--check` 를
+붙여 부르고 있으므로 (`setup.js` 의 `args`), 명령 모양도 나머지와 같아집니다.
+
+새로 만드는 스크립트라면 이 방식이 낫습니다 — `--check-json` 은 pm2 처럼
+`--json` 을 빼앗을 수 없을 때의 마지막 수단입니다.
 
 ## 지켜야 할 것
 
@@ -306,7 +325,11 @@ node pm2/ecosystem.config.js --check-json
 | `services/kamailio/check-push.sh` | `push.incoming` | ✅ 확인 전용 |
 | `database/check-database.sh` | `database.schema` | ✅ 확인 전용 |
 | `nginx/install_nginx_stack.sh` | `nginx.routes` | ✅ (생성기가 낸다) |
-| `pm2/ecosystem.config.js` | `pm2.apps` | ✅ **`--check-json`** (아래 예외) |
+| `pm2/ecosystem.config.js` | `pm2.apps` | ✅ **`--check-json`** (위 예외) |
+| `nginx/public_ca/setup_letsencrypt.sh` | `public_ca.issue` | ✅ |
+| `nginx/public_ca/cert-status.sh` | `public_ca.nginx` | ✅ **`--check --json`** (위 예외) |
+| `nginx/public_ca/renew-status.sh` | `public_ca.renew` | ✅ 확인 전용 |
+| `nginx/public_ca/check-dns.sh` | `public_ca.dns` | ✅ 확인 전용 |
 
 **"확인 전용"** 은 적용 기능이 없는 스크립트라는 뜻입니다. 나머지는 원래
 적용도 하는 스크립트에 점검 모드가 함께 있는 것들입니다.

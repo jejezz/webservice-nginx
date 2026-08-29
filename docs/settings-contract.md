@@ -24,6 +24,10 @@ services/<서비스>/
 └── .applied-settings      --apply 가 마지막으로 설치한 값 (root 가 쓴다)
 ```
 
+**`services/` 아래일 필요는 없습니다.** 세 파일이 한 디렉터리에 같이 있고
+`settings-schema.json` 이 규약대로면 됩니다. `nginx/public_ca/` 가 그렇습니다 —
+공인 인증서의 도메인은 서비스가 아니라 서버 전체의 값입니다.
+
 ## 세 파일이 각각 다른 것을 뜻합니다
 
 | 파일 | 누가 쓰는가 | 무엇을 뜻하는가 |
@@ -163,6 +167,7 @@ chmod 644 "$APPLIED_FILE"
 |---|---|---|
 | `services/janus` | `public_ip` · `rtp_port_range` | `install.sh` |
 | `services/kamailio` | `sip_domain` · `sip_listen_addr` · `sip_push_url` | `install.sh` |
+| `nginx/public_ca` | `domain` · `email` | `setup_letsencrypt.sh` · `cert-status.sh` · `renew-status.sh` |
 
 `websocket-relay` 는 아직 없습니다 — 자기 `.env` 로 값을 받고 있고, 13단계
 어디에서도 파라미터를 묻지 않기 때문입니다. 필요해지면 같은 모양으로 붙입니다.

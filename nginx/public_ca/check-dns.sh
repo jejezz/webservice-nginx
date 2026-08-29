@@ -3,7 +3,7 @@
 # 공개 이름이 아직 이 서버를 가리키는지 본다.
 #
 #   ./check-dns.sh              사람이 읽는 형식
-#   ./check-dns.sh --json       기계용 (docs/check-contract.md)
+#   ./check-dns.sh --check --json   기계용 (docs/check-contract.md)
 #   ./check-dns.sh --quiet      조용히. 크론용 — 어긋날 때만 종료 코드 1
 #
 # ── 왜 필요한가 ──────────────────────────────────────────────────
@@ -39,6 +39,9 @@ NAMES=()
 for a in "$@"; do
     case "$a" in
         --quiet) QUIET=1 ;;
+        # 옆의 public_ca 점검들과 명령 모양을 맞춘다. 이 스크립트는 원래
+        # 점검만 하므로 하는 일은 달라지지 않는다.
+        --check) ;;
         -h|--help) sed -n '2,26p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
         "") ;;
         -*) echo "Unknown option: $a" >&2; exit 2 ;;
