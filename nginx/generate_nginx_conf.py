@@ -382,12 +382,49 @@ class Stack:
         self.verify_client = t("verify_client")
         self.acme_webroot = t("acme_webroot")
 
+    @staticmethod
+    def _file_state(path):
+        """'ok' | 'missing' | 'unknown'
+
+        os.path.isfile() 은 권한이 없어 못 보는 경우에도 False 를 준다. 그래서
+        "없다" 와 "볼 수 없다" 를 구분하지 못한다.
+
+        Let's Encrypt 인증서는 /etc/letsencrypt/live/ 에 있고 그 디렉토리는
+        0700 root 다. install_nginx_stack.sh --check 는 sudo 없이 도는 경로라
+        여기서 반드시 걸리는데, 파일은 멀쩡히 있다. 없다고 단정하고 죽으면
+        멀쩡한 설정을 틀렸다고 말하는 셈이다.
+        """
+        try:
+            os.stat(path)
+            return "ok"
+        except FileNotFoundError:
+            return "missing"
+        except OSError:
+            # PermissionError 를 포함한다 — 상위 디렉토리를 지나갈 수 없는 경우다.
+            return "unknown"
+
     def check_files(self):
-        missing = [p for p in (self.cert, self.key) if not os.path.isfile(p)]
-        if self.client_ca and self.verify_client and not os.path.isfile(self.client_ca):
-            missing.append(self.client_ca)
+        paths = [self.cert, self.key]
+        if self.client_ca and self.verify_client:
+            paths.append(self.client_ca)
+
+        missing, unknown = [], []
+        for p in paths:
+            state = self._file_state(p)
+            if state == "missing":
+                missing.append(p)
+            elif state == "unknown":
+                unknown.append(p)
+
         if missing:
             die("인증서 파일이 없습니다:\n  " + "\n  ".join(missing))
+
+        if unknown:
+            # 막지 않는다. root 로 도는 nginx -t 가 진짜 관문이고, 그쪽은 읽을 수 있다.
+            print("  --      인증서를 확인할 수 없습니다 (권한). root 로 실행하면 확인합니다:",
+                  file=sys.stderr)
+            for p in unknown:
+                print(f"            {p}", file=sys.stderr)
 
     def acme_challenge_block(self):
         """Let's Encrypt HTTP-01 챌린지 예외.
