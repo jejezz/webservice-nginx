@@ -23,7 +23,7 @@ public final class RelayRestApi {
     private static final MediaType JSON = MediaType.get("application/json; charset=utf-8");
 
     private final OkHttpClient http;
-    private final String baseUrl; // 예: https://jejezzhome.iptime.org:28099
+    private final String baseUrl; // 예: https://c-a3f19c04.rtc.zoomon.art  (디렉터리의 host 에 스킴을 붙인 것)
 
     public RelayRestApi(@NonNull OkHttpClient http, @NonNull String baseUrl) {
         this.http = http;

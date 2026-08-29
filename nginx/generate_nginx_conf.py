@@ -380,13 +380,75 @@ class Stack:
         client_ca = t("client_ca")
         self.client_ca = os.path.join(cert_dir, client_ca) if client_ca else ""
         self.verify_client = t("verify_client")
+        self.acme_webroot = t("acme_webroot")
+
+    @staticmethod
+    def _file_state(path):
+        """'ok' | 'missing' | 'unknown'
+
+        os.path.isfile() 은 권한이 없어 못 보는 경우에도 False 를 준다. 그래서
+        "없다" 와 "볼 수 없다" 를 구분하지 못한다.
+
+        Let's Encrypt 인증서는 /etc/letsencrypt/live/ 에 있고 그 디렉토리는
+        0700 root 다. install_nginx_stack.sh --check 는 sudo 없이 도는 경로라
+        여기서 반드시 걸리는데, 파일은 멀쩡히 있다. 없다고 단정하고 죽으면
+        멀쩡한 설정을 틀렸다고 말하는 셈이다.
+        """
+        try:
+            os.stat(path)
+            return "ok"
+        except FileNotFoundError:
+            return "missing"
+        except OSError:
+            # PermissionError 를 포함한다 — 상위 디렉토리를 지나갈 수 없는 경우다.
+            return "unknown"
 
     def check_files(self):
-        missing = [p for p in (self.cert, self.key) if not os.path.isfile(p)]
-        if self.client_ca and self.verify_client and not os.path.isfile(self.client_ca):
-            missing.append(self.client_ca)
+        paths = [self.cert, self.key]
+        if self.client_ca and self.verify_client:
+            paths.append(self.client_ca)
+
+        missing, unknown = [], []
+        for p in paths:
+            state = self._file_state(p)
+            if state == "missing":
+                missing.append(p)
+            elif state == "unknown":
+                unknown.append(p)
+
         if missing:
             die("인증서 파일이 없습니다:\n  " + "\n  ".join(missing))
+
+        if unknown:
+            # 막지 않는다. root 로 도는 nginx -t 가 진짜 관문이고, 그쪽은 읽을 수 있다.
+            print("  --      인증서를 확인할 수 없습니다 (권한). root 로 실행하면 확인합니다:",
+                  file=sys.stderr)
+            for p in unknown:
+                print(f"            {p}", file=sys.stderr)
+
+    def acme_challenge_block(self):
+        """Let's Encrypt HTTP-01 챌린지 예외.
+
+        80 포트 서버는 조건 없이 301 로 HTTPS 에 넘긴다. 그 앞에 이 location 을
+        두어 챌린지 경로만 평문으로 응답하게 한다. Let's Encrypt 는 반드시 80 으로
+        들어오고 포트를 지정할 수 없어서, 이 자리가 없으면 검증이 통과하지 못한다.
+
+        `^~` 로 잡아 접두사 일치 즉시 확정시킨다. 그리고 리다이렉트 쪽도
+        location 안에 있어야 한다 — server 레벨의 `return` 은 location 을 고르기
+        전 단계에서 실행되므로, 밖에 두면 이 예외에 닿지도 못하고 301 이 나간다.
+
+        acme_webroot 를 비우면 아무것도 만들지 않는다 — 예전 동작 그대로다.
+        """
+        if not self.acme_webroot:
+            return ""
+        return (
+            "\n    # Let's Encrypt HTTP-01. 아래 location / 의 301 보다 구체적이라 먼저 잡힌다.\n"
+            f"    location ^~ /.well-known/acme-challenge/ {{\n"
+            f"        root {self.acme_webroot};\n"
+            "        default_type \"text/plain\";\n"
+            "        try_files $uri =404;\n"
+            "    }\n"
+        )
 
     def redirect_map(self):
         """공유기 포트 포워딩 대응.
@@ -458,6 +520,7 @@ def render(stack, services, template_text):
         ("__SSL_CERTIFICATE__", stack.cert),
         ("__MAX_BODY__", stack.max_body_block()),
         ("__SSL_CLIENT_VERIFY__", stack.client_verify_block()),
+        ("__ACME_CHALLENGE__", stack.acme_challenge_block()),
         ("__DEFAULT_ROUTE__", stack.default_route_block()),
     ):
         output = output.replace(placeholder, value)

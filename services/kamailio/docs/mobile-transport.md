@@ -159,7 +159,8 @@ behalf of the web peer**" 로, 구상했던 등록대행 Agent 와 같은 모델
 
 - `SipTransportMode` / `SipTransportOptions` / `SipServerConfig` (신규) —
   **서버 호스트와 SIP 도메인을 분리.** 전자는 인증서와 대조하는 이름
-  (`jejezzhome.iptime.org`), 후자는 digest realm (`pluto.org`)
+  (지금은 `c-a3f19c04.rtc.zoomon.art` — 예전 `jejezzhome.iptime.org` 는 삭제됨),
+  후자는 digest realm (`pluto.org`)
 - `SipUserAgent` — 전송 생성 통합, `TlsConfig`(CA·검증·TLS1.2+1.3), 실패 사유 노출
 - `SipPreferences` (신규) — 설정 읽기 단일화 + CA 를 `res/raw` 에서 `files/` 로 스테이징
 - 설정 화면에 **전송 방식** 추가, 발신 URI 를 도메인 기반으로

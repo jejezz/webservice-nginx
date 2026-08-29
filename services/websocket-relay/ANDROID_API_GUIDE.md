@@ -21,30 +21,35 @@ The CallFusion server provides both REST APIs and WebSocket connectivity for And
 
 ### Base URLs
 
-> **2026-08-28 변경 — 주소가 바뀌었습니다. 포트 28099 는 더 이상 열리지 않습니다.**
+> **2026-08-29 변경 — 공인 인증서로 옮겼습니다. 주소를 앱에 박지 마세요.**
 >
-> 단말이 서비스 포트에 직접 붙던 방식을 접었습니다. 이제 Nginx 가 443 에서 TLS 를
-> 끊고 내부로 넘깁니다. 서버는 루프백에만 묶여 있어 바깥에서 28099 로 붙을 수 없습니다.
->
-> **인증서 작업은 그대로 두어도 됩니다.** Nginx 가 내미는 인증서가 이 서비스가
-> 직접 쓰던 바로 그 파일입니다 — 같은 Root CA, 같은 SAN 입니다. 아래 "SSL Certificate
-> Installation" 절의 내용은 유효하며, 앱에서 **주소만** 고치면 됩니다.
->
-> | | 이전 | 지금 |
-> |---|---|---|
-> | REST | `https://호스트:28099` | `https://호스트/relay` |
-> | RTC WS | `wss://호스트:28099/ws` | `wss://호스트/relay/rtc` |
-> | IoT WS | `wss://호스트:28099/iot` | `wss://호스트/relay/iot` |
+> 서버 인증서가 사설 CA(`DevCA Root`)에서 **Let's Encrypt** 로 바뀌었습니다.
+> 앱에 CA 를 심을 필요가 없어졌고, 아래 "SSL Certificate Installation" 절의
+> 인증서 코드는 **전부 삭제해야 합니다.** 그대로 두면 오히려 접속이 깨집니다.
 
-호스트 이름은 서버 인증서 SAN 에 있는 것을 써야 합니다 — 기본값은
-`jejezzhome.iptime.org` 입니다 (아래 인증서 절 참고).
+주소는 **Firestore 디렉터리에서 받습니다.** 단지마다 서버가 다르므로 앱에 박을
+수 있는 값이 아닙니다. 등록할 때 받아 저장하고, 접속이 실패할 때만 다시 읽습니다
+(자세히는 [docs/multi-complex.md](docs/multi-complex.md)).
 
-- **HTTPS REST API**: `https://jejezzhome.iptime.org/relay`
-- **WebSocket RTC**: `wss://jejezzhome.iptime.org/relay/rtc`
-- **WebSocket IoT**: `wss://jejezzhome.iptime.org/relay/iot`
+```
+regions/41135  →  complexes[].host  →  "c-a3f19c04.rtc.zoomon.art"
+```
 
-관리 대시보드는 사람이 보는 화면입니다 — `https://jejezzhome.iptime.org/relay/dashboard`
-이며 manager 로그인이 필요합니다. 단말이 쓸 일은 없습니다.
+`host` 는 **스킴 없는 호스트 이름**입니다. 스킴은 앱이 붙입니다:
+
+| | 만드는 법 | 예 |
+|---|---|---|
+| REST | `https://<host>/relay` | `https://c-a3f19c04.rtc.zoomon.art/relay` |
+| RTC WS | `wss://<host>/relay/rtc` | `wss://c-a3f19c04.rtc.zoomon.art/relay/rtc` |
+| IoT WS | `wss://<host>/relay/iot` | `wss://c-a3f19c04.rtc.zoomon.art/relay/iot` |
+
+포트를 붙이지 않습니다. 표준 443 입니다.
+
+> 예전 문서에 있던 `호스트:28099` 와 `jejezzhome.iptime.org` 는 **둘 다 죽었습니다.**
+> 28099 는 루프백에만 묶여 있고, 그 DDNS 이름은 삭제됐습니다.
+
+관리 대시보드(`https://<host>/relay/dashboard`)는 사람이 보는 화면이고 manager
+로그인이 필요합니다. 단말이 쓸 일은 없습니다.
 
 ## Group Communication Application Features
 
@@ -124,418 +129,55 @@ data class GeoLocation(
 )
 ```
 
-## SSL Certificate Installation for Android
+## TLS — 앱이 할 일은 없습니다
 
-### Required Certificate Files
-
-> **2026-08-18 변경 — 이전 인증서는 더 이상 쓰지 않습니다.**
->
-> 서비스가 자체 PKI(`PTYPE Root CA`, 키가 `src/certs/` 에 있었음)를 쓰던 것을
-> **프로젝트 공용 인증서로 통합**했습니다. 서비스 디렉토리의 인증서는 삭제됐고,
-> 이제 `nginx/cert/` 가 소유합니다 (`nginx/README.md`).
->
-> 이전 `root-ca.crt` 를 번들한 앱은 **접속되지 않습니다.** 아래 새 CA 로 교체한 뒤
-> 다시 배포하세요. 서버 인증서의 이름도 바뀌었으니 접속 호스트도 함께 확인해야 합니다.
-
-Android 단말이 서버에 안전하게 붙으려면 **Root CA 인증서** 하나를 앱에 넣습니다.
-
-**Certificate File:** `nginx/cert/ca/ca.crt`
-- **Issuer / Subject:** `C=KR, ST=Seoul, O=DevCA, CN=DevCA Root` (self-signed root)
-- **Validity:** 10 years (Aug 13 2026 - Aug 10 2036)
-- **SHA-256 Fingerprint:** `CD:D9:48:83:98:69:7A:57:B2:B4:6B:39:82:C3:5E:A3:7B:70:B9:DF:A6:D9:EA:A4:C1:21:B7:D4:7B:92:F9:31`
-
-이전과 달리 중간 CA 가 없습니다. 서버 인증서를 이 루트가 직접 서명합니다.
-
-**Server Certificate**
-- **Subject:** `C=KR, ST=Seoul, O=DevServer, CN=jejezzhome.iptime.org`
-- **Validity:** Aug 13 2026 - Aug 13 2027 (1년 — 갱신 주기에 주의)
-- **SAN:** `jejezzhome.iptime.org`, `*.jejezzhome.iptime.org`, `localhost`,
-  `127.0.0.1`, `::1`, `192.168.0.252`, `192.168.122.1`, `125.242.8.15`
-- **Public Key Pin (SHA-256/Base64):** `5nSijbuz83FqgmWIuU71rLJ66Y/qEVFg09U07sEpBOU=`
-
-#### 접속 호스트 이름을 맞출 것
-
-**SAN 에 `jejezzhome.iptime.org` 이 없습니다.** 예전 인증서에만 있던 이름입니다.
-그 이름으로 붙으면 인증서는 유효해도 호스트명 검증에서 실패합니다.
-`jejezzhome.iptime.org` (또는 SAN 에 있는 IP)로 접속하세요.
-
-그 도메인을 계속 써야 한다면 서버 인증서를 다시 만들어야 합니다.
-
-```bash
-# 주의: 이 스크립트는 CA 도 새로 만듭니다. 실행하면 기존 CA 로 발급된
-# 클라이언트 인증서(android/electron/ios)와 브라우저 신뢰가 모두 무효가 되므로,
-# 모든 클라이언트를 함께 갱신할 수 있을 때만 실행하세요.
-cd nginx && ./generate_certs.sh --auto --dns jejezzhome.iptime.org jejezzhome.iptime.org
-```
-
-인증서를 새로 만들었다면 이 문서의 지문·핀 값도 함께 갱신해야 합니다.
-
-### Android Certificate Integration Methods
-
-#### Method 1: Bundle Certificate in App (Recommended)
-
-Include the Root CA certificate in your app's assets and create a custom trust manager:
+**2026-08-29 부터 서버가 Let's Encrypt 공인 인증서를 씁니다.** 안드로이드 시스템
+신뢰 저장소에 이미 들어 있는 CA 라, 앱은 **아무것도 하지 않아도** 서버를 검증합니다.
 
 ```kotlin
-// 1. Place ca.crt in app/src/main/assets/certificates/
-// 2. Create custom SSL context
-
-import java.security.cert.CertificateFactory
-import java.security.cert.X509Certificate
-import javax.net.ssl.SSLContext
-import javax.net.ssl.TrustManagerFactory
-import javax.net.ssl.X509TrustManager
-import java.security.KeyStore
-
-class CallFusionSSLConfig {
-    
-    companion object {
-        fun createSSLContext(context: Context): SSLContext {
-            try {
-                // Load the Root CA certificate from assets
-                val certificateFactory = CertificateFactory.getInstance("X.509")
-                val caInput = context.assets.open("certificates/ca.crt")
-                val ca = certificateFactory.generateCertificate(caInput) as X509Certificate
-                caInput.close()
-                
-                // Create a KeyStore containing our trusted CA
-                val keyStoreType = KeyStore.getDefaultType()
-                val keyStore = KeyStore.getInstance(keyStoreType)
-                keyStore.load(null, null)
-                keyStore.setCertificateEntry("ca", ca)
-                
-                // Create a TrustManager that trusts the CA in our KeyStore
-                val tmfAlgorithm = TrustManagerFactory.getDefaultAlgorithm()
-                val tmf = TrustManagerFactory.getInstance(tmfAlgorithm)
-                tmf.init(keyStore)
-                
-                // Create an SSLContext that uses our TrustManager
-                val sslContext = SSLContext.getInstance("TLS")
-                sslContext.init(null, tmf.trustManagers, null)
-                
-                return sslContext
-                
-            } catch (e: Exception) {
-                throw RuntimeException("Failed to create SSL context", e)
-            }
-        }
-        
-        fun createTrustManager(context: Context): X509TrustManager {
-            val sslContext = createSSLContext(context)
-            return sslContext.socketFactory.defaultTrustManager as X509TrustManager
-        }
-    }
-}
-
-// Usage with OkHttp
-class CallFusionWebSocketClient {
-    
-    fun createSecureClient(context: Context): OkHttpClient {
-        val sslContext = CallFusionSSLConfig.createSSLContext(context)
-        val trustManager = CallFusionSSLConfig.createTrustManager(context)
-        
-        return OkHttpClient.Builder()
-            .sslSocketFactory(sslContext.socketFactory, trustManager)
-            .hostnameVerifier { hostname, session ->
-                // Verify hostname matches certificate
-                hostname == "jejezzhome.iptime.org" || 
-                hostname == "*.jejezzhome.iptime.org"
-            }
-            .build()
-    }
-}
+// 이것으로 끝입니다.
+val client = OkHttpClient()
 ```
 
-#### Method 2: Certificate Pinning (Enhanced Security)
+`res/xml/network_security_config.xml` 도 필요 없습니다. 안드로이드 기본값이
+이미 "시스템 CA 만 신뢰, 평문 금지" 입니다.
 
-Pin the specific certificate fingerprint for maximum security:
+### 예전 코드를 쓰고 있다면 — 지워야 합니다
 
-```kotlin
-import okhttp3.CertificatePinner
+사설 CA 시절의 코드가 남아 있으면 **접속이 깨집니다.** 다음을 전부 제거하세요.
 
-class CallFusionCertificatePinning {
-    
-    companion object {
-        // SHA-256 fingerprint of the Root CA certificate
-        private const val ROOT_CA_FINGERPRINT = "sha256/KsyDADVe29SnmMw5e4Jo0d/VFoyegKpVSfCJDzP5lDA="
-        
-        // You can also pin the server certificate for additional security
-        // Get server cert fingerprint: openssl x509 -in renewed_server.crt -pubkey -noout | 
-        // openssl pkey -pubin -outform der | openssl dgst -sha256 -binary | base64
-        private const val SERVER_CERT_FINGERPRINT = "sha256/5nSijbuz83FqgmWIuU71rLJ66Y/qEVFg09U07sEpBOU="
-        
-        fun createPinnedClient(): OkHttpClient {
-            val certificatePinner = CertificatePinner.Builder()
-                .add("jejezzhome.iptime.org", ROOT_CA_FINGERPRINT)
-                .add("*.jejezzhome.iptime.org", ROOT_CA_FINGERPRINT)
-                .add("192.168.0.252", ROOT_CA_FINGERPRINT) // If using IP address
-                // Optionally pin server certificate as well
-                .add("jejezzhome.iptime.org", SERVER_CERT_FINGERPRINT)
-                .build()
-            
-            return OkHttpClient.Builder()
-                .certificatePinner(certificatePinner)
-                .build()
-        }
-    }
-}
+| 지울 것 | 왜 |
+|---|---|
+| `res/raw/ca.crt` 등 번들된 CA 파일 | 이 CA 는 이제 서버와 무관합니다 |
+| 커스텀 `TrustManager` · `SSLContext` | 시스템 기본이 맞습니다 |
+| 커스텀 `hostnameVerifier` | `jejezzhome.iptime.org` 로 박혀 있어 **항상 실패**합니다 |
+| `CertificatePinner` / `<pin-set>` | 아래 참고 — 90일마다 끊깁니다 |
+| `network_security_config.xml` 의 `<domain-config>` | 기본값이 더 안전합니다 |
+| BouncyCastle 의존성 | 인증서를 직접 다루지 않으면 필요 없습니다 |
 
-// Usage
-val secureClient = CallFusionCertificatePinning.createPinnedClient()
-val request = Request.Builder()
-    .url("wss://jejezzhome.iptime.org/relay/rtc")
-    .build()
-val webSocket = secureClient.newWebSocket(request, webSocketListener)
-```
+### ⚠️ 인증서 핀닝을 하지 마세요
 
-#### Method 3: System Certificate Installation (User Action Required)
+Let's Encrypt 인증서는 **90일마다 갱신**되고 그때 공개키가 바뀝니다. 핀을 박으면
+**갱신될 때마다 앱이 통째로 접속 불가**가 되고, 앱을 다시 배포하기 전까지 복구되지
+않습니다. 사설 CA(1년 주기)에서는 넘어갔던 문제가 여기서는 분기마다 터집니다.
 
-For development or enterprise deployment, users can install the Root CA certificate system-wide:
+중간 CA 를 핀해도 안전하지 않습니다 — Let's Encrypt 는 중간 인증서를 예고 없이
+교체합니다. **핀닝은 하지 않는 것이 옳습니다.**
 
-```kotlin
-// Guide user to install certificate manually
-fun guideUserToCertificateInstallation() {
-    val intent = Intent().apply {
-        action = "com.android.credentials.INSTALL"
-        data = Uri.parse("content://path/to/ca.crt")
-    }
-    
-    // Or provide instructions:
-    val instructions = """
-    To install the CallFusion certificate:
-    
-    1. Download ca.crt to your device
-    2. Go to Settings > Security > Install certificates
-    3. Select "CA certificate"
-    4. Choose the ca.crt file
-    5. Enter a name like "CallFusion Root CA"
-    6. Restart the CallFusion app
-    """.trimIndent()
-    
-    // Show dialog with instructions
-}
-```
+### 호스트 이름
 
-### Complete Secure Connection Setup
+인증서 SAN 에는 그 단지의 이름 하나만 들어 있습니다 (예: `c-a3f19c04.rtc.zoomon.art`).
+**디렉터리에서 받은 `host` 를 그대로** 쓰면 자동으로 맞습니다. 다른 이름이나 IP 로
+붙으면 호스트명 검증에서 실패합니다 — 정상 동작입니다.
 
-Here's a complete implementation combining certificate handling with the WebSocket client:
+### 서버 쪽 사정
 
-```kotlin
-class SecureCallFusionClient(private val context: Context) {
-    
-    private var webSocketClient: CallFusionWebSocketClient? = null
-    private var secureOkHttpClient: OkHttpClient? = null
-    
-    fun initialize() {
-        // Choose your security method:
-        secureOkHttpClient = when (BuildConfig.CERTIFICATE_METHOD) {
-            "BUNDLED" -> createBundledCertClient()
-            "PINNED" -> CallFusionCertificatePinning.createPinnedClient()
-            else -> createBundledCertClient() // Default to bundled
-        }
-    }
-    
-    private fun createBundledCertClient(): OkHttpClient {
-        val sslContext = CallFusionSSLConfig.createSSLContext(context)
-        val trustManager = CallFusionSSLConfig.createTrustManager(context)
-        
-        return OkHttpClient.Builder()
-            .sslSocketFactory(sslContext.socketFactory, trustManager)
-            .hostnameVerifier { hostname, session ->
-                // Validate hostname against certificate SAN
-                val validHostnames = listOf(
-                    "jejezzhome.iptime.org",
-                    "*.jejezzhome.iptime.org"
-                )
-                validHostnames.contains(hostname)
-            }
-            .connectTimeout(30, TimeUnit.SECONDS)
-            .readTimeout(30, TimeUnit.SECONDS)
-            .pingInterval(30, TimeUnit.SECONDS)
-            .build()
-    }
-    
-    fun connectSecure(serverUrl: String, listener: CallFusionWebSocketClient.WebSocketListener) {
-        secureOkHttpClient?.let { client ->
-            webSocketClient = CallFusionWebSocketClient()
-            
-            val request = Request.Builder()
-                .url(serverUrl)
-                .addHeader("User-Agent", "CallFusion-Android/${BuildConfig.VERSION_NAME}")
-                .build()
-            
-            val webSocket = client.newWebSocket(request, object : okhttp3.WebSocketListener() {
-                override fun onOpen(webSocket: okhttp3.WebSocket, response: Response) {
-                    Log.d("SecureCallFusion", "Secure WebSocket connected")
-                    listener.onConnected()
-                }
-                
-                override fun onMessage(webSocket: okhttp3.WebSocket, text: String) {
-                    listener.onMessage(text)
-                }
-                
-                override fun onFailure(webSocket: okhttp3.WebSocket, t: Throwable, response: Response?) {
-                    Log.e("SecureCallFusion", "WebSocket connection failed", t)
-                    
-                    // Handle specific SSL errors
-                    when (t) {
-                        is SSLHandshakeException -> {
-                            Log.e("SecureCallFusion", "SSL Handshake failed - check certificate")
-                        }
-                        is SSLPeerUnverifiedException -> {
-                            Log.e("SecureCallFusion", "Server certificate verification failed")
-                        }
-                    }
-                    
-                    listener.onError(t)
-                }
-                
-                override fun onClosed(webSocket: okhttp3.WebSocket, code: Int, reason: String) {
-                    Log.d("SecureCallFusion", "WebSocket closed: $code - $reason")
-                    listener.onDisconnected()
-                }
-            })
-        }
-    }
-}
-```
+발급·갱신 절차와 문제 해결은 [nginx/public_ca/README.md](../../nginx/public_ca/README.md)
+에 있습니다. 앱 개발자가 알아야 할 것은 위가 전부입니다.
 
-### Certificate Validation Helper
-
-```kotlin
-class CertificateValidator {
-    
-    companion object {
-        fun validateServerCertificate(hostname: String): Boolean {
-            return try {
-                val url = URL("https://$hostname/relay")
-                val connection = url.openConnection() as HttpsURLConnection
-                connection.connect()
-                
-                val certs = connection.serverCertificates
-                val serverCert = certs[0] as X509Certificate
-                
-                // Check certificate validity
-                serverCert.checkValidity()
-                
-                // Check hostname matches
-                val certCN = serverCert.subjectDN.name
-                Log.d("CertValidator", "Server certificate CN: $certCN")
-                
-                // Additional validation...
-                connection.disconnect()
-                true
-                
-            } catch (e: Exception) {
-                Log.e("CertValidator", "Certificate validation failed", e)
-                false
-            }
-        }
-        
-        fun getCertificateInfo(hostname: String): String? {
-            return try {
-                val url = URL("https://$hostname/relay")
-                val connection = url.openConnection() as HttpsURLConnection
-                connection.connect()
-                
-                val certs = connection.serverCertificates
-                val serverCert = certs[0] as X509Certificate
-                
-                """
-                Certificate Information:
-                Subject: ${serverCert.subjectDN}
-                Issuer: ${serverCert.issuerDN}
-                Valid From: ${serverCert.notBefore}
-                Valid Until: ${serverCert.notAfter}
-                Serial: ${serverCert.serialNumber}
-                """.trimIndent()
-                
-            } catch (e: Exception) {
-                null
-            }
-        }
-    }
-}
-```
-
-### Gradle Dependencies
-
-Add these dependencies to your `app/build.gradle`:
-
-```gradle
-dependencies {
-    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
-    implementation 'com.squareup.okhttp3:logging-interceptor:4.12.0'
-    
-    // For certificate handling
-    implementation 'org.bouncycastle:bcprov-jdk15on:1.70'
-    implementation 'org.bouncycastle:bcpkix-jdk15on:1.70'
-}
-```
-
-### Network Security Config (Optional)
-
-For additional security configuration, create `res/xml/network_security_config.xml`:
-
-```xml
-<?xml version="1.0" encoding="utf-8"?>
-<network-security-config>
-    <domain-config cleartextTrafficPermitted="false">
-        <!-- includeSubdomains 를 쓰므로 와일드카드 항목은 따로 적지 않는다 -->
-        <domain includeSubdomains="true">jejezzhome.iptime.org</domain>
-
-        <!-- Certificate pinning configuration.
-             첫 줄은 CA 공개키 핀, 둘째 줄은 서버 공개키 핀이다.
-             서버 인증서는 1년마다 갱신되므로 CA 핀을 함께 두어야 갱신 때 끊기지 않는다. -->
-        <pin-set>
-            <pin digest="SHA-256">KsyDADVe29SnmMw5e4Jo0d/VFoyegKpVSfCJDzP5lDA=</pin>
-            <pin digest="SHA-256">5nSijbuz83FqgmWIuU71rLJ66Y/qEVFg09U07sEpBOU=</pin>
-        </pin-set>
-    </domain-config>
-</network-security-config>
-```
-
-And reference it in your `AndroidManifest.xml`:
-
-```xml
-<application
-    android:networkSecurityConfig="@xml/network_security_config"
-    ... >
-</application>
-```
-
-### Testing Certificate Installation
-
-```kotlin
-class CallFusionConnectionTest {
-    
-    fun testSecureConnection() {
-        lifecycleScope.launch {
-            try {
-                val client = SecureCallFusionClient(this@MainActivity)
-                client.initialize()
-                
-                // Test HTTPS connection first
-                val isValid = CertificateValidator.validateServerCertificate("jejezzhome.iptime.org")
-                
-                if (isValid) {
-                    Log.d("ConnectionTest", "Certificate validation passed")
-                    
-                    // Proceed with WebSocket connection
-                    client.connectSecure("wss://jejezzhome.iptime.org/relay/rtc", webSocketListener)
-                } else {
-                    Log.e("ConnectionTest", "Certificate validation failed")
-                }
-                
-            } catch (e: Exception) {
-                Log.e("ConnectionTest", "Connection test failed", e)
-            }
-        }
-    }
-}
-```
-
-**Recommendation:** Use **Method 1 (Bundled Certificate)** for production apps as it provides the best balance of security and user experience without requiring manual certificate installation.
+> **클라이언트 인증서(mTLS)는 아직 없습니다.** 서버가 `verify_client = optional` 로
+> 두고 있고 검사 결과를 쓰는 코드가 없어, 지금은 단말 인증서를 준비할 필요가
+> 없습니다. 도입하면 이 문서에 절차를 추가하겠습니다.
 
 ## Group Communication API Endpoints
 
@@ -631,14 +273,12 @@ class GroupWebSocketClient(private val context: Context) {
     }
     
     private fun connectAndSend(initialMessage: String) {
-        val secureClient = CallFusionSSLConfig.createSSLContext(context)
-        val client = OkHttpClient.Builder()
-            .sslSocketFactory(secureClient.socketFactory, 
-                CallFusionSSLConfig.createTrustManager(context))
-            .build()
-            
+        // 공인 인증서라 TLS 설정이 필요 없다. 시스템 신뢰 저장소가 검증한다.
+        val client = OkHttpClient()
+
+        // host 는 디렉터리에서 받아 저장해 둔 값이다 (스킴 없음).
         val request = Request.Builder()
-            .url("wss://jejezzhome.iptime.org/relay/rtc")
+            .url("wss://$host/relay/rtc")
             .build()
             
         webSocket = client.newWebSocket(request, object : okhttp3.WebSocketListener() {
@@ -1028,7 +668,7 @@ class GroupPhotoManager(
                     .build()
                 
                 val request = Request.Builder()
-                    .url("https://jejezzhome.iptime.org/relay/group/$groupId/upload")
+                    .url("https://$host/relay/group/$groupId/upload")
                     .post(requestBody)
                     .build()
                 

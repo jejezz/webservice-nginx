@@ -11,7 +11,7 @@ import org.json.JSONObject
 /**
  * RTC 시그널링 클라이언트.
  *
- *   val client = RtcRelayClient(http, "wss://jejezzhome.iptime.org:28099", listener)
+ *   val client = RtcRelayClient(http, "wss://c-a3f19c04.rtc.zoomon.art", listener)
  *   client.connect()
  *   client.invite(roomId = "12345678",
  *                 sender   = RtcMessage.address("101B405U", "192.168.0.157"),

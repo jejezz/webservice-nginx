@@ -26,9 +26,9 @@ implementation 'org.json:json:20240303'   // Android 에 기본 포함(org.json)
 
 | 용도 | 주소 |
 |---|---|
-| RTC 시그널링 | `wss://jejezzhome.iptime.org:28099/ws` |
-| IoT 제어 | `wss://jejezzhome.iptime.org:28099/iot` |
-| REST | `https://jejezzhome.iptime.org:28099` |
+| RTC 시그널링 | `wss://<host>/relay/rtc` |
+| IoT 제어 | `wss://<host>/relay/iot` |
+| REST | `https://<host>/relay` |
 
 호스트 이름은 서버 인증서 SAN 에 있는 것을 써야 합니다. 자세한 것은
 `ANDROID_API_GUIDE.md` 의 인증서 절을 보세요. CA 는 `nginx/cert/ca/ca.crt` 입니다.
@@ -133,8 +133,8 @@ implementation 'org.json:json:20240303'   // Android 에 기본 포함(org.json)
 
 ```json
 { "method":"invite",
-  "sender":"rtc:101B405U@jejezzhome.iptime.org:28099",
-  "receiver":"rtc:101B203U@jejezzhome.iptime.org:28099",
+  "sender":"rtc:101B405U@a3f19c04",
+  "receiver":"rtc:101B203U@a3f19c04",
   "code":"100", "device":"interphone", "roomid":"12345678" }
 ```
 

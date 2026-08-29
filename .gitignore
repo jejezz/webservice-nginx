@@ -57,8 +57,12 @@ services/*/settings.json
 # settings.local.json 은 개인 설정이다 (.local 규약 — 공유할 설정은
 # .claude/settings.json 에 두고 그건 커밋한다).
 # worktrees/ 는 작업용으로 만들어진 저장소 사본이라 통째로 중복이다.
-.claude/settings.local.json
-.claude/worktrees/
+#
+# **/ 를 붙인다. 슬래시가 든 패턴은 이 파일이 있는 디렉토리(= 저장소 루트)에만
+# 걸려서, services/<서비스>/.claude/worktrees/ 는 그냥 통과한다. 실제로 그렇게
+# 만들어진 워크트리가 커밋에 딸려 들어간 적이 있다.
+**/.claude/settings.local.json
+**/.claude/worktrees/
 
 # 작업 중 메모. 저장소에 남길 것은 docs/ 에 둔다.
 claude-session-memery.md

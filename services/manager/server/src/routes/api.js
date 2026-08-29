@@ -7,6 +7,7 @@ const { loadServices } = require('../services/registry');
 const health = require('../services/health');
 const pm2 = require('../services/pm2');
 const nginx = require('../services/nginx');
+const cert = require('../services/cert');
 const setup = require('../services/setup');
 const attest = require('../services/setup-attest');
 const { router: adminRouter } = require('./admin');
@@ -168,10 +169,12 @@ router.get('/overview', requireAuth, async (req, res, next) => {
   try {
     const { server, services: registered, source } = loadServices();
 
-    const [checks, pm2Map, nginxStatus] = await Promise.all([
+    const [checks, pm2Map, nginxStatus, certStatus] = await Promise.all([
       health.checkAll(registered),
       pm2.list(),
       nginx.status(),
+      // 인증서는 nginx 가 내미는 것을 본다. 포트·SNI 는 nginx-stack.conf 값이다.
+      cert.status(server),
     ]);
 
     const services = registered.map((service, i) => ({
@@ -190,6 +193,7 @@ router.get('/overview', requireAuth, async (req, res, next) => {
 
     res.json({
       nginx: nginxStatus,
+      cert: certStatus,
       server,
       services,
       summary,

@@ -15,7 +15,7 @@ import java.io.IOException
  */
 class RelayRestApi(
     private val http: OkHttpClient,
-    baseUrl: String, // 예: https://jejezzhome.iptime.org:28099
+    baseUrl: String, // 예: https://c-a3f19c04.rtc.zoomon.art  (디렉터리의 host 에 스킴을 붙인 것)
 ) {
     /**
      * 스킴이 없으면 https 로 본다.
