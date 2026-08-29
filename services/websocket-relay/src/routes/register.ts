@@ -24,7 +24,7 @@ import { getGateway } from '../gateway';
 import { DbConn } from '../libs/dbConnection';
 import logger from '../libs/logger'; // Import your configured logger
 import { normalizeSipUser, SIP_USER_ERROR } from '../libs/sipUser';
-import { requestEnrollment } from '../libs/enrollment';
+import { requestEnrollment, issueDeviceCert } from '../libs/enrollment';
 import { PLACE_PART_RE } from '../libs/address';
 import { onEnrollmentPending } from '../libs/enrollmentEvents';
 import { complexId as serverComplexId, COMPLEX_ID_RE, COMPLEX_ID_ERROR } from '../libs/complex';
@@ -107,7 +107,7 @@ Route2Register.get('/findip', function (req: Request, res: Response) {
  */
 
 async function handlePostMobile(req: Request, res: Response) {
-    const { uuid, email, complex, address, token } = req.body ?? {};
+    const { uuid, email, complex, address, token, csr } = req.body ?? {};
     if (!uuid || !email || !complex || !address || !token) {
         res.status(400).json({ error: 'uuid, email, complex, address, token 은 필수입니다.' });
         return;
@@ -205,12 +205,30 @@ async function handlePostMobile(req: Request, res: Response) {
     }
 
     if (outcome.kind === 'refreshed') {
-        res.status(200).json({
+        const body: Record<string, unknown> = {
             title: 'websocket-relay',
             result: 'success',
             status: 'approved',
             message: 'Your token has been updated successfully.',
-        });
+        };
+
+        /*
+         * 클라이언트 인증서(mTLS). CSR 을 보내 온 승인 단말에만 내려준다.
+         *
+         * 발급과 갱신이 같은 경로다. 앱은 승인을 확인하려고 어차피 다시
+         * 등록하고, 만료가 다가오면 CSR 을 한 번 더 보내면 된다.
+         *
+         * 실패해도 등록은 성공으로 둔다 — CA 가 없는 배치도 있고, mTLS 는
+         * 아직 아무것도 강제하지 않는 선택적 기능이다. 여기서 막으면 인증서와
+         * 무관한 토큰 갱신까지 함께 죽는다.
+         */
+        if (typeof csr === 'string' && csr.trim()) {
+            const pem = await issueDeviceCert(uuid, csr);
+            if (pem) body.clientCert = pem;
+            else body.clientCertError = 'issue_failed';
+        }
+
+        res.status(200).json(body);
         return;
     }
 

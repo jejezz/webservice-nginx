@@ -32,6 +32,7 @@ import { sendToTargets, sendOne } from './push';
 import { TokenMessage } from 'firebase-admin/messaging';
 import config from '../config';
 import logger from './logger';
+import * as deviceCert from './deviceCert';
 
 /** 한 세대가 인정할 수 있는 단말 수. */
 export const MAX_APPROVED_PER_HOME = 4;
@@ -62,6 +63,39 @@ export interface EnrollmentPayload {
     phone?: string | null;
     image?: string | null;
     sip_user?: string | null;
+}
+
+/**
+ * 승인된 단말에게 클라이언트 인증서를 발급하고 기록을 남긴다.
+ *
+ * **승인된 단말에만 부른다.** 이 함수는 그 확인을 하지 않는다 — 부르는 쪽이
+ * 이미 rtc_mobiles 에 있는 행을 손에 쥐고 있어야 한다.
+ *
+ * 주체는 서버가 아는 값으로 쓴다. CSR 에 적힌 것은 보지 않는다 (deviceCert.ts).
+ *
+ * @returns 인증서 PEM. CA 가 없거나 CSR 이 잘못됐으면 null — 발급만 안 될 뿐
+ *          등록 자체는 성공으로 둔다. mTLS 는 아직 선택적 기능이다.
+ */
+export async function issueDeviceCert(
+    uuid: string,
+    csrPem: string,
+): Promise<string | null> {
+    const issued = deviceCert.sign(csrPem, { uuid, complexId: complexId() });
+    if (!issued) return null;
+
+    try {
+        await DbConn.execute(
+            `UPDATE ${config.tables.mobile}
+                SET cert_serial = ?, cert_issued_at = NOW(), cert_expires_at = ?
+              WHERE uuid = ? AND complex_id <=> ?`,
+            [issued.serial, issued.expiresAt, uuid, complexId()]);
+    } catch (err: any) {
+        // 기록만 실패한 것이다. 인증서는 이미 유효하게 만들어졌으므로 내려준다.
+        // 여기서 막으면 006-device-cert.sql 을 아직 적용하지 않은 배치에서
+        // 발급이 통째로 멈춘다.
+        logger.warn(`인증서 발급 기록에 실패했습니다 (uuid=${uuid}): ${err.message}`);
+    }
+    return issued.pem;
 }
 
 /** 요청을 누가 어디서 보냈는지. 월패드 승인 화면이 단말을 가리는 데 쓴다. */
