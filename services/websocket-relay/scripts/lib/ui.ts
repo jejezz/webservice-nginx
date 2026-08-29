@@ -3,6 +3,10 @@
  *
  * setup / doctor / db-* 가 같은 모양으로 보고하도록 여기에 모아 둔다.
  * Reporter 로 문제 수를 세어 마지막에 종료 코드를 정한다 (CI 에서도 쓸 수 있게).
+ *
+ * Reporter 는 구축 마법사가 읽는 판정도 낸다 (docs/check-contract.md).
+ * contract() 를 부르지 않으면 예전과 똑같이 동작하므로, 이 통로를 쓰지 않는
+ * setup·db-migrate·db-status 는 아무것도 달라지지 않는다.
  */
 
 import readline from 'readline';
@@ -16,39 +20,116 @@ const DIM = c('\x1b[2m');
 const BOLD = c('\x1b[1m');
 const RESET = c('\x1b[0m');
 
+/**
+ * 점검 규약의 네 레벨 (docs/check-contract.md).
+ *
+ *   ok       됐다
+ *   skip     안 해도 되는 것 · 우리가 못 본 것 (판정에 영향 없음)
+ *   pending  아직 안 한 것        → incomplete
+ *   problem  잘못된 것            → problem
+ */
+type Level = 'ok' | 'skip' | 'pending' | 'problem';
+
 export class Reporter {
   problems = 0;
 
+  // ── 점검 규약 모드 ────────────────────────────────────────────────
+  //
+  // 구축 마법사가 판정을 읽으려면 별도의 통로가 필요하다 — 종료 코드로는
+  // 안 된다 (docs/check-contract.md '종료 코드로는 안 됩니다').
+  //
+  // **사람이 보는 출력은 그대로 둔다.** contract() 를 부르지 않으면 이
+  // 클래스는 예전과 똑같이 동작한다. setup·db-migrate·db-status 는 그대로다.
+  private step_ = '';
+  private json = false;
+  private entries: { level: Level; text: string }[] = [];
+
+  /** 이 보고를 마법사가 읽는 단계로 표시한다. asJson 이면 JSON 만 낸다. */
+  contract(step: string, asJson: boolean): void {
+    this.step_ = step;
+    this.json = asJson;
+  }
+
+  private add(level: Level, text: string): void {
+    if (this.step_) this.entries.push({ level, text });
+  }
+
+  /** JSON 모드에서는 사람용 줄을 찍지 않는다 — stdout 에 JSON 만 나가야 한다. */
+  private say(line: string): void {
+    if (!this.json) console.log(line);
+  }
+
   step(title: string): void {
-    console.log(`\n${BOLD}${title}${RESET}`);
+    this.say(`\n${BOLD}${title}${RESET}`);
   }
 
   ok(message: string): void {
-    console.log(`  ${GREEN}✓${RESET} ${message}`);
+    this.add('ok', message);
+    this.say(`  ${GREEN}✓${RESET} ${message}`);
   }
 
+  /**
+   * 안 해도 되는 것, 또는 우리가 확인하지 못한 것.
+   *
+   * ⚠️ "확인할 수 없음" 을 problem 으로 두면 그 단계가 영원히 막힌다 —
+   * 실제로 잘못된 것이 아니라 우리가 못 본 것뿐이다 (docs/check-contract.md).
+   */
   warn(message: string): void {
-    console.log(`  ${YELLOW}!${RESET} ${message}`);
+    this.add('skip', message);
+    this.say(`  ${YELLOW}!${RESET} ${message}`);
   }
 
-  /** 고쳐야 하는 것. problems 를 올린다. */
+  /**
+   * **아직 안 한 것.** 순서가 아직 안 온 것이지 고장이 아니다.
+   *
+   * 사람이 보는 출력은 bad 와 똑같다 — 터미널에서 쓰던 눈에는 달라지는 것이
+   * 없다. 갈라지는 것은 마법사가 읽는 판정뿐이다 (pending vs problem).
+   */
+  pend(message: string, fix?: string): void {
+    this.problems++;
+    this.add('pending', fix ? `${message} → ${fix}` : message);
+    this.say(`  ${RED}✗${RESET} ${message}`);
+    if (fix) this.fix(fix);
+  }
+
+  /** 고쳐야 하는 것 — **잘못돼 있는 것**. problems 를 올린다. */
   bad(message: string, fix?: string): void {
     this.problems++;
-    console.log(`  ${RED}✗${RESET} ${message}`);
+    this.add('problem', fix ? `${message} → ${fix}` : message);
+    this.say(`  ${RED}✗${RESET} ${message}`);
     if (fix) this.fix(fix);
   }
 
   /** 해결 방법 한 줄. */
   fix(command: string): void {
-    console.log(`    ${DIM}→ ${command}${RESET}`);
+    this.say(`    ${DIM}→ ${command}${RESET}`);
   }
 
   info(message: string): void {
-    console.log(`    ${DIM}${message}${RESET}`);
+    // 판정에 들어가지 않는 안내다 (check-report.sh 의 info 와 같다).
+    this.say(`    ${DIM}${message}${RESET}`);
+  }
+
+  /**
+   * 판정. problem 이 하나라도 있으면 problem, 아니면 pending 이 있으면
+   * incomplete, 둘 다 없으면 complete. skip 은 판정에 영향을 주지 않는다.
+   */
+  private state(): 'complete' | 'incomplete' | 'problem' {
+    if (this.entries.some((e) => e.level === 'problem')) return 'problem';
+    if (this.entries.some((e) => e.level === 'pending')) return 'incomplete';
+    return 'complete';
   }
 
   /** 마지막 정리. 문제가 있으면 0이 아닌 코드로 끝낸다. */
   finish(nextCommand = 'npm run doctor'): never {
+    if (this.json) {
+      const state = this.state();
+      process.stdout.write(
+        `${JSON.stringify({ step: this.step_, state, checks: this.entries }, null, 2)}\n`,
+      );
+      process.exit(state === 'complete' ? 0 : 1);
+    }
+
     console.log('');
     if (this.problems === 0) {
       console.log(`${GREEN}모두 정상입니다.${RESET}`);

@@ -189,6 +189,34 @@ const STEPS = [
     check: { cwd: 'nginx', file: './install_nginx_stack.sh', args: ['--check', '--json'] },
   },
   {
+    id: 'relay.service',
+    service: 'websocket-relay',
+    title: 'websocket-relay 설치와 기동',
+    why:
+      '모바일이 이 게이트웨이와 만나는 유일한 자리입니다 — WebRTC 시그널링도, IoT 도, ' +
+      '**착신 푸시(FCM)도 전부 여기를 지납니다.** Kamailio 가 INVITE 를 붙들어 두고 깨우러 ' +
+      '가는 상대가 이 서비스이고, 이것이 없으면 자고 있는 단말은 영영 깨지 않습니다. ' +
+      '단말을 찾는 표(rtc_mobiles)도 이 서비스가 들고 있습니다.',
+    // DB 는 이 서비스의 표가 있는 곳이고, pm2 가 이것을 띄웁니다. nginx 는 /relay/ 를
+    // 바깥에 여는 자리 — 셋 다 있어야 doctor 가 통과합니다.
+    requires: ['database.schema', 'pm2.apps', 'nginx.routes'],
+    command: {
+      cwd: 'services/websocket-relay',
+      run:
+        'npm install\n' +
+        'npm run setup        # .env 를 만든다 (물어보는 값들이 있다)\n' +
+        'npm run db:migrate\n' +
+        'npm run web:build\n' +
+        'npm start            # pm2 등록 + pm2 save',
+      sudo: false,
+    },
+    guide: { text: '이 서비스의 대시보드', href: '/relay/dashboard' },
+    // 점검은 npm run doctor 가 하는 그것입니다. 껍데기를 한 겹 두른 이유는
+    // check-relay.sh 머리말에 있습니다 (node_modules 가 없으면 doctor 는
+    // 실행조차 되지 않습니다).
+    check: { cwd: 'services/websocket-relay', file: './check-relay.sh', args: ['--check', '--json'] },
+  },
+  {
     id: 'janus.verify.call',
     service: 'janus',
     title: '시험 통화',
@@ -224,7 +252,9 @@ const STEPS = [
     why:
       '자고 있는 모바일로 인터폰이 걸 때, INVITE 를 붙들어 두고(tsilo) FCM 으로 단말을 ' +
       '깨워 그 연결로 흘려보냅니다. 네 자리 중 하나만 비어도 아무 일도 일어나지 않습니다.',
-    requires: ['sip.accounts', 'nginx.routes'],
+    // 깨우러 갈 상대가 relay.service 다. 그것이 서 있어야 이 단계가 의미를 갖는다
+    // (relay.service 가 nginx.routes 를 이미 걸고 있으므로 여기서는 겹쳐 적지 않는다).
+    requires: ['sip.accounts', 'relay.service'],
     optional: true,
     command: { cwd: 'services/kamailio', run: 'sudo ./install.sh --apply', sudo: true },
     check: { cwd: 'services/kamailio', file: './check-push.sh', args: ['--check', '--json'] },
