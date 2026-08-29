@@ -19,6 +19,7 @@ import config from './config';
 import { getGateway } from './gateway';
 import { DbConn } from './libs/dbConnection';
 import { complexId } from './libs/complex';
+import { clientCert, mtlsActive } from './libs/clientCert';
 import { Firebase } from './libs/firebaseAdmin';
 
 // package.json 의 version. dist/ 에서 실행돼도 서비스 디렉토리에서 찾는다.
@@ -28,7 +29,7 @@ const pkg = require(`${config.root}/package.json`) as { version?: string };
 export function createHealthRouter(): Router {
     const router = Router();
 
-    router.get('/', (_req: Request, res: Response) => {
+    router.get('/', (req: Request, res: Response) => {
         const gateway = getGateway();
         const dbReady = DbConn.isConfigured() && DbConn.isReady();
 
@@ -61,6 +62,13 @@ export function createHealthRouter(): Router {
                 // 푸시는 선택적 의존성이다. 꺼져 있어도 중계 자체는 정상이므로
                 // status 를 떨어뜨리지 않고 여기에만 적는다.
                 pushEnabled: Firebase.isConfigured(),
+                // mTLS 가 실제로 도는지 확인할 수 있는 유일한 자리다. nginx 가
+                // TLS 를 끊으므로 설정만 보고는 헤더가 오는지 알 수 없다.
+                // 지금은 아무것도 막지 않는다 — 읽기만 한다.
+                clientCert: {
+                    active: mtlsActive(req),
+                    verify: clientCert(req).verify,
+                },
                 database: {
                     configured: DbConn.isConfigured(),
                     ready: dbReady,

@@ -189,6 +189,21 @@ class Route:
         lines.append("        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;")
         lines.append("        proxy_set_header X-Forwarded-Proto $scheme;")
 
+        # 클라이언트 인증서 검증 결과. nginx 가 TLS 를 끊으므로 백엔드는 이것을
+        # 직접 볼 수 없다.
+        #
+        # **mTLS 를 쓰지 않아도 반드시 넣는다.** proxy_set_header 는 클라이언트가
+        # 같은 이름으로 보낸 헤더를 덮어쓴다. 빼 두면 아무나
+        # `X-SSL-Client-Verify: SUCCESS` 를 붙여 보내 검사를 통째로 우회한다.
+        # 지금은 읽는 곳이 없지만, 나중에 읽기 시작할 때 이 줄이 없으면
+        # 그 순간부터 구멍이 된다.
+        #
+        # 값은 mTLS 가 꺼져 있으면 빈 문자열이고, 그때 nginx 는 헤더를 아예
+        # 보내지 않는다(클라이언트가 보낸 것도 함께 사라진다). TLS 위에서
+        # verify_client 가 켜져 있으면 NONE / SUCCESS / FAILED 가 온다.
+        lines.append("        proxy_set_header X-SSL-Client-Verify $ssl_client_verify;")
+        lines.append("        proxy_set_header X-SSL-Client-DN $ssl_client_s_dn;")
+
         if self.websocket:
             lines.append("        proxy_set_header Upgrade $http_upgrade;")
             lines.append("        proxy_set_header Connection $connection_upgrade;")
