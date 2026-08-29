@@ -180,7 +180,8 @@ POST https://<서버>/iot/register/mobile
 > 서버 쪽은 이미 그렇게 동작하고, 아래 `sip` 를 쓰면 이 필드를 보내지 않아도
 > 됩니다. 보내던 앱도 그대로 둡니다.
 
-승인된 단말이 다시 등록하면 응답에 **내선 자격**이 실려 옵니다. 이 값으로 Janus
+승인된 단말이 다시 등록하면 응답에 **내선 자격**이 실려 옵니다. 앱을 고칠 때
+필요한 것은 [client-migration.md](client-migration.md) 에 모아 두었습니다. 이 값으로 Janus
 에 등록하세요(위 3번의 `username`·`authuser`·`secret`).
 
 ```jsonc

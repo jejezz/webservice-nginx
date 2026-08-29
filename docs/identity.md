@@ -225,6 +225,11 @@ Janus 하니스(`test-harness/*.html` · `verify-call.sh --run` · `verify-bridg
 
 ## 적용 순서
 
+클라이언트 쪽에서 무엇을 고쳐야 하는지는
+[client-migration.md](client-migration.md) 에 따로 있습니다 — 그 문서 하나로
+작업을 시작할 수 있게 썼습니다.
+
+
 1. ~~**relay**~~ ✅ — 순번 배정(`schema/007-sip-number.sql` · `libs/sipNumber.ts`),
    승인 시 `subscriber` 계정 발급(`libs/sipAccount.ts`), 단말을 지울 때 계정 회수,
    `/register/mobile` 응답의 `sip`, `/sip-push` 의 세대번호와 `missing`.

@@ -260,6 +260,8 @@ node tools/fcm.js dry <토큰>        # 보내지 않고 토큰만 검증
 
 SIP 내선(`sip_user`)과 동/호(`address`), 그리고 Kamailio·Janus 쪽 ID 가 어떻게
 이어지는지는 [docs/identity.md](../../docs/identity.md) 한 곳에 있습니다.
+클라이언트(앱·인터폰·월패드)를 고칠 때는
+[docs/client-migration.md](../../docs/client-migration.md) 를 보세요.
 
 ## 구조
 
