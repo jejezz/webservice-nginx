@@ -19,7 +19,7 @@
 ## 처음이라면 — 여기서 시작하세요
 
 ```bash
-git clone <이 저장소> webservices
+git clone https://github.com/jejezz/webservice-nginx.git webservices
 cd webservices
 ./bootstrap.sh
 ```
