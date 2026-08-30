@@ -29,6 +29,10 @@ Janus → nginx → 릴레이 → 시험 통화까지 19단계입니다. 각 단
 
 > 전체 설치가 무엇을 어떤 순서로 하는지는 [docs/setup-wizard.md](docs/setup-wizard.md),
 > 여러 서비스가 함께 쓰는 값은 [site/README.md](site/README.md) 를 보세요.
+>
+> **이 길이 실제로 통하는지 증명하려면** 빈 장비에서 처음부터 끝까지 돌려 봐야
+> 합니다 — 절차와 기록표가 [docs/clean-install-test.md](docs/clean-install-test.md)
+> 에 있습니다.
 
 ```
 webservices/

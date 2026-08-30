@@ -23,6 +23,11 @@
 [health-contract.md](health-contract.md) · [nginx-conf.md](nginx-conf.md) ·
 [pm2-conf.md](pm2-conf.md) · [migration-plan.md](migration-plan.md)
 
+> 빈 장비에서 이 19단계를 처음부터 돌려 보는 절차와 기록표는
+> [clean-install-test.md](clean-install-test.md) 에 있습니다. 이미 설치된
+> 장비에서는 재현성을 증명할 수 없습니다 — 무엇을 돌려도 "이미 돼 있어서
+> 통과한 것" 과 구분되지 않기 때문입니다.
+
 ## 왜 필요한가
 
 지금 구축 절차는 **여덟 곳에 흩어져 있습니다.**
