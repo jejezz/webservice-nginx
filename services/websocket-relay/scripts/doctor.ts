@@ -89,6 +89,32 @@ function checkEnv(): void {
 }
 
 /**
+ * 사이트 값(`site/settings.ini`). 없으면 빈 값이다.
+ *
+ * doctor 는 릴레이 소스를 import 하지 않으므로(빌드 없이 tsx 로 돈다) 여기서
+ * 직접 읽는다. 형식은 `libs/siteSettings.ts` 와 같은 `키 = 값` 이다.
+ */
+function readSiteSettings(): { host: string; complexId: string; sipDomain: string } {
+    const file = path.resolve(ROOT, '..', '..', 'site', 'settings.ini');
+    const out: Record<string, string> = {};
+    try {
+        for (const raw of fs.readFileSync(file, 'utf8').split(/\r?\n/)) {
+            const line = raw.trim();
+            if (!line || line.startsWith('#') || line.startsWith(';')) continue;
+            const eq = line.indexOf('=');
+            if (eq !== -1) out[line.slice(0, eq).trim()] = line.slice(eq + 1).trim();
+        }
+    } catch {
+        // 사이트 층을 아직 만들지 않은 배치다.
+    }
+    return {
+        host: out.host ?? '',
+        complexId: (out.complex_id ?? '').toLowerCase(),
+        sipDomain: out.sip_domain ?? '',
+    };
+}
+
+/**
  * 앱에게 알려 줄 Janus 주소가 **이 단지의 것인지** 본다.
  *
  * ── 왜 대조가 필요한가 ──────────────────────────────────────────
@@ -103,11 +129,24 @@ function checkEnv(): void {
  * 근본 해법은 두 값을 한 곳에서 파생시키는 것이다. 그 전까지는 여기서 대조한다.
  */
 function checkJanusUrl(complexId: string): void {
-    const raw = (process.env.JANUS_WS_URL ?? '').trim();
+    const site = readSiteSettings();
+    const override = (process.env.JANUS_WS_URL ?? '').trim();
+    const derived = site.host ? `wss://${site.host}/janus-ws` : '';
+    const raw = override || derived;
+
     if (raw === '') {
         // 없으면 응답에서 키를 빼고 보낸다. 앱은 저장해 둔 값을 쓴다.
-        report.info('JANUS_WS_URL 미설정 — 등록 응답에 janus.url 을 싣지 않습니다.');
+        report.info('Janus 주소가 없습니다 — 등록 응답에 janus.url 을 싣지 않습니다.');
         return;
+    }
+
+    // .env 로 덮는 것 자체는 막지 않는다(개발기). 다만 사이트 값과 다르면
+    // 그것이 곧 옛 사고의 모양이므로 드러낸다.
+    if (override && derived && override !== derived) {
+        report.warn(`.env 의 JANUS_WS_URL 이 사이트 값을 덮고 있습니다 (${override} ≠ ${derived}).`);
+        report.fix('한 곳에서 나오게 하려면 .env 의 JANUS_WS_URL 줄을 지우세요 (site/settings.ini 의 host 를 씁니다)');
+    } else if (!override && derived) {
+        report.ok('Janus 주소를 site/settings.ini 의 host 에서 만듭니다.');
     }
 
     let host: string;

@@ -27,6 +27,10 @@ import dotenv from 'dotenv';
 // quiet: 부팅할 때마다 pm2 로그에 dotenv 배너가 찍히지 않도록.
 dotenv.config({ quiet: true });
 
+// 여러 서비스가 함께 쓰는 값. **config 를 import 하지 않는 파일이어야 한다** —
+// 여기서 부르므로 되짚으면 순환이 된다.
+import { siteSettings, janusWsUrl } from './libs/siteSettings';
+
 /** 서비스 디렉토리 (src 의 상위). 아래 상대 경로들의 기준점이다. */
 const ROOT = path.resolve(__dirname, '..');
 
@@ -59,7 +63,8 @@ export const COMPLEX_ID_ERROR = 'complexId 는 소문자 16진수 8자여야 합
  * 잘못된 값으로 검사를 켜면 멀쩡한 단말이 전부 거부되기 때문이다.
  */
 function readComplexId(): string | null {
-    const raw = (process.env.COMPLEX_ID ?? '').trim().toLowerCase();
+    // .env 가 이긴다. 비어 있을 때만 사이트 값을 쓴다 (libs/siteSettings.ts).
+    const raw = ((process.env.COMPLEX_ID ?? '').trim() || siteSettings().complexId).toLowerCase();
     if (raw === '') return null;
     if (!COMPLEX_ID_RE.test(raw)) {
         warnings.push(`COMPLEX_ID 형식이 잘못됐습니다: "${raw}" — ${COMPLEX_ID_ERROR} 단지 검사를 켜지 않고 계속합니다.`);
@@ -190,7 +195,16 @@ export const config = {
      * 받는다. 비어 있으면 착신 푸시 payload 에 싣지 않는다.
      */
     janus: {
-        wsUrl: (process.env.JANUS_WS_URL ?? '').trim(),
+        /*
+         * 앱에게 알려 줄 Janus 주소. 등록 응답의 `janus.url` 과 착신 푸시의
+         * `janusUrl` 로 나간다 — 단말이 그대로 믿고 접속하는 값이다.
+         *
+         * **사이트의 host 에서 만든다.** 손으로 적던 값이라 개발용 호스트가
+         * 그대로 앱에 나간 적이 있고, 단말에서는 이름이 풀리지 않아 통화가
+         * 되지 않았다. .env 로 덮을 수는 있게 남겨 둔다 — 한 장비만 다르게
+         * 두어야 하는 경우가 있고, 어긋나면 doctor 가 말해 준다.
+         */
+        wsUrl: (process.env.JANUS_WS_URL ?? '').trim() || janusWsUrl(),
 
         /*
          * 단말마다 다른 Janus 토큰 (libs/janusToken.ts).
@@ -225,7 +239,7 @@ export const config = {
     sip: {
         provision: bool(process.env.SIP_PROVISION, true),
         /** kamctlrc 의 SIP_DOMAIN 과 같아야 한다. 다르면 만든 계정으로 등록되지 않는다. */
-        domain: (process.env.SIP_DOMAIN || 'pluto.org').trim(),
+        domain: ((process.env.SIP_DOMAIN ?? '').trim() || siteSettings().sipDomain || 'pluto.org'),
         subscriberTable: process.env.SIP_SUBSCRIBER_TABLE || 'kamailio.subscriber',
     },
 

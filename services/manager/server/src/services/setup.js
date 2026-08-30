@@ -79,6 +79,22 @@ const LEVELS = new Set(['ok', 'skip', 'pending', 'problem']);
  */
 const STEPS = [
   {
+    id: 'site.settings',
+    service: 'site',
+    title: '사이트 값 (여러 서비스가 함께 씁니다)',
+    why:
+      '호스트·단지 ID·SIP 도메인은 **다섯 서비스가 함께 쓰는 값**입니다. ' +
+      '각자 자기 설정 파일에 적게 두면 언젠가 어긋나고, 그 어긋남은 조용합니다 — ' +
+      '실제로 앱에게 알려 줄 Janus 주소가 개발용 호스트인 채로 나가 단말에서 ' +
+      '이름이 풀리지 않았고, 앱 쪽에서 알려 줄 때까지 아무도 몰랐습니다.\n\n' +
+      '여기서 한 번 받고 나머지가 그 값에서 나옵니다. **가장 먼저 채우세요.**',
+    // 아무것도 요구하지 않는다. 다른 단계들이 이 값을 쓰므로 맨 앞이어야 한다.
+    requires: [],
+    settings: { dir: 'site' },
+    command: { cwd: '.', run: './site/apply.sh --apply' },
+    check: { cwd: '.', file: './site/apply.sh', args: ['--check', '--json'] },
+  },
+  {
     id: 'database.schema',
     service: 'database',
     title: 'MariaDB 설치와 스키마 적용',
@@ -249,7 +265,7 @@ const STEPS = [
       '단말을 찾는 표(rtc_mobiles)도 이 서비스가 들고 있습니다.',
     // DB 는 이 서비스의 표가 있는 곳이고, pm2 가 이것을 띄웁니다. nginx 는 /relay/ 를
     // 바깥에 여는 자리 — 셋 다 있어야 doctor 가 통과합니다.
-    requires: ['database.schema', 'pm2.apps', 'nginx.routes'],
+    requires: ['site.settings', 'database.schema', 'pm2.apps', 'nginx.routes'],
     command: {
       cwd: 'services/websocket-relay',
       run:

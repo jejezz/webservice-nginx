@@ -24,6 +24,10 @@ services/<서비스>/
 └── .applied-settings      --apply 가 마지막으로 설치한 값 (root 가 쓴다)
 ```
 
+> **사이트 층이 하나 더 있습니다.** 여럿이 함께 쓰는 값(호스트·단지 ID·SIP
+> 도메인)은 `site/` 에 있고 같은 규약을 씁니다. 서비스 단위로만 두면 그런 값이
+> 여러 파일에 베껴 적히고 조용히 어긋납니다 — [site/README.md](../site/README.md).
+
 **`services/` 아래일 필요는 없습니다.** 세 파일이 한 디렉터리에 같이 있고
 `settings-schema.json` 이 규약대로면 됩니다. `nginx/public_ca/` 가 그렇습니다 —
 공인 인증서의 도메인은 서비스가 아니라 서버 전체의 값입니다.

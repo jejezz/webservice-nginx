@@ -73,3 +73,7 @@ claude-session-memery.md
 .DS_Store
 Thumbs.db
 *.swp
+
+# 사이트 값 — 장비마다 다르다 (site/settings-schema.json 이 정의)
+site/settings.ini
+site/.applied-settings
