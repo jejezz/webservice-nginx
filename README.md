@@ -145,6 +145,71 @@ sudo 없이 돌아갑니다 — 무엇이 왜 안 되는지는 대개 여기서 
 ./nginx/install_nginx_stack.sh --check
 ```
 
+## 전부 멈추기 — 자동 시작을 끄고 손으로만 띄우기
+
+장비를 다른 일에 쓰거나, 재부팅해도 아무것도 안 뜨게 하고 싶을 때입니다.
+**부팅에 걸려 있는 것은 둘**입니다.
+
+| 무엇 | 어디에 | 무엇을 띄우나 |
+|---|---|---|
+| `pm2 resurrect` | 사용자 crontab 의 `@reboot` → `pm2/pm2-boot.sh` | manager · websocket-relay · 각 대시보드 등 pm2 앱 |
+| systemd | `nginx` · `kamailio` · `janus` · `rtpproxy` · `mariadb` | 프록시·SIP·게이트웨이·미디어·DB |
+
+### 멈추기
+
+```bash
+# ① pm2 — 지금 멈추고, **저장 목록을 비웁니다**
+pm2 stop all
+pm2 delete all
+pm2 save                    # ← 이걸 빠뜨리면 재부팅 때 resurrect 가 되살립니다
+
+# ② 부팅 훅 — 목록이 비었으면 그대로 둬도 아무것도 안 뜹니다.
+#    확실히 하려면 그 줄을 지우거나 앞에 # 를 붙이세요.
+crontab -e                  # @reboot ... pm2-boot.sh 줄
+
+# ③ systemd — 지금 멈추고 부팅 등록도 뗍니다
+sudo systemctl disable --now nginx kamailio janus rtpproxy
+sudo systemctl disable --now mariadb        # DB 까지 멈출 때만
+```
+
+> `pm2 save` 를 빠뜨리는 것이 가장 흔한 실수입니다. `pm2 delete all` 만 하면
+> 지금은 조용하지만 **재부팅하면 옛 목록이 그대로 되살아납니다.**
+>
+> `rtpproxy` 는 sysv 스크립트라 `disable` 이 `systemd-sysv-install` 로 넘어간다는
+> 안내를 찍습니다 — 정상입니다.
+>
+> **`mariadb` 를 멈추면 manager 로그인도 안 됩니다** (계정이 DB 에 있습니다).
+> 대시보드를 계속 쓰려면 DB 는 남겨 두세요.
+
+### 멈췄는지 확인
+
+```bash
+pm2 list                                     # 비어 있어야 합니다
+systemctl is-enabled nginx kamailio janus    # 전부 disabled
+ss -lntp | grep -E ':(80|443|28084|28099|8088)'   # 아무것도 안 나와야 합니다
+```
+
+### 다시 손으로 띄우기
+
+```bash
+sudo systemctl start mariadb nginx kamailio janus rtpproxy
+cd pm2 && pm2 start ecosystem.config.js && pm2 save
+```
+
+특정 서비스만 띄우려면 `--only` 를 씁니다.
+
+```bash
+cd pm2 && pm2 start ecosystem.config.js --only manager
+```
+
+### 다시 자동으로 뜨게
+
+```bash
+sudo systemctl enable nginx kamailio janus rtpproxy mariadb
+crontab -e     # @reboot 줄을 되살립니다 (원문 만드는 법은 pm2/README.md)
+cd pm2 && pm2 start ecosystem.config.js && pm2 save
+```
+
 ## 서로를 가리키는 방법
 
 절대 경로는 **사용자 crontab 의 `@reboot` 줄 하나뿐**입니다. 나머지는 모두
