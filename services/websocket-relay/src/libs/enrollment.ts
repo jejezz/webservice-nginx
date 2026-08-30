@@ -648,6 +648,78 @@ export async function revokeDevice(
     return { ok: true, id: Number(row.id), uuid: row.uuid };
 }
 
+export type PermissionResult =
+    | { ok: true; id: number; canCall: boolean; canControl: boolean }
+    | { ok: false; reason: 'not_found' | 'nothing_to_change'; message: string };
+
+/**
+ * 이미 인정한 단말의 통화·제어 권한을 바꾼다.
+ *
+ * ── 승인과 규칙이 다르다 ─────────────────────────────────────────
+ * `approve` 는 값을 **안 보내면 꺼짐**으로 본다 — 실수로 빈 본문을 보냈을 때
+ * 권한이 켜지는 것보다 안 켜지는 편이 낫기 때문이다.
+ *
+ * 여기서는 반대로 **안 보내면 건드리지 않는다.** 이미 정해져 있는 값이므로,
+ * "통화만 끄겠다" 는 요청이 제어까지 함께 꺼 버리면 안 된다. 둘 다 안 보내면
+ * 바꿀 것이 없으므로 오류로 돌려준다 — 조용히 성공하면 부르는 쪽은 바뀐 줄 안다.
+ *
+ * ── 주소는 있으면 조인다 ─────────────────────────────────────────
+ * 월패드가 부를 때는 그 세대로 좁혀야 한다(소켓에서 얻은 주소를 넘긴다).
+ * 관리자 대시보드는 어느 단말이든 다룰 수 있으므로 넘기지 않는다.
+ */
+export async function setDevicePermissions(
+    target: { id: number; address?: string },
+    grants: { canCall?: boolean; canControl?: boolean },
+    actor: string,
+): Promise<PermissionResult> {
+    const sets: string[] = [];
+    const params: any[] = [];
+
+    if (grants.canCall !== undefined) {
+        sets.push('can_call = ?');
+        params.push(grants.canCall ? 1 : 0);
+    }
+    if (grants.canControl !== undefined) {
+        sets.push('can_control = ?');
+        params.push(grants.canControl ? 1 : 0);
+    }
+    if (sets.length === 0) {
+        return { ok: false, reason: 'nothing_to_change', message: 'canCall 또는 canControl 이 필요합니다.' };
+    }
+
+    let where = 'id = ?';
+    params.push(target.id);
+    if (target.address !== undefined) {
+        where += ' AND address = ? AND complex_id <=> ?';
+        params.push(normalizeAddress(target.address), complexId());
+    }
+
+    await DbConn.execute(
+        `UPDATE ${config.tables.mobile} SET ${sets.join(', ')} WHERE ${where}`, params);
+
+    // affectedRows 0 은 "그런 단말이 없다" 일 수도, "값이 이미 그랬다" 일 수도 있다.
+    // 뒤쪽을 오류로 만들지 않으려고 행을 다시 읽어 판단한다.
+    const [row] = await DbConn.select(
+        `SELECT address, email, can_call, can_control FROM ${config.tables.mobile} WHERE ${where}`,
+        params.slice(sets.length));
+
+    if (!row) {
+        return { ok: false, reason: 'not_found', message: '그런 단말이 없습니다.' };
+    }
+
+    invalidateControlCache(row.address);
+    logger.warn(
+        `[audit] 단말 권한 변경: ${row.address} ${row.email} ` +
+        `통화=${row.can_call ? '허용' : '불가'} 제어=${row.can_control ? '허용' : '불가'} (by ${actor})`);
+
+    return {
+        ok: true,
+        id: Number(target.id),
+        canCall: row.can_call === 1,
+        canControl: row.can_control === 1,
+    };
+}
+
 /** 권한을 바꾼 뒤 부른다. 캐시 때문에 30초간 옛 판정이 남는 것을 막는다. */
 export function invalidateControlCache(rawAddress?: string): void {
     if (rawAddress) controlCache.delete(normalizeAddress(rawAddress));

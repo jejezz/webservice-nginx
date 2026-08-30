@@ -64,9 +64,15 @@ POST /iot/register/mobile          // nginx 경유. 포트 직결이면 /registe
     "domain":   "pluto.org",
     "password": "9e807d…"           // 24자 16진수
   },
+  "canCall": true,                  // 지금 이 단말에 열려 있는 권한
+  "canControl": false,
   "clientCert": "-----BEGIN CERTIFICATE-----…"   // CSR 을 함께 보냈을 때만
 }
 ```
+
+`canCall`·`canControl` 은 승인 푸시로 한 번 받은 뒤 월패드나 관리자가 바꿀 수
+있습니다. 등록할 때마다 현재 값이 오므로 **여기서 따라잡으십시오** — 없는 버튼을
+계속 보여 주면 눌러야 실패합니다.
 
 - **`sip` 가 없을 수 있습니다.** 번호를 받기 전에 승인된 옛 단말이거나, 숫자가
   아닌 동/호(`A동` 등)라 번호를 만들 수 없는 세대입니다. 그 경우 예전처럼

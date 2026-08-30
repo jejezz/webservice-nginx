@@ -24,6 +24,7 @@ import { verifyPassword } from '../auth/reauth';
 import {
     listPending, approve, reject, countApproved,
     MAX_APPROVED_PER_HOME, MAX_PENDING_PER_HOME, PENDING_TTL_MS, invalidateControlCache,
+    setDevicePermissions,
 } from '../libs/enrollment';
 import { notifyWallpad } from '../libs/enrollmentEvents';
 import { normalizeAddress } from '../libs/address';
@@ -426,37 +427,19 @@ export function createDashboardApi(): Router {
      */
     router.patch('/mobiles/:id/permissions', async (req: Request, res: Response) => {
         const actor = (req as any).user?.username ?? 'unknown';
-        const sets: string[] = [];
-        const params: any[] = [];
-
-        if (req.body?.canCall !== undefined) {
-            sets.push('can_call = ?');
-            params.push(req.body.canCall ? 1 : 0);
-        }
-        if (req.body?.canControl !== undefined) {
-            sets.push('can_control = ?');
-            params.push(req.body.canControl ? 1 : 0);
-        }
-        if (sets.length === 0) return res.status(400).json({ error: 'canCall 또는 canControl 이 필요합니다.' });
-
-        params.push(req.params.id);
         try {
-            const result = await DbConn.execute(
-                `UPDATE ${config.tables.mobile} SET ${sets.join(', ')} WHERE id = ?`, params);
-            if (result.affectedRows === 0) return res.status(404).json({ error: 'not found' });
+            // 규칙은 월패드 경로(device.permissions)와 **같은 모듈**을 쓴다.
+            // 두 벌로 두면 캐시 무효화나 감사 로그가 한쪽에만 남는다.
+            const result = await setDevicePermissions(
+                { id: Number(req.params.id) },
+                { canCall: req.body?.canCall, canControl: req.body?.canControl },
+                actor);
 
-            const [row] = await DbConn.select(
-                `SELECT address, email, can_call, can_control FROM ${config.tables.mobile} WHERE id = ?`,
-                [req.params.id]);
-            invalidateControlCache(row.address);
-            logger.warn(
-                `[audit] 단말 권한 변경: ${row.address} ${row.email} ` +
-                `통화=${row.can_call ? '허용' : '불가'} 제어=${row.can_control ? '허용' : '불가'} (by ${actor})`);
-            res.json({
-                id: Number(req.params.id),
-                can_call: row.can_call === 1,
-                can_control: row.can_control === 1,
-            });
+            if (!result.ok) {
+                return res.status(result.reason === 'not_found' ? 404 : 400)
+                          .json({ error: result.reason, message: result.message });
+            }
+            res.json({ id: result.id, can_call: result.canCall, can_control: result.canControl });
         } catch (err: any) {
             fail(res, err, 'Failed to update permissions');
         }

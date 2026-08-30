@@ -35,7 +35,7 @@ import { DbConn } from './dbConnection';
 import { sendToTargets, PushTarget } from './push';
 import { complexClause, pointsToAnotherComplex, complexId } from './complex';
 import { approve as approveEnrollment, reject as rejectEnrollment, homeAllowsControl,
-         listDevices, revokeDevice } from './enrollment';
+         listDevices, revokeDevice, setDevicePermissions } from './enrollment';
 import { pendingFor } from './enrollmentEvents';
 import { normalizeAddress } from './address';
 import { IoTMessage, ClientMessage } from './clientMessage';
@@ -120,6 +120,8 @@ const WS_METHODS = {
     DEVICE_LIST: 'device.list',
     /** @brief 이 단말의 등록을 해지한다 */
     DEVICE_REVOKE: 'device.revoke',
+    /** @brief 이 단말의 통화·제어 권한을 바꾼다 */
+    DEVICE_PERMISSIONS: 'device.permissions',
     
     // IoT Methods
     /** @brief Create IoT room/device */
@@ -761,6 +763,7 @@ export class WebSocketService {
                 case WS_METHODS.ENROLL_REJECT:
                 case WS_METHODS.DEVICE_LIST:
                 case WS_METHODS.DEVICE_REVOKE:
+                case WS_METHODS.DEVICE_PERMISSIONS:
                     this._handleEnrollment(ws, json).catch((err: any) => {
                         logger.error(`[IOT] 등록 승인 처리 실패: ${err?.message ?? err}`);
                     });
@@ -824,6 +827,37 @@ export class WebSocketService {
         if (msg.method === WS_METHODS.DEVICE_LIST) {
             wallpad.send({ method: WS_METHODS.DEVICE_LIST, address,
                            devices: await listDevices(address) } as any);
+            return;
+        }
+
+        if (msg.method === WS_METHODS.DEVICE_PERMISSIONS) {
+            const deviceId = Number(msg.deviceId ?? msg.id);
+            if (!Number.isFinite(deviceId) || deviceId <= 0) {
+                this.sendError(ws, Error("invalid request: missing 'deviceId'"));
+                return;
+            }
+            /*
+             * ⚠️ enroll.approve 와 규칙이 **반대**다. 승인은 값을 안 보내면
+             * 꺼짐이지만(실수로 권한이 켜지지 않게), 여기서는 안 보내면
+             * 건드리지 않는다 — "통화만 끄겠다" 가 제어까지 끄면 안 된다.
+             */
+            const result = await setDevicePermissions(
+                { id: deviceId, address },
+                {
+                    canCall: msg.canCall === undefined ? undefined : Boolean(msg.canCall),
+                    canControl: msg.canControl === undefined ? undefined : Boolean(msg.canControl),
+                },
+                'wallpad');
+
+            wallpad.send({
+                method: WS_METHODS.DEVICE_PERMISSIONS,
+                deviceId,
+                ok: result.ok,
+                ...(result.ok
+                    ? { canCall: result.canCall, canControl: result.canControl }
+                    : { error: result.reason, message: result.message }),
+                devices: await listDevices(address),
+            } as any);
             return;
         }
 

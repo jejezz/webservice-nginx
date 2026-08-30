@@ -21,6 +21,8 @@
 import express, { Request, Response, NextFunction } from 'express';
 import { getGateway } from '../gateway';
 import logger from '../libs/logger'; // Import your configured logger
+import { DbConn } from '../libs/dbConnection';
+import config from '../config';
 import { normalizeSipUser, SIP_USER_ERROR } from '../libs/sipUser';
 import { requestEnrollment, issueDeviceCert } from '../libs/enrollment';
 import * as sipAccount from '../libs/sipAccount';
@@ -238,6 +240,27 @@ async function handlePostMobile(req: Request, res: Response) {
          */
         const sip = await sipAccount.credentialForDevice(uuid);
         if (sip) body.sip = sip;
+
+        /*
+         * 지금 이 단말에 열려 있는 권한.
+         *
+         * 앱은 이 값을 승인 푸시(enroll.approved)에서 한 번 받는데, 그 뒤에
+         * 월패드나 관리자가 바꾸면(device.permissions) 알 길이 없었다. 그러면
+         * 앱은 없는 버튼을 계속 보여 주고, 눌러야 실패한다. 등록할 때마다 현재
+         * 값을 함께 주면 새 푸시 종류를 만들지 않고도 따라잡는다.
+         */
+        try {
+            const [row] = await DbConn.select(
+                `SELECT can_call, can_control FROM ${config.tables.mobile} WHERE uuid = ?`, [uuid]);
+            if (row) {
+                body.canCall = row.can_call === 1;
+                body.canControl = row.can_control === 1;
+            }
+        } catch (err: any) {
+            // 권한을 못 읽어도 등록 자체는 끝났다. 앱은 예전처럼 승인 푸시의
+            // 값을 계속 쓰면 된다.
+            logger.warn(`권한 조회 실패 (uuid=${uuid}): ${err.message}`);
+        }
 
         res.status(200).json(body);
         return;
