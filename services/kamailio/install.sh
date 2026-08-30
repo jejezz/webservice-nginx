@@ -198,7 +198,13 @@ report_settings_pending() {
 
     local key saved applied
     for key in sip_domain sip_listen_addr sip_push_url; do
-        saved="$(settings_get "$key" '')"
+        # **원본 파일이 아니라 실제로 쓰이는 값**과 비교한다. sip_domain 처럼
+        # 사이트에서 오는 값은 이 서비스의 settings.ini 가 비어 있는 것이
+        # 정상이라, 파일만 보면 "안 채웠다" 로 잘못 읽는다.
+        case "$key" in
+            sip_domain) saved="$SIP_DOMAIN" ;;
+            *)          saved="$(settings_get "$key" '')" ;;
+        esac
         applied="$(sed -n "s/^[[:space:]]*${key}[[:space:]]*=[[:space:]]*\(.*\)$/\1/p" "$APPLIED_FILE" | tail -1)"
         applied="${applied//[[:space:]]/}"
         [[ "$saved" == "$applied" ]] && continue
