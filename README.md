@@ -3,6 +3,19 @@
 이 서버가 웹으로 제공하는 것들을 한 곳에 모아 둔 디렉토리입니다.
 역할에 따라 나뉩니다.
 
+지금 이 저장소의 중심은 **아파트 인터폰·월패드·모바일을 잇는 통화 시스템**입니다.
+네 서비스가 한 몸처럼 움직입니다.
+
+```
+인터폰 ──SIP──▶ Kamailio ──▶ Janus ──WebRTC──▶ 모바일 앱
+                    │                              ▲
+                    └── websocket-relay ──FCM──────┘   자는 단말을 깨운다
+                        (등록·승인·초인종 중계)
+```
+
+번호 체계와 세 서비스가 같은 단말을 가리키는 방법은
+[docs/identity.md](docs/identity.md) 에 있습니다.
+
 ## 처음이라면 — 여기서 시작하세요
 
 ```bash
@@ -36,17 +49,26 @@ Janus → nginx → 릴레이 → 시험 통화까지 19단계입니다. 각 단
 
 ```
 webservices/
+├── bootstrap.sh # 클론 직후 여기서 시작 (위 '처음이라면')
+├── site/        # 여러 서비스가 함께 쓰는 값 — 호스트·단지 ID·SIP 도메인
 ├── docs/        # 서비스 사이의 약속 — nginx-conf / pm2-conf 스키마, /health 규약
+├── lib/         # 여러 스크립트가 공유하는 셸 조각 (점검 보고·설정 읽기)
 ├── nginx/       # 리버스 프록시 서버 설정과 인증서 (systemd 가 nginx 자체를 관리)
 ├── pm2/         # 프로세스 오케스트레이션 — 선언 스캐너, 부팅 스크립트, 로그
 ├── database/    # MariaDB — database/README.md
 └── services/    # 서비스 코드. 하나의 서비스 = 하나의 디렉토리
-    ├── manager/                # 관리 대시보드        /manager      (28084)
-    ├── ws-bridge/              # WebSocket Bridge     /ws-bridge/   (28083)
-    ├── stock-analyzer/         # 주식 차트·예측       /stock-analyzer (28085)
-    ├── route-a|route-b|route-c/# 예제 서비스          (라우트 꺼 둠) (28080~28082)
-    └── websocket-relay/        # WebRTC·IoT·SIP 릴레이 /relay/       (28099)
+    ├── manager/         # 관리 대시보드·구축 마법사   /manager    (28084)
+    ├── websocket-relay/ # 등록·승인·초인종·착신 푸시  /relay/     (28099)
+    ├── kamailio/        # SIP 레지스트라·프록시       /kamailio/  (28086 · SIP 5060)
+    ├── janus/           # WebRTC ↔ SIP 게이트웨이     /janus/     (28087 · API 8088)
+    └── route-a|b|c/     # 예제 서비스 (라우트 꺼 둠)              (28080~28082)
 ```
+
+> `services/ws-bridge` 와 `services/stock-analyzer` 는 **별도 저장소**라 클론에
+> 따라오지 않습니다. 그 자리에 두면 스캐너가 알아서 줍습니다.
+>
+> Kamailio 와 Janus 는 pm2 가 아니라 **systemd** 가 띄웁니다(각자의 `install.sh`).
+> 위 포트는 그 서비스의 **대시보드**이고, 프로토콜 포트는 따로입니다.
 
 경계는 이렇습니다.
 
@@ -103,11 +125,25 @@ cd pm2 && pm2 start ecosystem.config.js && pm2 save
 
 ```bash
 pm2 list
-systemctl is-active nginx
+systemctl is-active nginx kamailio janus     # 뒤 둘은 pm2 가 아니라 systemd 입니다
 curl -sk -o /dev/null -w '%{http_code}\n' https://127.0.0.1/manager
 ```
 
 `502` 면 nginx 설정은 맞는데 뒤에 프로세스가 없다는 뜻입니다.
+
+서비스마다 **자기 점검 스크립트**가 있습니다. 마법사가 보는 것과 같은 판정이고,
+sudo 없이 돌아갑니다 — 무엇이 왜 안 되는지는 대개 여기서 나옵니다.
+
+```bash
+./site/apply.sh                          # 사이트 값 (호스트·단지 ID·SIP 도메인)
+./database/check-database.sh             # DB·스키마
+./services/kamailio/check-accounts.sh    # SIP 계정
+./services/kamailio/check-push.sh        # 인터폰 착신 네 자리
+./services/janus/install.sh              # Janus 설정·미디어 포트·단말 토큰
+./services/janus/verify-call.sh          # 마지막 시험 통화 결과 (--run 이면 실제로 걸어 봅니다)
+./services/websocket-relay/check-relay.sh
+./nginx/install_nginx_stack.sh --check
+```
 
 ## 서로를 가리키는 방법
 
@@ -145,7 +181,16 @@ pm2 등록(`pm2 delete` 후 재등록)만 손보면 됩니다.
 - 데이터베이스 → [database/README.md](database/README.md)
 - 이 구조로 옮긴 과정 → [docs/migration-plan.md](docs/migration-plan.md)
 
-서비스별 상세는 각 디렉토리의 README 에 있습니다
-([ws-bridge](services/ws-bridge/README.md),
-[stock-analyzer](services/stock-analyzer/README.md),
-[websocket-relay](services/websocket-relay/ReadMe.md)).
+통화 시스템을 다룬다면 이쪽입니다.
+
+- **번호 체계** (동/호 → SIP 번호, 세 서비스가 같은 단말을 가리키는 법) → [docs/identity.md](docs/identity.md)
+- 앱·월패드·인터폰을 고칠 때 → [docs/client-migration.md](docs/client-migration.md)
+- 단말 등록과 승인 흐름 → [services/websocket-relay/docs/enrollment.md](services/websocket-relay/docs/enrollment.md)
+- 인터폰 착신이 자는 폰을 깨우는 길 → [services/kamailio/docs/incoming-call.md](services/kamailio/docs/incoming-call.md)
+
+서비스별 상세는 각 디렉토리의 README 에 있습니다 —
+[websocket-relay](services/websocket-relay/ReadMe.md) ·
+[kamailio](services/kamailio/README.md) ·
+[janus](services/janus/README.md) ·
+[manager](services/manager/README.md).
+`ws-bridge` 와 `stock-analyzer` 는 각자의 저장소에 있습니다.
