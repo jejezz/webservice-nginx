@@ -125,11 +125,15 @@ except Exception:
 for region in d.get('regions', []):
     for c in region.get('complexes', []):
         if str(c.get('complexId', '')).lower() == sys.argv[2].lower():
-            print(c.get('host', ''))
+            # 항목은 있는데 host 가 없으면 "여기서 채운다" 는 뜻이다.
+            print(c.get('host') or '(derived)')
 PY
 )"
     if [[ -z "$expected" ]]; then
         warn "디렉터리에 단지 ${COMPLEX_ID} 가 없습니다 — 앱이 이 서버를 찾지 못합니다 (tools/directory.json)"
+    elif [[ "$expected" == "(derived)" ]]; then
+        # 정상이다. push 할 때 이 값으로 채워진다 (tools/directory.js 의 applySiteHost).
+        ok "디렉터리가 이 값을 물려받습니다 (tools/directory.json 에 host 를 적지 않았습니다)"
     elif [[ "$expected" != "$HOST" ]]; then
         warn "디렉터리의 host 와 다릅니다: ${HOST} ≠ ${expected} (tools/directory.json)"
     else

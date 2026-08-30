@@ -128,6 +128,9 @@ function readSiteSettings(): { host: string; complexId: string; sipDomain: strin
  *
  * 근본 해법은 두 값을 한 곳에서 파생시키는 것이다. 그 전까지는 여기서 대조한다.
  */
+/** 디렉터리 항목은 있는데 host 를 적지 않은 상태. 사이트 값을 물려받는다는 뜻이다. */
+const DERIVED = '(derived)';
+
 function checkJanusUrl(complexId: string): void {
     const site = readSiteSettings();
     const override = (process.env.JANUS_WS_URL ?? '').trim();
@@ -169,7 +172,10 @@ function checkJanusUrl(complexId: string): void {
         const dir = JSON.parse(fs.readFileSync(dirFile, 'utf8'));
         for (const region of dir.regions ?? []) {
             for (const c of region.complexes ?? []) {
-                if (String(c.complexId).toLowerCase() === complexId.toLowerCase()) expected = c.host ?? null;
+                if (String(c.complexId).toLowerCase() !== complexId.toLowerCase()) continue;
+                // 항목은 있는데 host 가 비어 있으면 "사이트 값을 물려받는다" 는 뜻이다
+                // (tools/directory.js 가 push 할 때 채운다). 없는 것과 구분한다.
+                expected = c.host ? String(c.host) : DERIVED;
             }
         }
     } catch (err) {
@@ -180,6 +186,10 @@ function checkJanusUrl(complexId: string): void {
     if (!expected) {
         report.warn(`디렉터리에 단지 ${complexId} 가 없습니다 — 앱이 이 서버를 찾지 못합니다.`);
         report.fix('tools/directory.json 에 넣고 npm run directory -- push tools/directory.json');
+        return;
+    }
+    if (expected === DERIVED) {
+        report.ok(`Janus 주소: ${host} (디렉터리도 이 값을 물려받습니다)`);
         return;
     }
     if (host !== expected) {

@@ -210,6 +210,64 @@ async function firestoreHint(err, key) {
  * 올릴 내용을 검사한다. **올리기 전에 다 본다** — 절반만 올라가면 앱이
  * 목록에는 있는데 열 수 없는 단지를 보게 된다.
  */
+/**
+ * 사이트 값 (`site/settings.ini`). 없으면 빈 객체.
+ *
+ * 이 저장소가 도는 서버는 **단지 하나**를 맡는다. 그 단지의 host 는 이미
+ * 사이트 값에 있고, nginx server_name·인증서·앱에게 알려 줄 주소가 전부 거기서
+ * 나온다 (site/README.md). 여기에 또 손으로 적으면 어긋날 자리가 하나 더 생긴다.
+ */
+function siteSettings() {
+    const file = path.resolve(__dirname, '..', '..', '..', 'site', 'settings.ini');
+    const out = {};
+    try {
+        for (const raw of fs.readFileSync(file, 'utf8').split(/\r?\n/)) {
+            const line = raw.trim();
+            if (!line || line.startsWith('#') || line.startsWith(';')) continue;
+            const eq = line.indexOf('=');
+            if (eq !== -1) out[line.slice(0, eq).trim()] = line.slice(eq + 1).trim();
+        }
+    } catch {
+        // 사이트 층을 아직 만들지 않은 배치다.
+    }
+    return out;
+}
+
+/**
+ * **이 서버가 맡은 단지의 host 를 사이트 값으로 채운다.**
+ *
+ * 이 파일에는 여러 단지가 들어 있고, 남의 단지 주소는 이 장비가 알 길이 없다.
+ * 그래서 `complexId` 가 이 서버의 것과 같은 항목 하나만 다룬다.
+ *
+ *   host 가 없다            → 채운다. 그것이 이 이관의 목적이다
+ *   host 가 사이트와 같다   → 그대로 둔다
+ *   host 가 사이트와 다르다 → **올리지 않는다.** 앱에게 이 서버가 답하지 않는
+ *                             주소를 알려 주게 되고, 그 실패는 조용하다
+ *
+ * @returns 사람에게 보여 줄 알림 문장들
+ */
+function applySiteHost(doc) {
+    const site = siteSettings();
+    const complexId = String(site.complex_id || '').toLowerCase();
+    const host = String(site.host || '').trim();
+    const notes = [];
+    if (!complexId || !host) return notes;
+
+    for (const r of doc.regions ?? []) {
+        for (const c of r.complexes ?? []) {
+            if (String(c.complexId || '').toLowerCase() !== complexId) continue;
+            if (!c.host) {
+                c.host = host;
+                notes.push(`${c.complexId} 의 host 를 사이트 값으로 채웠습니다: ${host}`);
+            } else if (String(c.host).trim() !== host) {
+                die(`${c.complexId} 의 host 가 이 서버의 것과 다릅니다: ${c.host} ≠ ${host}`,
+                    'site/settings.ini 의 host 를 고치거나, 이 항목의 host 를 지워 사이트 값을 쓰게 하세요.');
+            }
+        }
+    }
+    return notes;
+}
+
 function validate(doc) {
     const problems = [];
     if (!doc || typeof doc !== 'object' || !Array.isArray(doc.regions)) {
@@ -353,6 +411,10 @@ async function cmdPush(file, dryRun, prune) {
     } catch (err) {
         die(`JSON 을 읽을 수 없습니다: ${err.message}`);
     }
+
+    // 검증보다 먼저 채운다. 우리 단지의 host 는 여기 적지 않는 것이 정상이므로,
+    // 비어 있다고 "host 가 없습니다" 로 막으면 안 된다.
+    for (const note of applySiteHost(doc)) console.log(`   ${note}`);
 
     const problems = validate(doc);
     if (problems.length) {

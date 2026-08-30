@@ -14,7 +14,7 @@
         {
           "complexId": "a3f19c04",
           "name": "플루토 1단지",
-          "host": "c-a3f19c04.rtc.zoomon.art",
+          "_host": "이 서버가 맡은 단지라 host 를 적지 않는다. push 할 때 site/settings.ini 의 host 로 채워진다.",
           "minAppVersion": "1.0.0"
         },
         {

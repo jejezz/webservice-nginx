@@ -33,17 +33,21 @@
 |---|---|
 | `host` | websocket-relay 가 앱에게 알려 줄 Janus 주소(`wss://<host>/janus-ws`) |
 | `complex_id` | websocket-relay 의 단지 검사 |
-| `sip_domain` | websocket-relay 의 SIP 계정 발급 |
+| `sip_domain` | websocket-relay 의 SIP 계정 발급 · Kamailio 의 kamctlrc·alias |
+| `host` | nginx `server_name` · Let's Encrypt 발급 도메인 |
+| `host` | `tools/directory.json` 의 이 단지 항목 (push 할 때 채워집니다) |
 
-아직 옮기지 않은 것들입니다. 각 서비스의 `install.sh` 가 이 값을 읽게 하면
-됩니다 — 한 번에 하지 않고 하나씩 옮깁니다.
+### 여기 두지 않는 것
 
-| 값 | 지금 있는 곳 |
-|---|---|
-| nginx `server_name` · Let's Encrypt 도메인 | `nginx/public_ca/settings.ini` |
-| Kamailio `SIP_DOMAIN` | `/etc/kamailio/kamctlrc` |
-| `tools/directory.json` 의 `host` | 손으로 적음 (지금은 대조만 합니다) |
-| Janus `public_ip` | `services/janus/settings.ini` |
+`services/janus/settings.ini` 의 **`public_ip`** 는 옮기지 않습니다. 성질이
+다릅니다 — 사람이 정하는 값이 아니라 **회선이 알려 주는 값**입니다.
+
+- 저장하는 곳은 Janus 하나뿐입니다. `check-dns.sh` 와 `setup_letsencrypt.sh` 는
+  저장된 값을 읽지 않고 그때그때 `ifconfig.me` 등에서 알아냅니다
+- 이 회선은 유동 IP 라 값이 저절로 바뀌고, `check-public-ip.sh --write` 가
+  자동으로 고쳐 씁니다. 사람이 채우는 파일에 스크립트가 되쓰기 시작하면 그
+  파일은 더 이상 "사람이 정한 값" 이 아니게 됩니다
+- 어긋남은 이미 `check-public-ip.sh` 가 현재값·저장값·적용값 셋을 대조해 잡습니다
 
 ## `.env` 가 이깁니다
 
