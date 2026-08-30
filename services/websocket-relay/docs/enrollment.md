@@ -441,6 +441,7 @@ FCM data 메시지 세 가지를 처리하면 됩니다. `data` 값은 FCM 규�
 |---|---|---|
 | `enroll.approved` | 승인됨 | 대기 화면을 닫고 정상 진입. `canCall`·`canControl` 로 쓸 수 있는 기능을 정함 |
 | `enroll.rejected` | 거절됨 | 대기 화면을 닫고 사유 안내 |
+| `enroll.revoked` | 인정됐던 등록이 해지됨 | 등록 상태를 지우고 처음 화면으로. 다시 등록하려면 새 요청이 필요합니다 |
 | `enroll.expired` | 30분 안에 승인되지 않음 | 대기 화면을 닫고 "다시 요청" 제시 |
 
 ```json
@@ -678,6 +679,44 @@ FCM 자격입니다.
 `ok:false` 의 `error` 는 `not_found`(이미 처리됐거나 만료) 또는 `home_full`
 (4대가 찼다) 입니다.
 
+#### 이미 인정한 단말 — 목록과 해지
+
+승인만 있고 되돌릴 길이 없으면 **정원이 찬 집은 막힙니다.** 4대가 차면 새 요청은
+`home_full` 로 거절되는데, 지우는 화면이 대시보드에만 있으면 관리자를 불러야
+다섯 번째 기기를 등록할 수 있습니다. 승인을 월패드에 준 이상 해지도 같은 자리에
+있어야 합니다.
+
+```json
+{ "method": "device.list" }                       // 이 세대가 인정한 단말들
+{ "method": "device.revoke", "deviceId": 36 }     // 그중 하나를 내린다
+```
+
+```json
+{ "method": "device.list", "address": "1B101U", "devices": [
+    { "id": 36, "uuid": "…", "email": "…", "phone": "…",
+      "sip_user": "0101080501", "active": true,
+      "can_call": true, "can_control": false,
+      "approved_at": "…", "approved_by": "wallpad",
+      "created": "…", "token_updated_at": "…", "push_error": null } ] }
+
+{ "method": "device.revoke", "deviceId": 36, "ok": true, "devices": [ ... ] }
+{ "method": "device.revoke", "deviceId": 99, "ok": false,
+  "error": "not_found", "message": "이 세대에 그런 단말이 없습니다.", "devices": [ ... ] }
+```
+
+- **대상은 이 세대로 좁혀집니다.** 서버가 소켓에서 얻은 주소로 조건을 걸므로,
+  `deviceId` 만으로 남의 집 단말을 가리킬 방법이 없습니다
+- 처리 뒤 목록이 함께 옵니다 — 다시 물어보지 않아도 되고, **몇 자리가 비었는지**
+  그 자리에서 보입니다
+- `token` 은 싣지 않습니다. FCM 자격입니다
+- 해지하면 그 단말의 **SIP 계정도 함께 회수**됩니다. 안 그러면 표에서 사라진
+  단말이 SIP 로는 계속 등록할 수 있습니다
+- 해지된 단말에는 FCM 으로 `enroll.revoked` 가 갑니다 — 앱이 "등록됨" 화면에
+  머물지 않게 하기 위해서입니다
+
+> `device.permissions`(승인 뒤 통화·제어를 바꾸는 것)는 아직 없습니다. 지금은
+> 대시보드에만 있습니다.
+
 ### 3-4. 월패드 승인 화면
 
 - **대기 목록** — `email` 과 `user_agent` 로 기기를 구분하게. 이 둘이 사용자가
@@ -687,11 +726,7 @@ FCM 자격입니다.
 - **남은 시간** — `expires_at`
 - **거절**
 - **등록된 기기 목록과 해지** — 4대가 차면 새 등록이 막히므로, 지우는 길이
-  월패드에 있어야 합니다
-
-> 등록된 기기의 조회·해지 API 는 아직 WebSocket 에 없습니다. 지금은 관리자
-> 대시보드에만 있습니다. 월패드에서도 해야 한다면 `enroll.*` 과 같은 방식으로
-> `device.list` / `device.revoke` / `device.permissions` 를 추가하면 됩니다.
+  월패드에 있어야 합니다. `device.list` · `device.revoke` 로 합니다 (3-3)
 
 ---
 

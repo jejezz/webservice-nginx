@@ -34,7 +34,8 @@ import { TokenMessage } from 'firebase-admin/messaging';
 import { DbConn } from './dbConnection';
 import { sendToTargets, PushTarget } from './push';
 import { complexClause, pointsToAnotherComplex, complexId } from './complex';
-import { approve as approveEnrollment, reject as rejectEnrollment, homeAllowsControl } from './enrollment';
+import { approve as approveEnrollment, reject as rejectEnrollment, homeAllowsControl,
+         listDevices, revokeDevice } from './enrollment';
 import { pendingFor } from './enrollmentEvents';
 import { normalizeAddress } from './address';
 import { IoTMessage, ClientMessage } from './clientMessage';
@@ -115,6 +116,10 @@ const WS_METHODS = {
     ENROLL_APPROVE: 'enroll.approve',
     /** @brief 이 요청을 거절한다 */
     ENROLL_REJECT: 'enroll.reject',
+    /** @brief 이미 인정한 단말 목록을 달라 */
+    DEVICE_LIST: 'device.list',
+    /** @brief 이 단말의 등록을 해지한다 */
+    DEVICE_REVOKE: 'device.revoke',
     
     // IoT Methods
     /** @brief Create IoT room/device */
@@ -754,6 +759,8 @@ export class WebSocketService {
                 case WS_METHODS.ENROLL_LIST:
                 case WS_METHODS.ENROLL_APPROVE:
                 case WS_METHODS.ENROLL_REJECT:
+                case WS_METHODS.DEVICE_LIST:
+                case WS_METHODS.DEVICE_REVOKE:
                     this._handleEnrollment(ws, json).catch((err: any) => {
                         logger.error(`[IOT] 등록 승인 처리 실패: ${err?.message ?? err}`);
                     });
@@ -790,7 +797,7 @@ export class WebSocketService {
         return client;
     }
 
-    /** 월패드가 보내는 enroll.* 를 처리한다. */
+    /** 월패드가 보내는 enroll.* · device.* 를 처리한다. */
     private async _handleEnrollment(ws: WebSocket, msg: any): Promise<void> {
         const wallpad = this._wallpadOf(ws);
         if (!wallpad) {
@@ -801,6 +808,41 @@ export class WebSocketService {
 
         if (msg.method === WS_METHODS.ENROLL_LIST) {
             wallpad.send({ method: WS_METHODS.ENROLL_LIST, address, pending: await pendingFor(address) } as any);
+            return;
+        }
+
+        /*
+         * ── 이미 인정한 단말 ────────────────────────────────────────
+         *
+         * 승인만 있고 되돌릴 길이 없으면 정원(4대)이 찬 집은 막힌다 — 새 요청은
+         * `home_full` 로 거절되고, 지우는 화면은 대시보드에만 있어 관리자를
+         * 불러야 했다. 승인을 월패드에 준 이상 해지도 같은 자리에 있어야 한다.
+         *
+         * 대상은 **소켓에서 얻은 주소**로 좁힌다. 월패드가 id 만 보내므로 남의
+         * 집 단말을 가리킬 방법이 없다.
+         */
+        if (msg.method === WS_METHODS.DEVICE_LIST) {
+            wallpad.send({ method: WS_METHODS.DEVICE_LIST, address,
+                           devices: await listDevices(address) } as any);
+            return;
+        }
+
+        if (msg.method === WS_METHODS.DEVICE_REVOKE) {
+            const deviceId = Number(msg.deviceId ?? msg.id);
+            if (!Number.isFinite(deviceId) || deviceId <= 0) {
+                this.sendError(ws, Error("invalid request: missing 'deviceId'"));
+                return;
+            }
+            const result = await revokeDevice(address, deviceId, 'wallpad');
+            wallpad.send({
+                method: WS_METHODS.DEVICE_REVOKE,
+                deviceId,
+                ok: result.ok,
+                ...(result.ok ? {} : { error: result.reason, message: result.message }),
+                // 지운 뒤의 목록을 함께 보낸다. 월패드가 다시 물어보지 않아도 되고,
+                // 무엇보다 "몇 자리가 비었는가" 가 그 자리에서 보인다.
+                devices: await listDevices(address),
+            } as any);
             return;
         }
 

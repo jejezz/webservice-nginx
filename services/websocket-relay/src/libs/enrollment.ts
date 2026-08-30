@@ -137,7 +137,7 @@ export type EnrollmentResult =
  * 이 메시지는 **알림 하나** 이상의 권한을 주지 않는다 — 대상이 자기 등록의
  * 결과를 받는 것뿐이다.
  */
-type EnrollOutcome = 'approved' | 'rejected' | 'expired';
+type EnrollOutcome = 'approved' | 'rejected' | 'expired' | 'revoked';
 
 const OUTCOME_TEXT: Record<EnrollOutcome, { title: string; body: (place: string) => string }> = {
     approved: {
@@ -151,6 +151,10 @@ const OUTCOME_TEXT: Record<EnrollOutcome, { title: string; body: (place: string)
     expired: {
         title: '등록 요청이 만료되었습니다',
         body: (place) => `${place} 등록 요청이 승인되지 않아 만료되었습니다. 다시 시도하세요.`,
+    },
+    revoked: {
+        title: '기기 등록이 해지되었습니다',
+        body: (place) => `${place} 에서 이 기기의 등록이 해지되었습니다.`,
     },
 };
 
@@ -570,6 +574,78 @@ export async function homeAllowsControl(rawAddress: string): Promise<boolean> {
 
     controlCache.set(address, { allowed, at: Date.now() });
     return allowed;
+}
+
+// ── 이미 인정한 단말 (월패드가 보고 지운다) ─────────────────────
+//
+// 승인만 있고 **되돌릴 길이 없었다.** 세대 정원이 4대인데 지우는 화면은
+// 대시보드에만 있어서, 관리자를 부르지 않으면 다섯 번째 기기를 등록할 방법이
+// 없었다 — 정원이 찬 집에서 새 요청은 `home_full` 로 거절된다.
+//
+// 두 함수 모두 **주소를 인자로 받아 그 세대로 좁힌다.** 부르는 쪽(WebSocket)이
+// 소켓에서 얻은 주소를 넘기므로, id 만으로 남의 집 단말을 지우는 일이 구조적으로
+// 생기지 않는다 (libs/push.ts 의 sendOne 주석과 같은 종류의 사고다).
+
+/** 이 세대가 인정한 단말들. 토큰은 싣지 않는다 — FCM 자격이다. */
+export async function listDevices(rawAddress: string): Promise<any[]> {
+    const address = normalizeAddress(rawAddress);
+    const rows = await DbConn.select(
+        `SELECT id, uuid, email, phone, sip_user, active, can_call, can_control,
+                approved_at, approved_by, created, token_updated_at, push_error
+           FROM ${config.tables.mobile}
+          WHERE address = ? AND complex_id <=> ?
+          ORDER BY sip_seq, id`, [address, complexId()]);
+
+    return rows.map((r: any) => ({
+        ...r,
+        active: r.active === 1,
+        can_call: r.can_call === 1,
+        can_control: r.can_control === 1,
+    }));
+}
+
+export type RevokeResult =
+    | { ok: true; id: number; uuid: string }
+    | { ok: false; reason: 'not_found'; message: string };
+
+/**
+ * 인정했던 단말을 내린다. **그 세대의 단말만 지운다.**
+ *
+ * 지운 뒤에 세 가지를 정리한다.
+ *   ① SIP 계정 회수 — 안 하면 표에서 사라진 단말이 SIP 로는 계속 등록할 수 있다
+ *   ② 제어 캐시 무효화 — 마지막 제어 단말이 나가도 30초는 통과하던 것을 막는다
+ *   ③ 그 단말에 통보 — 앱이 "등록됨" 화면에 머물지 않게 한다
+ *
+ * 셋 다 실패해도 삭제는 되돌리지 않는다. 이미 지웠고, 되돌리면 사람이 누른
+ * 결과가 사라진다.
+ */
+export async function revokeDevice(
+    rawAddress: string,
+    deviceId: number,
+    actor: string,
+): Promise<RevokeResult> {
+    const address = normalizeAddress(rawAddress);
+    const id = complexId();
+
+    const [row] = await DbConn.select(
+        `SELECT id, uuid, email, token, sip_user FROM ${config.tables.mobile}
+          WHERE id = ? AND address = ? AND complex_id <=> ?`,
+        [deviceId, address, id]);
+
+    if (!row) {
+        return { ok: false, reason: 'not_found', message: '이 세대에 그런 단말이 없습니다.' };
+    }
+
+    await DbConn.execute(`DELETE FROM ${config.tables.mobile} WHERE id = ?`, [row.id]);
+
+    if (row.sip_user) await sipAccount.revoke(row.sip_user);
+    invalidateControlCache(address);
+
+    // 이 단말은 방금 표에서 사라졌으므로 되쓰기가 없는 길로 보낸다 (push.ts).
+    void sendOne(row.token, outcomeMessage('revoked', address), `등록 해지 통보 ${address}`);
+
+    logger.warn(`[audit] 단말 해지: ${address} ${row.email} (uuid=${row.uuid}) (by ${actor})`);
+    return { ok: true, id: Number(row.id), uuid: row.uuid };
 }
 
 /** 권한을 바꾼 뒤 부른다. 캐시 때문에 30초간 옛 판정이 남는 것을 막는다. */
