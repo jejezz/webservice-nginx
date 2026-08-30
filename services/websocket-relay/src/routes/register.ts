@@ -26,6 +26,7 @@ import config from '../config';
 import { normalizeSipUser, SIP_USER_ERROR } from '../libs/sipUser';
 import { requestEnrollment, issueDeviceCert } from '../libs/enrollment';
 import * as sipAccount from '../libs/sipAccount';
+import * as janusToken from '../libs/janusToken';
 import { saveHomenetRecord } from '../libs/homenetRecord';
 import { onEnrollmentPending } from '../libs/enrollmentEvents';
 import { complexId as serverComplexId, COMPLEX_ID_RE, COMPLEX_ID_ERROR } from '../libs/complex';
@@ -260,6 +261,24 @@ async function handlePostMobile(req: Request, res: Response) {
             // 권한을 못 읽어도 등록 자체는 끝났다. 앱은 예전처럼 승인 푸시의
             // 값을 계속 쓰면 된다.
             logger.warn(`권한 조회 실패 (uuid=${uuid}): ${err.message}`);
+        }
+
+        /*
+         * 이 단말만의 Janus 토큰 (libs/janusToken.ts).
+         *
+         * 부를 때마다 Janus 에 **다시 넣는다.** Janus 가 재시작하면 토큰이 전부
+         * 사라지는데, 앱이 재등록하는 이 자리가 그것을 스스로 복구하는 곳이다.
+         *
+         * 값이 없으면 키를 **빼고** 보낸다. 빈 문자열로 보내면 앱이 "실려 있다"
+         * 로 읽고 쥐고 있던 값을 지울 수 있다.
+         */
+        const janusUrl = config.janus.wsUrl;
+        const janusTokenValue = await janusToken.ensureForDevice(uuid);
+        if (janusUrl || janusTokenValue) {
+            body.janus = {
+                ...(janusUrl ? { url: janusUrl } : {}),
+                ...(janusTokenValue ? { token: janusTokenValue } : {}),
+            };
         }
 
         res.status(200).json(body);

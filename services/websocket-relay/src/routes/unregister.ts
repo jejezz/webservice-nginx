@@ -10,6 +10,7 @@ import config from '../config';
 import { DbConn } from '../libs/dbConnection';
 import logger from '../libs/logger'; // Import your configured logger
 import * as sipAccount from '../libs/sipAccount';
+import * as janusToken from '../libs/janusToken';
 
 const Route2Unregister = express.Router();
 
@@ -39,6 +40,7 @@ async function responseToPostMobile(req: Request, res: Response) {
         // 내선 번호는 지우기 **전에** 읽어 둔다. 지운 뒤에는 알 길이 없고,
         // 남겨 두면 표에서 사라진 단말이 SIP 로는 계속 등록할 수 있다.
         const sipUser = await sipAccount.sipUserOf({ uuid });
+        await janusToken.removeForDevice({ uuid });
 
         const result = await DbConn.execute(
             `DELETE FROM ${config.tables.mobile} WHERE uuid = ?`, [uuid]);

@@ -191,6 +191,24 @@ export const config = {
      */
     janus: {
         wsUrl: (process.env.JANUS_WS_URL ?? '').trim(),
+
+        /*
+         * 단말마다 다른 Janus 토큰 (libs/janusToken.ts).
+         *
+         * `tokenAuth` 를 켜기 전에 **Janus 쪽 janus.jcfg 의 `token_auth = true`
+         * 가 먼저** 켜져 있어야 한다. 순서가 뒤바뀌면 발급은 매번 490 으로
+         * 실패하고(로그에는 남는다) 앱은 계속 apisecret 으로 붙는다 — 위험하지는
+         * 않지만 아무 일도 일어나지 않는다.
+         */
+        tokenAuth: bool(process.env.JANUS_TOKEN_AUTH, false),
+        /** Admin API. **루프백에만 열려 있어야 한다.** */
+        adminUrl: (process.env.JANUS_ADMIN_URL || 'http://127.0.0.1:7088/admin').trim(),
+        adminSecretFile: fromRoot(process.env.JANUS_ADMIN_SECRET_FILE || '../janus/secrets/admin-secret'),
+        /** 토큰이 열어 주는 플러그인. 비우면 그 Janus 의 **모든** 플러그인이 열린다. */
+        tokenPlugins: (process.env.JANUS_TOKEN_PLUGINS || 'janus.plugin.sip')
+            .split(',').map((s) => s.trim()).filter(Boolean),
+        /** Admin API 를 기다리는 시간. 등록 응답이 이만큼 늦어질 수 있다. */
+        adminTimeoutMs: num(process.env.JANUS_ADMIN_TIMEOUT, 2000),
     },
 
     /**

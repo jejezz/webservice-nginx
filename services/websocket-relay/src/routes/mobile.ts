@@ -12,6 +12,7 @@ import logger from '../libs/logger.js';
 import config from '../config';
 import { createMobileRecord, updateMobileRecord, statusFor } from '../libs/mobileRecord';
 import * as sipAccount from '../libs/sipAccount';
+import * as janusToken from '../libs/janusToken';
 
 const router = Router();
 
@@ -162,6 +163,7 @@ router.delete('/:id', async (req: Request, res: Response) => {
     try {
         // 지우기 전에 읽는다 — 지운 뒤에는 어느 내선이었는지 알 길이 없다.
         const sipUser = await sipAccount.sipUserOf({ id: req.params.id });
+        await janusToken.removeForDevice({ id: req.params.id });
         const result = await DbConn.execute(
             `DELETE FROM ${config.tables.mobile} WHERE id = ?`, [req.params.id]);
         if (result.affectedRows === 0) return res.status(404).json({ error: 'Mobile record not found' });

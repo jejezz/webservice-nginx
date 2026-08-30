@@ -52,6 +52,20 @@ general: {
 	# 있습니다 (nginx-conf/service.ini 의 health_path).
 	api_secret = "__API_SECRET__"
 
+	# 단말마다 다른 토큰으로 붙게 합니다. websocket-relay 가 Admin API 로
+	# 발급하고, 앱은 등록 응답으로 받습니다 (../../docs/identity.md 옆의
+	# client-migration.md, libs/janusToken.ts).
+	#
+	# 위의 api_secret 은 **단지에 하나**라 모든 폰에 같은 값이 들어갑니다.
+	# 한 대에서 새면 이 게이트웨이 전체가 열리고, 그 한 대만 막을 방법이
+	# 없습니다. 토큰은 단말마다 다르므로 그 한 대만 거둘 수 있습니다.
+	#
+	# ⚠️ 둘이 함께 켜져 있으면 Janus 는 **둘 중 하나만 맞아도** 통과시킵니다.
+	#    전환 기간에는 그 성질이 필요합니다 — 아직 토큰을 모르는 앱이 계속
+	#    붙어야 하니까요. **전환이 끝나면 api_secret 줄을 지우세요.**
+	#    남겨 두면 토큰을 발급한 의미가 없습니다.
+	token_auth = true
+
 	# 녹화·패킷캡처가 파일을 만들지 못하게 막을 폴더. 배포본 목록 그대로입니다.
 	# 주석 처리하면 **아무 폴더도 보호되지 않으므로** 지우지 마세요.
 	protected_folders = [

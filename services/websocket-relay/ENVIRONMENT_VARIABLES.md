@@ -68,6 +68,17 @@ nano .env
 - `DEV_MIDDLEWARE` - Enable development middleware (true/false)
 - `TRUST_PROXY` - Trust proxy headers (true/false)
 
+### Janus 단말별 토큰 (docs/client-migration.md)
+- `JANUS_TOKEN_AUTH` - 단말마다 다른 Janus 토큰을 발급할지 (기본 `false`).
+  **Janus 쪽 `janus.jcfg` 의 `token_auth = true` 를 먼저 켜 두어야** 합니다 —
+  순서가 뒤바뀌면 발급이 매번 490 으로 실패하고 앱은 계속 apisecret 으로 붙습니다
+- `JANUS_ADMIN_URL` - Admin API 주소 (기본 `http://127.0.0.1:7088/admin`).
+  **이 포트는 외부에 열지 않습니다** — 세션 조회·토큰 발급·강제 종료가 전부 되는 문입니다
+- `JANUS_ADMIN_SECRET_FILE` - admin_secret 파일 (기본 `../janus/secrets/admin-secret`)
+- `JANUS_TOKEN_PLUGINS` - 토큰이 열어 주는 플러그인 (기본 `janus.plugin.sip`).
+  **비우지 마세요** — 그 Janus 에 올라간 모든 플러그인이 열립니다
+- `JANUS_ADMIN_TIMEOUT` - Admin API 응답을 기다리는 밀리초 (기본 2000)
+
 ### SIP 내선 계정 (docs/identity.md)
 - `SIP_PROVISION` - 승인된 단말에게 Kamailio 내선 계정을 만들어 줄지 (기본 `true`).
   끄면 번호는 배정하되 계정은 만들지 않는다 — Kamailio 가 없는 개발기용

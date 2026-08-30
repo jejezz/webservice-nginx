@@ -30,6 +30,7 @@ import config from './config';
 import logger from './libs/logger';
 import { createApp, hasDashboardBuild } from './app';
 import { RelayGateway, setGateway } from './gateway';
+import * as janusToken from './libs/janusToken';
 import { RtcRoomTable } from './libs/rtcRoomTable';
 import { startWebsocketService } from './libs/websocketService';
 import { DbConn } from './libs/dbConnection';
@@ -182,6 +183,14 @@ async function main(): Promise<void> {
         startPruneTimer();
 
         startWebsocketService(gateway);
+
+        /*
+         * Janus 는 토큰을 메모리에만 갖고 있다. 둘 다 재부팅했다면 Janus 는
+         * 빈 상태로 떠 있고 우리 표에만 남아 있으므로, 여기서 다시 넣는다
+         * (libs/janusToken.ts 의 재시작 대비 ②). 기다리지 않는다 — 실패해도
+         * 앱이 재등록할 때 ①이 복구한다.
+         */
+        void janusToken.reconcile();
 
         logger.info(`${config.serviceName} 대기 중 — http://${config.host}:${config.port} (WS: /rtc, /iot)`);
     });

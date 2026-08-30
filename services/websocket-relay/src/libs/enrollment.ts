@@ -35,6 +35,7 @@ import logger from './logger';
 import * as deviceCert from './deviceCert';
 import { homeNumber, deviceNumber, nextFreeSeq, MOBILE_CAPACITY } from './sipNumber';
 import * as sipAccount from './sipAccount';
+import * as janusToken from './janusToken';
 
 /**
  * 한 세대가 인정할 수 있는 단말 수.
@@ -459,6 +460,13 @@ export async function approve(
     }
 
     /*
+     * 이 단말만의 Janus 토큰도 같은 자리에서 만든다 (libs/janusToken.ts).
+     * 승인 전에는 만들지 않는다 — 권한이 없는 단말에게 게이트웨이를 열어 줄
+     * 이유가 없다.
+     */
+    await janusToken.ensureForDevice(e.uuid);
+
+    /*
      * 승인됐다고 알린다. **여기서는 sendToTargets 를 쓴다** — 이 단말은 방금
      * rtc_mobiles 에 들어갔으므로 id 가 유효하고, 죽은 토큰이면 그 사실이
      * 바로 기록된다 (앱을 지웠다 다시 깐 뒤 승인하는 경우가 있다).
@@ -628,7 +636,7 @@ export async function revokeDevice(
     const id = complexId();
 
     const [row] = await DbConn.select(
-        `SELECT id, uuid, email, token, sip_user FROM ${config.tables.mobile}
+        `SELECT id, uuid, email, token, sip_user, janus_token FROM ${config.tables.mobile}
           WHERE id = ? AND address = ? AND complex_id <=> ?`,
         [deviceId, address, id]);
 
@@ -639,6 +647,7 @@ export async function revokeDevice(
     await DbConn.execute(`DELETE FROM ${config.tables.mobile} WHERE id = ?`, [row.id]);
 
     if (row.sip_user) await sipAccount.revoke(row.sip_user);
+    await janusToken.remove(row.janus_token);
     invalidateControlCache(address);
 
     // 이 단말은 방금 표에서 사라졌으므로 되쓰기가 없는 길로 보낸다 (push.ts).
@@ -708,6 +717,26 @@ export async function setDevicePermissions(
     }
 
     invalidateControlCache(row.address);
+
+    /*
+     * 통화를 껐으면 Janus 토큰도 거둔다.
+     *
+     * 권한만 끄고 토큰을 남기면 그 앱은 여전히 Janus 에 붙어 SIP 등록까지
+     * 마칠 수 있다. 착신 조회에서만 빠질 뿐 게이트웨이는 열려 있는 셈이다.
+     *
+     * 표의 값도 함께 지운다. 남겨 두면 다음 등록에서 `ensureForDevice` 가 그
+     * 값을 Janus 에 도로 넣는다. 통화를 다시 켜면 그때 새로 발급된다.
+     */
+    if (grants.canCall === false) {
+        await janusToken.removeForDevice({ id: target.id });
+        try {
+            await DbConn.execute(
+                `UPDATE ${config.tables.mobile} SET janus_token = NULL WHERE id = ?`, [target.id]);
+        } catch (err: any) {
+            logger.warn(`Janus 토큰 기록을 지우지 못했습니다 (단말 ${target.id}): ${err.message}`);
+        }
+    }
+
     logger.warn(
         `[audit] 단말 권한 변경: ${row.address} ${row.email} ` +
         `통화=${row.can_call ? '허용' : '불가'} 제어=${row.can_control ? '허용' : '불가'} (by ${actor})`);
