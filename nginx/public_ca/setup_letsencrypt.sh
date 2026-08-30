@@ -45,6 +45,7 @@ RENEWAL_DIR="/etc/letsencrypt/renewal"
 
 # 점검 규약 (docs/check-contract.md). ok/pend/skip/warn/info/judge 가 여기서 온다.
 source "${REPO_ROOT}/lib/check-report.sh"
+source "${REPO_ROOT}/lib/site.sh"
 check_init "public_ca.issue"
 check_args "$@"
 set -- "${CHECK_REST[@]:-}"
@@ -116,8 +117,11 @@ settings_get() {
     echo "${v:-$fallback}"
 }
 
+# 도메인은 **사이트 값**이 기본이다 (site/README.md). 인증서·nginx server_name·
+# 앱에게 알려 줄 주소가 같은 이름이어야 하는데, 각자 적게 두면 어긋나고 그
+# 어긋남은 조용하다. 여기 settings.ini 에 적으면 그것이 이긴다.
 if [[ ${#DOMAINS[@]} -eq 0 ]]; then
-    from_settings="$(settings_get "$SETTINGS_FILE" domain)"
+    from_settings="$(settings_get "$SETTINGS_FILE" domain "$(site_get host)")"
     [[ -n "$from_settings" ]] && DOMAINS+=("$from_settings")
 fi
 [[ -z "$EMAIL" ]] && EMAIL="$(settings_get "$SETTINGS_FILE" email)"
@@ -132,7 +136,7 @@ fi
 # 발급을 하려면 도메인이 반드시 있어야 한다. 점검은 도메인 없이도 돌려야
 # 한다 — 마법사가 "무엇을 채워야 하는지" 를 보여 주는 화면이기 때문이다.
 if [[ $HAVE_DOMAIN -eq 0 && "$MODE" != "check" ]]; then
-    echo "도메인이 없습니다. 인자로 주거나 settings.ini 의 domain 에 적으세요." >&2
+    echo "도메인이 없습니다. site/settings.ini 의 host 를 채우거나, 인자로 주거나, settings.ini 의 domain 에 적으세요." >&2
     usage
 fi
 

@@ -7,9 +7,9 @@
     {
       "key": "domain",
       "label": "인증서를 받을 도메인",
-      "help": "앱이 실제로 접속하는 이름입니다. DDNS 이름(*.iptime.org)으로는 안 됩니다 — 그 존의 레코드를 만들 권한이 없습니다.",
+      "help": "앱이 실제로 접속하는 이름입니다. **비워 두면 사이트 값(site/settings.ini 의 host)을 씁니다** — 이 장비만 다르게 두어야 할 때만 채우세요. DDNS 이름(*.iptime.org)으로는 안 됩니다 — 그 존의 레코드를 만들 권한이 없습니다.",
       "placeholder": "c-a3f19c04.rtc.zoomon.art",
-      "optional": false,
+      "optional": true,
       "type": "text",
       "pattern": "^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)+$",
       "patternHint": "점이 든 도메인 (예: c-a3f19c04.rtc.zoomon.art)",

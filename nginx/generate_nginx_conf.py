@@ -20,6 +20,32 @@ import json
 import difflib
 import glob
 import os
+
+
+# ── 사이트 값 ───────────────────────────────────────────────────────
+#
+# 여러 서비스가 함께 쓰는 값은 저장소 뿌리의 site/settings.ini 에 있다
+# (site/README.md). server_name 이 그중 하나다 — 인증서(Let's Encrypt)와
+# 앱에게 알려 줄 주소가 같은 이름이어야 하는데, 각자 적게 두면 어긋나고 그
+# 어긋남은 조용하다.
+#
+# **nginx-stack.conf 가 이긴다.** 거기 적으면 그 값을 쓰고, 비어 있을 때만
+# 사이트 값을 본다. 둘 다 없으면 예전처럼 localhost 다.
+def site_get(key, fallback=""):
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "site", "settings.ini")
+    try:
+        with open(path, encoding="utf-8") as fh:
+            for raw in fh:
+                line = raw.strip()
+                if not line or line[0] in "#;":
+                    continue
+                if "=" in line:
+                    k, v = line.split("=", 1)
+                    if k.strip() == key:
+                        return v.strip()
+    except OSError:
+        pass
+    return fallback
 import re
 import sys
 
@@ -380,7 +406,7 @@ class Stack:
         def t(key, default=""):
             return (tls.get(key) or default).strip()
 
-        self.server_name = g("server_name", "localhost")
+        self.server_name = g("server_name") or site_get("host") or "localhost"
         self.listen_port = g("listen_port", "80")
         self.ssl_port = g("ssl_port", "443")
         self.max_body = g("max_body")

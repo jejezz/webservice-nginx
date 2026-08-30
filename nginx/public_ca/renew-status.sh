@@ -36,6 +36,7 @@ RENEWAL_DIR="/etc/letsencrypt/renewal"
 DEPLOY_HOOK_DIR="/etc/letsencrypt/renewal-hooks/deploy"
 
 source "${REPO_ROOT}/lib/check-report.sh"
+source "${REPO_ROOT}/lib/site.sh"
 check_init "public_ca.renew"
 check_args "$@"
 set -- "${CHECK_REST[@]:-}"
@@ -58,6 +59,8 @@ settings_get() {
     echo "${v//[[:space:]]/}"
 }
 DOMAIN="$(settings_get domain)"
+# 여기 안 적혀 있으면 사이트 값을 쓴다 (setup_letsencrypt.sh 와 같은 순서).
+[[ -z "$DOMAIN" ]] && DOMAIN="$(site_get host)"
 
 # ──────────────────────────────────────────────────────────────
 # 1. 타이머 — certbot 은 설치될 때 자기 systemd 타이머를 함께 깐다.
