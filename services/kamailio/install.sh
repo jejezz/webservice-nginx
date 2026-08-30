@@ -48,6 +48,9 @@ APPLIED_FILE="${SCRIPT_DIR}/.applied-settings"
 
 # settings.ini 에서 `키 = 값` 하나를 읽는다. 없으면 기본값.
 # 절(section)은 쓰지 않는다 — node 쪽(lib/settings.js)도 같은 파일을 파싱한다.
+# 사이트 값(여러 서비스가 함께 쓰는 것)을 읽는 도구. 서비스 값이 비었을 때만 쓴다.
+source "${SCRIPT_DIR}/../../lib/site.sh"
+
 settings_get() {
     local key="$1" fallback="${2:-}" v=""
     if [[ -r "$SETTINGS_FILE" ]]; then
@@ -59,12 +62,15 @@ settings_get() {
 }
 # ═════════════════════════════════════════════════════════════════════
 
-# SIP 도메인 — 이 값이 두 곳으로 흘러간다.
-#   kamctlrc 의 SIP_DOMAIN   → kamctl add 가 subscriber.domain 에 넣는 값
+# SIP 도메인 — 이 값이 **세 곳**으로 흘러간다.
+#   kamctlrc 의 SIP_DOMAIN      → kamctl add 가 subscriber.domain 에 넣는 값
 #   kamailio-local.cfg 의 alias → Kamailio 가 이 도메인을 "내 것" 으로 인식
+#   websocket-relay             → 승인할 때 만드는 SIP 계정의 도메인
 #
-# 둘이 어긋나면 계정은 만들어지는데 등록이 안 된다. 그래서 한 곳에서 정한다.
-SIP_DOMAIN="$(settings_get sip_domain 'pluto.org')"
+# 셋이 어긋나면 계정은 만들어지는데 등록이 안 된다. 그래서 **사이트 값**을
+# 기본으로 쓴다 (site/README.md). 이 서비스의 settings.ini 에 적으면 그것이
+# 이긴다 — 한 장비만 다르게 두어야 할 때를 막지 않는다.
+SIP_DOMAIN="$(settings_get sip_domain "$(site_get sip_domain 'pluto.org')")"
 
 # SIP 를 받을 주소. listen= 을 하나라도 명시하면 Kamailio 는 **자동 바인딩을
 # 멈추므로**, WS 용 5080 만 적으면 5060 이 통째로 닫힌다. 실제로 그렇게 만들었다가
@@ -302,7 +308,11 @@ report() {
     validate_settings || true
 
     if [[ ${#SETTINGS_PROBLEMS[@]} -eq 0 && ${#SETTINGS_PENDING[@]} -eq 0 ]]; then
-        ok "SIP 도메인: ${SIP_DOMAIN}"
+        if [[ -n "$(settings_get sip_domain '')" ]]; then
+            ok "SIP 도메인: ${SIP_DOMAIN} (이 서비스의 settings.ini)"
+        else
+            ok "SIP 도메인: ${SIP_DOMAIN} (site/settings.ini)"
+        fi
         ok "SIP 수신 주소: ${SIP_LISTEN_ADDR}:5060 (udp+tcp)"
         ok "착신 푸시 요청: ${SIP_PUSH_URL}"
         report_settings_pending

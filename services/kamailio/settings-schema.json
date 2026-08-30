@@ -7,14 +7,13 @@
     {
       "key": "sip_domain",
       "label": "SIP 도메인",
-      "help": "계정이 등록될 도메인입니다. 단말의 SIP 계정 설정에 넣는 값과 같아야 합니다.",
+      "help": "계정이 등록될 도메인입니다. **비워 두면 사이트 값(site/settings.ini)을 씁니다** — 이 장비만 다르게 두어야 할 때만 채우세요.",
       "placeholder": "pluto.org",
-      "optional": false,
-      "default": "pluto.org",
+      "optional": true,
       "type": "text",
       "pattern": "^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$",
       "patternHint": "도메인 (예: pluto.org)",
-      "effect": "kamctlrc 의 SIP_DOMAIN 과 kamailio-local.cfg 의 alias 로 함께 들어갑니다. 둘이 어긋나면 계정은 만들어지는데 등록이 안 됩니다."
+      "effect": "kamctlrc 의 SIP_DOMAIN 과 kamailio-local.cfg 의 alias 로 함께 들어갑니다. websocket-relay 도 같은 값을 써야 하므로 사이트 값에 두는 편이 안전합니다 — 어긋나면 계정은 만들어지는데 등록이 안 됩니다."
     },
     {
       "key": "sip_listen_addr",
