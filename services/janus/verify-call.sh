@@ -124,9 +124,9 @@ for u in "$FROM_USER" "$TO_USER"; do
         ok "${u}: secrets/sip-${u}.pw"
     else
         warn "${u}: secrets/sip-${u}.pw 가 없습니다"
-        echo "         계정은 kamailio 대시보드에서 만들고, 비밀번호를 이 파일에 두세요:"
-        echo "           umask 077; printf '%s' '<비밀번호>' > secrets/sip-${u}.pw"
-        echo "         (계정을 사람이 정한다는 규약은 ../kamailio/accounts.md 를 보세요)"
+        echo "         시험용 세대의 계정은 만들어 주는 스크립트가 있습니다 (sudo 불필요):"
+        echo "           ./ensure-test-accounts.sh"
+        echo "         실재하는 세대의 계정은 여전히 사람이 만듭니다 — ../kamailio/accounts.md"
     fi
 done
 

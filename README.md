@@ -3,6 +3,33 @@
 이 서버가 웹으로 제공하는 것들을 한 곳에 모아 둔 디렉토리입니다.
 역할에 따라 나뉩니다.
 
+## 처음이라면 — 여기서 시작하세요
+
+```bash
+git clone <이 저장소> webservices
+cd webservices
+./bootstrap.sh
+```
+
+그러면 관리 대시보드가 뜨고, 마지막에 **구축 마법사 주소**를 알려 줍니다.
+
+```
+http://127.0.0.1:28084/manager/setup      처음 로그인: zoomon / 77887788
+```
+
+나머지는 그 화면이 순서대로 안내합니다 — 사이트 값 → DB → pm2 → Kamailio →
+Janus → nginx → 릴레이 → 시험 통화까지 19단계입니다. 각 단계는 **무엇을 왜
+하는지**와 점검 결과를 함께 보여 주고, 끝났는지는 기계가 판정합니다.
+
+- `./bootstrap.sh --check` — 아무것도 바꾸지 않고 무엇이 준비됐는지만 봅니다
+- **`bootstrap.sh` 는 sudo 를 쓰지 않습니다.** 필요한 자리에서는 실행할 명령을
+  보여 주고 멈춥니다. 남의 장비에 root 로 무엇을 했는지 모르는 상태를 만들지
+  않기 위해서입니다
+- 이미 설치된 장비에서 다시 돌려도 안전합니다
+
+> 전체 설치가 무엇을 어떤 순서로 하는지는 [docs/setup-wizard.md](docs/setup-wizard.md),
+> 여러 서비스가 함께 쓰는 값은 [site/README.md](site/README.md) 를 보세요.
+
 ```
 webservices/
 ├── docs/        # 서비스 사이의 약속 — nginx-conf / pm2-conf 스키마, /health 규약

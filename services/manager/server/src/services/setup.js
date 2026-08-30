@@ -292,7 +292,9 @@ const STEPS = [
       '패킷 수로 판정합니다. 마법사는 그 통화를 대신 걸지 않고, ' +
       '**--run 이 남긴 결과 파일**을 읽어 판정합니다.',
     requires: ['janus.config', 'sip.accounts'],
-    command: { cwd: 'services/janus', run: './verify-call.sh --run', sudo: false },
+    // 시험용 계정(9999동 9999호)이 없으면 등록부터 실패한다. 갓 설치한 장비에는
+    // 없는 것이 정상이므로 먼저 챙긴다 — 실재하는 세대의 계정은 건드리지 않는다.
+    command: { cwd: 'services/janus', run: './ensure-test-accounts.sh\n./verify-call.sh --run', sudo: false },
     // 마법사는 90초짜리 통화를 대신 돌리지 않는다. 대신 **--run 이 남긴 결과
     // 파일을 읽는다** — 사람의 확인 기록보다 낫다. 주장이 아니라 증거이고,
     // 언제 돌렸는지도 함께 남아 설정이 바뀐 뒤인지까지 가릴 수 있다.
