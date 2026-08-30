@@ -80,10 +80,77 @@ function checkEnv(): void {
         report.ok(`단지 ${complex.toLowerCase()}`);
     }
 
+    checkJanusUrl(complex);
+
     // manager 로그인 세션을 이 시크릿으로 검증한다. 없으면 대시보드가 전부 막힌다.
     const secret = resolveFromRoot(process.env.SESSION_SECRET_FILE || '../.session-secret');
     if (fs.existsSync(secret)) report.ok('manager 세션 시크릿 있음');
     else report.pend(`세션 시크릿이 없어 대시보드 접근이 모두 거부됩니다: ${secret}`, 'services/manager 를 먼저 기동하세요.');
+}
+
+/**
+ * 앱에게 알려 줄 Janus 주소가 **이 단지의 것인지** 본다.
+ *
+ * ── 왜 대조가 필요한가 ──────────────────────────────────────────
+ * 이 값은 두 곳으로 나간다 — 등록 응답의 `janus.url` 과 착신 푸시의 `janusUrl`.
+ * 둘 다 단말이 그대로 믿고 접속하는 주소다.
+ *
+ * 그런데 값은 사람이 `.env` 에 손으로 적고, 진짜 주소는 `tools/directory.json`
+ * 에 따로 적혀 있다. 둘이 어긋나도 서버는 멀쩡히 돌고 로그도 조용하다. 실제로
+ * 개발용 호스트(`jejezzhome.iptime.org`)가 그대로 앱에 나갔고, 단말에서는
+ * 이름이 풀리지 않아 통화가 되지 않았다 — 앱 쪽에서 알려 줄 때까지 몰랐다.
+ *
+ * 근본 해법은 두 값을 한 곳에서 파생시키는 것이다. 그 전까지는 여기서 대조한다.
+ */
+function checkJanusUrl(complexId: string): void {
+    const raw = (process.env.JANUS_WS_URL ?? '').trim();
+    if (raw === '') {
+        // 없으면 응답에서 키를 빼고 보낸다. 앱은 저장해 둔 값을 쓴다.
+        report.info('JANUS_WS_URL 미설정 — 등록 응답에 janus.url 을 싣지 않습니다.');
+        return;
+    }
+
+    let host: string;
+    try {
+        host = new URL(raw).host;
+    } catch {
+        report.bad(`JANUS_WS_URL 이 URL 이 아닙니다: "${raw}"`, '.env 에 wss://<호스트>/janus-ws 형식으로');
+        return;
+    }
+
+    // 디렉터리는 앱이 단지를 고를 때 받는 값의 원본이다. 없으면 대조할 것이 없다.
+    const dirFile = path.join(ROOT, 'tools', 'directory.json');
+    if (!complexId || !fs.existsSync(dirFile)) {
+        report.ok(`Janus 주소: ${host}`);
+        return;
+    }
+
+    let expected: string | null = null;
+    try {
+        const dir = JSON.parse(fs.readFileSync(dirFile, 'utf8'));
+        for (const region of dir.regions ?? []) {
+            for (const c of region.complexes ?? []) {
+                if (String(c.complexId).toLowerCase() === complexId.toLowerCase()) expected = c.host ?? null;
+            }
+        }
+    } catch (err) {
+        report.warn(`tools/directory.json 을 읽지 못해 대조를 건너뜁니다: ${message(err)}`);
+        return;
+    }
+
+    if (!expected) {
+        report.warn(`디렉터리에 단지 ${complexId} 가 없습니다 — 앱이 이 서버를 찾지 못합니다.`);
+        report.fix('tools/directory.json 에 넣고 npm run directory -- push tools/directory.json');
+        return;
+    }
+    if (host !== expected) {
+        report.bad(
+            `JANUS_WS_URL 의 호스트가 이 단지의 것이 아닙니다 (${host} ≠ ${expected}).`,
+            `.env 를 JANUS_WS_URL=wss://${expected}/janus-ws 로 고치세요 — 이 값은 등록 응답과 착신 푸시로 단말에 그대로 나갑니다.`,
+        );
+        return;
+    }
+    report.ok(`Janus 주소: ${host} (디렉터리와 일치)`);
 }
 
 // ── 의존성 ───────────────────────────────────────────
