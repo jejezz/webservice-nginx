@@ -42,6 +42,7 @@ async function main(): Promise<void> {
     checkDeps();
     checkDashboard();
     checkPush();
+    await checkJanusToken();
     await checkDatabase();
     checkPm2();
     checkNginx();
@@ -130,6 +131,77 @@ function newestFileTime(dir: string): number {
 }
 
 // ── FCM ──────────────────────────────────────────────
+/**
+ * 단말별 Janus 토큰 (docs/client-migration.md).
+ *
+ * 스위치가 둘이다 — Janus 의 `token_auth` 와 여기의 `JANUS_TOKEN_AUTH`.
+ * **순서가 있다.** Janus 를 먼저 켜야 하고, 반대로 하면 발급이 매번 490 으로
+ * 실패한다. 로그에는 남지만 아무도 안 보므로, 그 어긋남을 여기서 말한다.
+ *
+ * Janus 쪽 상태는 파일이 아니라 Admin API 에 물어본다 — 설치본 janus.jcfg 는
+ * root 전용이라 읽을 수 없고, 물어보면 확실하다(꺼져 있으면 490).
+ */
+async function checkJanusToken(): Promise<void> {
+    report.step('Janus 단말 토큰 (선택)');
+
+    const relayOn = /^(true|1|yes|on)$/i.test((process.env.JANUS_TOKEN_AUTH || '').trim());
+    const adminUrl = (process.env.JANUS_ADMIN_URL || 'http://127.0.0.1:7088/admin').trim();
+    const secretPath = resolveFromRoot(process.env.JANUS_ADMIN_SECRET_FILE || '../janus/secrets/admin-secret');
+
+    let janusOn: boolean | null = null;
+    let secret = '';
+    try {
+        secret = fs.readFileSync(secretPath, 'utf8').split('\n')[0].trim();
+    } catch {
+        // 못 읽으면 발급 자체가 안 된다. 켜져 있다고 주장할 때만 문제다.
+    }
+
+    if (secret) {
+        try {
+            const res = await fetch(adminUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ janus: 'list_tokens', transaction: 'doctor', admin_secret: secret }),
+                signal: AbortSignal.timeout(2000),
+            });
+            const body: any = await res.json();
+            if (body?.janus === 'success') janusOn = true;
+            else if (body?.error?.code === 490) janusOn = false;
+        } catch {
+            // Admin API 가 응답하지 않는다. 아래에서 모름으로 다룬다.
+        }
+    }
+
+    if (!relayOn && janusOn !== true) {
+        report.info('꺼져 있습니다 — 모든 단말이 같은 api_secret 으로 붙습니다.');
+        return;
+    }
+
+    if (relayOn && janusOn === false) {
+        // 순서가 뒤바뀐 것이다. 릴레이는 발급을 시도하지만 매번 거절당한다.
+        report.bad(
+            'Janus 의 token_auth 가 꺼져 있어 토큰 발급이 매번 실패합니다.',
+            'cd services/janus && sudo ./install.sh --apply',
+        );
+        return;
+    }
+    if (relayOn && janusOn === null) {
+        report.warn(`Janus Admin API 에 닿지 못해 확인하지 못했습니다 (${adminUrl}).`);
+        return;
+    }
+    if (!relayOn && janusOn === true) {
+        report.pend('Janus 는 받을 준비가 됐는데 릴레이가 발급하지 않습니다.',
+                    '.env 에 JANUS_TOKEN_AUTH=true 를 넣고 pm2 restart websocket-relay --update-env');
+        return;
+    }
+
+    if (!secret) {
+        report.bad(`admin secret 을 읽을 수 없어 발급하지 못합니다: ${secretPath}`);
+        return;
+    }
+    report.ok('발급 켜져 있음 — 단말마다 다른 토큰으로 Janus 에 붙습니다.');
+}
+
 function checkPush(): void {
     report.step('FCM 푸시 (선택)');
 

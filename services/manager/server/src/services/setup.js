@@ -205,7 +205,11 @@ const STEPS = [
     title: 'Janus 설정과 systemd 유닛 설치',
     why:
       'Janus 는 배포본 설정 그대로면 SIP 플러그인도 /janus-api 도 뜨지 않습니다. ' +
-      'Kamailio 가 먼저 떠 있어야 SIP 쪽이 붙을 상대가 생깁니다.',
+      'Kamailio 가 먼저 떠 있어야 SIP 쪽이 붙을 상대가 생깁니다.\n\n' +
+      '이 설정이 `token_auth` 도 켭니다 — **단말마다 다른 토큰**으로 붙게 하는 ' +
+      '스위치입니다. 켠 뒤에 릴레이 쪽(`JANUS_TOKEN_AUTH`)을 켜야 하고, ' +
+      '순서를 뒤집으면 발급이 매번 실패합니다. 전환이 끝나면 `api_secret` 을 ' +
+      '지우세요 (docs/client-migration.md).',
     requires: ['janus.build', 'kamailio.config'],
     // 장비마다 다른 값 — 공인 IP·미디어 포트 범위 (settings-schema.json)
     settings: { dir: 'services/janus' },

@@ -460,6 +460,60 @@ report() {
     fi
 
     info ""
+    info "단말 토큰 (docs/client-migration.md)"
+    # api_secret 은 단지에 하나뿐이라 모든 폰에 같은 값이 들어간다. 한 대에서
+    # 새면 이 게이트웨이 전체가 열리고 그 한 대만 막을 방법이 없다. 그래서
+    # websocket-relay 가 단말마다 다른 토큰을 발급한다.
+    #
+    # 설치본 janus.jcfg 는 root 전용이라 파일로 확인할 수 없다. Admin API 에
+    # 물어보면 확실하다 — token_auth 가 꺼져 있으면 490 으로 답한다.
+    local token_state="unknown" admin_secret_value=""
+    [[ -r "$ADMIN_SECRET_FILE" ]] && admin_secret_value="$(head -1 "$ADMIN_SECRET_FILE" | tr -d '\r\n')"
+
+    if [[ -n "$admin_secret_value" && -n "$admin_addr" ]]; then
+        local body
+        body="$(curl -s -m 3 -X POST "http://127.0.0.1:${ADMIN_PORT}/admin" \
+                    -H 'Content-Type: application/json' \
+                    -d "{\"janus\":\"list_tokens\",\"transaction\":\"chk\",\"admin_secret\":\"${admin_secret_value}\"}" 2>/dev/null || true)"
+        case "$body" in
+            *'"success"'*) token_state="on" ;;
+            *490*)         token_state="off" ;;
+        esac
+    fi
+
+    case "$token_state" in
+        on)  ok "token_auth 켜져 있음 — 단말마다 다른 토큰으로 붙습니다" ;;
+        off) pend "token_auth 가 꺼져 있습니다 — 모든 단말이 같은 api_secret 을 씁니다 → sudo $0 --apply"
+             pending=$((pending + 1)) ;;
+        *)   skip "token_auth 상태를 확인하지 못했습니다 (Admin API 응답 없음)" ;;
+    esac
+
+    # 릴레이 쪽 스위치(JANUS_TOKEN_AUTH)는 여기서 보지 않는다. 그 파일은
+    # websocket-relay 가 소유하고, 어긋남은 check-relay.sh 가 잡는다.
+    #
+    # 전환이 끝나면 api_secret 을 지워야 한다 — 남겨 두면 Janus 는 둘 중 하나만
+    # 맞아도 통과시키므로 토큰을 발급한 의미가 없어진다.
+    #
+    # **판정에는 넣지 않는다.** 앱이 token 을 쓰기 시작해야 지울 수 있는데, 그
+    # 시점은 이 단계가 정할 수 없다. pending 으로 두면 이 단계가 영원히 미완료가
+    # 되고 뒤따르는 단계들이 잠긴다 (nginx.routes · relay.service · verify.call).
+    if [[ "$token_state" == "on" ]] \
+       && grep -qE '^[[:space:]]*api_secret[[:space:]]*=' "${SCRIPT_DIR}/janus.jcfg"; then
+        skip "api_secret 이 아직 남아 있습니다 — 앱이 token 을 쓰기 시작하면 지우세요 (이 단계의 완료 조건은 아닙니다)"
+    fi
+
+    # Admin API 는 세션 조회·토큰 발급·핸들 강제 종료가 전부 되는 문이다.
+    # nginx 는 nginx-conf/*.ini 에 적힌 포트로만 프록시를 만들 수 있으므로,
+    # 거기 admin 포트가 없으면 밖으로 나갈 길이 없다.
+    if grep -rqE "^[[:space:]]*(ports|port)[[:space:]]*=[[:space:]]*.*\b${ADMIN_PORT}\b" \
+           "${SCRIPT_DIR}/nginx-conf/" 2>/dev/null; then
+        warn "nginx 선언에 Admin 포트(${ADMIN_PORT})가 있습니다 — 밖으로 열면 안 됩니다"
+        problems=$((problems + 1))
+    else
+        ok "Admin 포트(${ADMIN_PORT})는 nginx 선언에 없습니다 — 밖으로 나갈 길이 없습니다"
+    fi
+
+    info ""
     info "미디어 포트 범위"
     # 겹치면 조용히 실패한다. 통화는 성립하는데 소리만 안 나거나, 어느 한쪽이
     # 포트를 못 잡는 형태로 나타난다.
