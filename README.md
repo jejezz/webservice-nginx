@@ -74,6 +74,9 @@ nginx 생성기와 manager 대시보드가 **같은** `nginx-conf` 를 읽고, p
 
 둘은 별개입니다 — **선언이 있어도 프로세스가 안 떠 있으면 그 경로는 502** 입니다.
 
+서비스를 하나 더 붙이는 절차와, **아직 손으로 고쳐야 하는 자리 셋**은
+[docs/adding-a-service.md](docs/adding-a-service.md) 에 있습니다.
+
 ## 자주 하는 일
 
 라우팅 선언을 바꾼 뒤 nginx 에 반영합니다.
