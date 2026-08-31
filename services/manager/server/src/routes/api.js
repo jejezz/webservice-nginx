@@ -7,6 +7,7 @@ const { loadServices } = require('../services/registry');
 const health = require('../services/health');
 const pm2 = require('../services/pm2');
 const nginx = require('../services/nginx');
+const host = require('../services/host');
 const cert = require('../services/cert');
 const setup = require('../services/setup');
 const attest = require('../services/setup-attest');
@@ -57,6 +58,15 @@ const router = express.Router();
 // --- 관리자 콘솔 (로그인 화면의 설정 버튼) ---
 // 일반 로그인 세션과 별개의 인증을 쓰므로 requireAuth 바깥에 둔다.
 router.use('/admin', adminRouter);
+
+// --- 장비 식별 ---
+
+// 로그인 화면이 "어느 장비인지" 를 띄우기 위해 부른다.
+// 로그인 전에 응답해야 하므로 requireAuth 를 걸지 않는다. IP 는 마지막
+// 옥텟만 나가고(services/host.js), 그 외에는 아무것도 드러내지 않는다.
+router.get('/host', (req, res) => {
+  res.json(host.identity());
+});
 
 // --- 인증 ---
 

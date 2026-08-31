@@ -1176,7 +1176,7 @@ DDNS 이름으로 발급받는 것이 아니라서 *"그 존에 레코드를 만
 ### Phase 1 — 프레임워크 (서비스는 건드리지 않는다)
 
 - [x] ~~`nginx/generate_client_certificates.sh` 를 가져온다~~ → **가져왔다.** 새 CA 를 만들지 않고 `cert/ca/` 로 서명하게 고쳤다 (§6.1)
-- [ ] `manager/server/src/services/host.js` 를 가져온다 (§5-①)
+- [x] ~~`manager/server/src/services/host.js` 를 가져온다~~ → **가져왔다.** `GET /api/host` · 로그인 화면 표시까지 (§5-①)
 - [ ] 관리자 계정을 fail-closed 로 (§5-②) — `bootstrap.sh` 도 함께 고친다
 - [ ] `setup_mariadb.sh` 에 관리자 접속 폴백을 더한다 (§4)
 - [ ] `nginx-stack.conf` 에서 장비별 절대경로를 뺀다 (§6)

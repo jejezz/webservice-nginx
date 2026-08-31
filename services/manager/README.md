@@ -288,6 +288,7 @@ pm2 restart manager
 | 메서드 | 경로 | 인증 | 설명 |
 |--------|------|------|------|
 | `GET` | `/manager/health` | — | manager 자체 상태 |
+| `GET` | `/manager/api/host` | — | 이 장비의 hostname 과 **마스킹된** IP (`x.x.x.224`). 로그인 화면이 어느 장비인지 띄우는 데 쓴다 |
 | `POST` | `/manager/api/login` | — | 로그인 / 승인 요청 (IP당 5회 실패 시 5분 차단) |
 | `POST` | `/manager/api/logout` | — | 로그아웃 |
 | `GET` | `/manager/api/me` | 필요 | 현재 세션 |

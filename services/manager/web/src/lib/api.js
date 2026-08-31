@@ -37,6 +37,9 @@ async function request(path, options = {}) {
 }
 
 export const api = {
+  // 로그인 화면이 어느 장비인지 표시하기 위해 부른다. 인증 전에도 응답한다.
+  host: () => request('/host'),
+
   login: (username, password) =>
     request('/login', { method: 'POST', body: JSON.stringify({ username, password }) }),
   logout: () => request('/logout', { method: 'POST' }),
