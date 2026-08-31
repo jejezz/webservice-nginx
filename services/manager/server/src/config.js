@@ -32,10 +32,21 @@ const DEFAULTS = {
   },
   // 로그인 화면의 설정 버튼으로 들어가는 관리자 콘솔 계정.
   // administrator 테이블 자체를 다루므로 일반 로그인 계정과 분리해 둔다.
-  // passwordHash(scrypt$...)를 넣으면 password 대신 그것을 쓴다.
+  //
+  // ⚠️ 기본 비밀번호를 두지 않는다. 둘 다 비어 있으면 콘솔은 **항상 실패**한다
+  //    (fail-closed — routes/admin.js 의 checkCredentials).
+  //
+  //    이 콘솔은 모든 관리자 계정을 만들고 지울 수 있다. 기본 비밀번호를 두면
+  //    그것이 저장소에 커밋되고 README 에도 실리므로, 바꾸지 않은 장비는 클론을
+  //    받은 누구에게나 열린다. "나중에 바꾸겠다" 가 지켜지지 않는 자리다.
+  //
+  //    비밀번호는 passwordHash 로 넣는다:
+  //      cd services/manager/server
+  //      printf '%s' '<비밀번호>' | node tools/hash-password.js --stdin
+  //    bootstrap.sh 가 config.json 을 만들 때 이것을 대신 해 준다.
   superAdmin: {
     username: 'zoomon',
-    password: '77887788',
+    password: '',
     passwordHash: '',
     sessionTtlMinutes: 30,
   },

@@ -15,7 +15,6 @@
   },
   "superAdmin": {
     "username": "zoomon",
-    "password": "77887788",
     "passwordHash": "",
     "sessionTtlMinutes": 30
   },

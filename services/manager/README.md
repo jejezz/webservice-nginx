@@ -181,16 +181,25 @@ CLI 없이 브라우저에서도 같은 일을 할 수 있습니다.
 두 토큰은 서로를 대신할 수 없고, 이 쿠키는 `/manager` 경로 밖으로 나가지 않습니다.
 모든 변경은 `admin_audit_log`에 `console:<아이디>` 행위자로 남습니다.
 
-> **주의** — 이 계정 하나로 모든 관리자 계정을 만들고 지울 수 있습니다.
-> 기본값(`zoomon` / `77887788`)을 그대로 두지 말고, 최소한 아래처럼 해시로 바꿔 두세요.
+> **기본 비밀번호는 없습니다.** 이 계정 하나로 모든 관리자 계정을 만들고 지울 수
+> 있어서, `password` 와 `passwordHash` 가 **둘 다 비어 있으면 콘솔은 항상 로그인에
+> 실패합니다**(fail-closed). 저장소에 커밋된 기본 비밀번호는 바꾸지 않은 장비
+> 전부에서 그대로 통하고, "나중에 바꾸겠다" 는 지켜지지 않습니다.
+>
+> `bootstrap.sh` 가 `config.json` 을 만들 때 이 비밀번호를 물어 해시로 넣어 줍니다.
+> 손으로 바꾸려면:
 >
 > ```bash
-> cd services/manager/server && npm run hash-password -- '새 비밀번호'
+> cd services/manager/server
+> printf '%s' '<비밀번호>' | node tools/hash-password.js --stdin
 > ```
 >
-> 출력한 `scrypt$…` 값을 `config.json`의 `superAdmin.passwordHash`에 넣으면
-> `superAdmin.password`는 무시됩니다. CLI와 달리 이 콘솔에는 “마지막 승인 계정 보호”가
-> 없습니다 — 모두 승인 취소해도 설정 버튼으로 다시 들어와 되돌릴 수 있기 때문입니다.
+> 출력한 `scrypt$…` 값을 `config.json`의 `superAdmin.passwordHash`에 넣습니다.
+> 인자로 주는 `npm run hash-password -- '<비밀번호>'` 도 되지만, 그 비밀번호가 같은
+> 장비의 다른 사용자에게 `ps` 목록으로 보이고 셸 히스토리에도 남습니다.
+>
+> CLI와 달리 이 콘솔에는 “마지막 승인 계정 보호”가 없습니다 — 모두 승인 취소해도
+> 설정 버튼으로 다시 들어와 되돌릴 수 있기 때문입니다.
 
 ### 첫 계정 만들기
 
@@ -270,8 +279,8 @@ pm2 restart manager
 | `pm2Enabled` | `true` | PM2 상태 수집 여부 |
 | `auth.provider` | `db` | `db`(administrator 테이블) 또는 `file`(비상용) |
 | `superAdmin.username` | `zoomon` | 관리자 콘솔 아이디 |
-| `superAdmin.password` | `77887788` | 관리자 콘솔 비밀번호. `passwordHash`가 있으면 무시됨 |
-| `superAdmin.passwordHash` | — | `npm run hash-password`로 만든 `scrypt$…` (권장) |
+| `superAdmin.password` | *(비어 있음)* | 평문 비밀번호. `passwordHash`가 있으면 무시됨. **둘 다 비면 콘솔이 열리지 않습니다** |
+| `superAdmin.passwordHash` | *(비어 있음)* | `tools/hash-password.js` 로 만든 `scrypt$…` **(이쪽을 쓰세요)** |
 | `superAdmin.sessionTtlMinutes` | `30` | 관리자 콘솔 세션 유효 시간 |
 | `database.host` / `port` | `127.0.0.1` / `3306` | MariaDB 주소 |
 | `database.user` | `jyahn` | 공용 DB 계정 |

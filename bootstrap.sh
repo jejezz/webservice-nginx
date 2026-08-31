@@ -102,7 +102,74 @@ else
         || { bad "화면 빌드 실패 — 직접 돌려 보세요: cd services/manager/web && npm install && npm run build"; exit 1; }
 fi
 
-# ── 3. 띄우기 ────────────────────────────────────────────────────
+# ── 3. 관리자 콘솔 비밀번호 ──────────────────────────────────────
+#
+# 기본 비밀번호를 두지 않는다. 저장소에 커밋된 비밀번호는 바꾸지 않은 장비
+# 전부에서 그대로 통하고, 이 콘솔은 관리자 계정을 만들고 지울 수 있다.
+# 그래서 비어 있으면 콘솔이 아예 열리지 않는다(fail-closed).
+#
+# 대신 그 값을 여기서 받아 둔다 — 그러지 않으면 클론한 사람이 화면 앞에서
+# 막히고, 왜 막혔는지 알 길이 없다.
+step "관리자 콘솔 비밀번호"
+
+CONFIG="${ROOT}/services/manager/config.json"
+EXAMPLE="${ROOT}/services/manager/config.example.json"
+
+set_admin_password() {
+    local pw pw2
+    while :; do
+        read -rsp "  관리자 콘솔 비밀번호 (8자 이상): " pw; echo
+        if [[ ${#pw} -lt 8 ]]; then
+            bad "8자 이상이어야 합니다."
+            continue
+        fi
+        read -rsp "  한 번 더: " pw2; echo
+        if [[ "$pw" != "$pw2" ]]; then
+            bad "두 번 입력한 값이 다릅니다."
+            continue
+        fi
+        break
+    done
+
+    # 비밀번호를 인자로 넘기지 않는다 — 같은 장비의 다른 사용자에게 ps 목록으로
+    # 그대로 보인다. 해시도 argv 대신 환경 변수로 넘긴다.
+    local hash
+    hash="$(printf '%s' "$pw" | node "${ROOT}/services/manager/server/tools/hash-password.js" --stdin)" \
+        || { bad "해시 생성에 실패했습니다."; return 1; }
+    unset pw pw2
+
+    MANAGER_PW_HASH="$hash" node -e '
+        const fs = require("fs");
+        const [example, out] = process.argv.slice(1);
+        const c = JSON.parse(fs.readFileSync(example, "utf8"));
+        c.superAdmin = { ...c.superAdmin, passwordHash: process.env.MANAGER_PW_HASH };
+        delete c.superAdmin.password;
+        fs.writeFileSync(out, JSON.stringify(c, null, 2) + "\n", { mode: 0o600 });
+    ' "$EXAMPLE" "$CONFIG" || { bad "config.json 을 쓰지 못했습니다."; return 1; }
+
+    chmod 600 "$CONFIG" 2>/dev/null || true
+    ok "config.json 을 만들었습니다 (비밀번호는 해시로만 저장됩니다)"
+}
+
+if [[ -f "$CONFIG" ]]; then
+    ok "config.json 있음"
+elif [[ "$MODE" == "check" ]]; then
+    todo "config.json 없음 → 이 스크립트가 비밀번호를 받아 만듭니다"
+elif [[ ! -t 0 ]]; then
+    # 파이프나 CI 로 돌린 경우. 비밀번호를 물을 수 없다.
+    bad "config.json 이 없는데 입력을 받을 수 없습니다 (대화형 터미널이 아닙니다)"
+    echo "      cp services/manager/config.example.json services/manager/config.json"
+    echo "      cd services/manager/server"
+    echo "      printf '%s' '<비밀번호>' | node tools/hash-password.js --stdin"
+    echo "      ${DIM}그 값을 config.json 의 superAdmin.passwordHash 에 넣으세요.${OFF}"
+    PROBLEMS=$((PROBLEMS + 1))
+else
+    echo "  ${DIM}관리자 콘솔(로그인 화면의 설정 버튼)로 들어갈 비밀번호입니다."
+    echo "  비밀번호는 저장되지 않고 해시만 config.json 에 들어갑니다.${OFF}"
+    set_admin_password || PROBLEMS=$((PROBLEMS + 1))
+fi
+
+# ── 4. 띄우기 ────────────────────────────────────────────────────
 step "manager 기동"
 
 if [[ $HAVE_PM2 -eq 0 ]]; then
@@ -119,7 +186,7 @@ else
     fi
 fi
 
-# ── 4. 어디로 가야 하나 ──────────────────────────────────────────
+# ── 5. 어디로 가야 하나 ──────────────────────────────────────────
 step "다음"
 
 PORT="$(sed -n 's/^[[:space:]]*"port"[[:space:]]*:[[:space:]]*\([0-9]\{1,\}\).*/\1/p' \
@@ -135,8 +202,9 @@ cat <<EOF
       ${GREEN}http://127.0.0.1:${PORT}/manager/setup${OFF}
       ${DIM}(nginx 를 이미 반영했다면 https://<이 서버>/manager/setup)${OFF}
 
-  처음 로그인은 ${YELLOW}zoomon / 77887788${OFF} 입니다.
-  ${DIM}services/manager/config.json 을 만들어 바꿀 수 있습니다 (config.example.json 참고).${OFF}
+  관리자 콘솔(로그인 화면의 설정 버튼)은 ${YELLOW}zoomon${OFF} 과 방금 정한
+  비밀번호로 들어갑니다. ${DIM}기본 비밀번호는 없습니다 — 비워 두면 콘솔이 열리지
+  않습니다(services/manager/config.json 의 superAdmin).${OFF}
 
   마법사가 나머지를 순서대로 안내합니다 — 사이트 값 → DB → pm2 → Kamailio →
   Janus → nginx → 릴레이 → 시험 통화. 각 단계는 무엇을 왜 하는지와 점검 결과를

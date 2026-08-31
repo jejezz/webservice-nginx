@@ -66,7 +66,7 @@ cd webservices
 그러면 관리 대시보드가 뜨고, 마지막에 **구축 마법사 주소**를 알려 줍니다.
 
 ```
-http://127.0.0.1:28084/manager/setup      처음 로그인: zoomon / 77887788
+http://127.0.0.1:28084/manager/setup
 ```
 
 나머지는 그 화면이 순서대로 안내합니다 — 사이트 값 → DB → pm2 → Kamailio →
