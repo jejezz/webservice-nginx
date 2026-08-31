@@ -58,10 +58,14 @@ Node.js 는 **20 이상**이 필요합니다 (`fetch` · `AbortSignal.timeout`).
 ## 처음이라면 — 여기서 시작하세요
 
 ```bash
-git clone https://github.com/jejezz/webservice-nginx.git webservices
+git clone -b release/22.04 https://github.com/jejezz/webservice-nginx.git webservices
 cd webservices
 ./bootstrap.sh
 ```
+
+> **브랜치를 지정하는 이유.** `master` 는 OS 중립인 것만 담습니다. 실제로 설치하는
+> 장비는 어느 한 OS 위에 있으므로, 그 OS 의 릴리스 브랜치를 받는 것이 맞습니다.
+> 24.04 장비라면 `release/24.04` 를 받으세요 — 다만 **아직 검증 전입니다**(위 ⚠️).
 
 그러면 관리 대시보드가 뜨고, 마지막에 **구축 마법사 주소**를 알려 줍니다.
 

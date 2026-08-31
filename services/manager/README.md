@@ -235,7 +235,7 @@ npm run admin -- add you@example.com --password '...' --name '홍길동'
 ```
 
 ```bash
-npm run hash-password -- '비상용비밀번호'   # passwordHash 값 생성
+printf '%s' '비상용비밀번호' | node tools/hash-password.js --stdin   # passwordHash 값 생성
 pm2 restart manager
 ```
 

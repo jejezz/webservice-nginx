@@ -320,6 +320,25 @@ services/kamailio/kamailio-websocket.cfg:59
 | `database/setup_mariadb.sh:199` | `--validate-config` 주석 |
 | `services/kamailio/bootstrap.sh:213` | "rtpengine — 배포판에 없음" |
 
+**①에서 확인한 결과 — 이 자리들은 손대지 않았습니다.** 전부 22.04 에서 참이고,
+최상위 README 가 이미 두 열 비교표와 24.04 경고를 담고 있습니다.
+
+대신 다른 것이 나왔습니다. **문서가 낡는 것은 OS 때문만이 아니라 이 통합 작업
+자체 때문**입니다 — Phase 1 이 기본값을 바꾸면 그 값을 사실로 적어 둔 문장이
+전부 틀려집니다. 그리고 그런 문장은 대개 **보안 경고**라, 틀린 채로 남으면
+읽는 사람이 이미 해결된 것을 다시 걱정하거나 남아 있는 위험을 지나칩니다.
+
+| 낡은 자리 | 무엇이 틀렸나 |
+|---|---|
+| `services/kamailio/README.md` 8-1 · 8-5 | `bind_address = 0.0.0.0` · `jyahn host = %` 를 현재 사실로 적음 |
+| `services/kamailio/accounts.md` | 같음 — SIP 해시의 노출 범위를 그 값으로 설명 |
+| `services/manager/README.md` | 비상용 계정 절이 아직 인자형 `hash-password` |
+| `database/README.md` '현재 상태' | *"이 서버에는 10.6.23이 이미 설치되어 실행 중"* — 빈 장비에서 거짓 |
+
+**클론 명령에 브랜치를 붙였습니다.** 브랜치 모델을 적어 두고도 `git clone` 이
+`master` 를 받고 있었습니다. `master` 에는 OS 중립인 것만 사는데 설치하는 장비는
+어느 한 OS 위에 있으므로, `-b release/22.04` 로 받는 것이 맞습니다.
+
 ## 3. pm2 — 서비스를 붙일 때 중앙 파일을 고치지 않는다
 
 W 의 `pm2/ecosystem.config.js` 는 앱 6개가 **손으로 적혀** 있습니다. 서비스를
@@ -1250,7 +1269,8 @@ DDNS 이름으로 발급받는 것이 아니라서 *"그 존에 레코드를 만
 - [x] ~~`database.ini` 기본값을 조인다~~ → **조였다.** `bind_address = 127.0.0.1` · `jyahn@127.0.0.1` (§7.3)
 - [x] ~~`.gitignore` 에 `nginx/certs/` 와 `nginx/cert/` 를 모두 남긴다~~ → **남겼다.**
       경로만으로는 부족해 확장자 그물(`*.pem` `*.key` `*.p12` `*.pfx` `*.srl` `secrets/`)도 쳤다 (§7.7)
-- [ ] 정한 Ubuntu 버전에 맞게 문서를 고친다 (§2 의 '정한 뒤 고쳐야 하는 자리')
+- [x] ~~정한 Ubuntu 버전에 맞게 문서를 고친다~~ → **맞췄다.** 아래 표의 자리들은 22.04 에서
+      **참이므로 그대로 두고**(§2 의 ①), 대신 이번 Phase 1 변경으로 낡아진 서술을 고쳤다
 
 ### Phase 2 — 서비스 이식
 

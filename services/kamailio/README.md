@@ -480,10 +480,21 @@ SELECT id, username FROM subscriber WHERE password = '';   -- 인증 불가 계�
 
 이 디렉토리의 작업 범위 밖이지만 함께 살펴본 것들입니다.
 
-**8-1. MariaDB 가 LAN 에 열려 있습니다** — `database.ini` 의 `bind_address = 0.0.0.0`,
-`[user:jyahn] host = %`. 이제 그 계정이 SIP 계정 해시까지 접근하므로 범위가 넓어졌습니다.
-`jyahn` 의 비밀번호는 현재 8자 영단어+숫자 조합이라 약합니다.
-외부 접속이 실제로 필요하지 않다면 `bind_address` 를 `127.0.0.1` 로 좁히는 것이 가장 확실합니다.
+**8-1. MariaDB 의 노출 범위** — ~~`bind_address = 0.0.0.0`, `[user:jyahn] host = %`~~
+**기본값을 조였습니다** — 지금은 `bind_address = 127.0.0.1` 이고 `jyahn` 도
+`host = 127.0.0.1` 입니다 ([database/README.md](../../database/README.md)).
+이 계정이 SIP 계정 해시까지 다루므로 그 편이 맞습니다.
+
+⚠️ **이미 만들어 둔 장비에서는 값을 바꾸는 것만으로 좁혀지지 않습니다.**
+`setup_mariadb.sh` 는 추가·갱신만 하므로 옛 `jyahn@%` 가 그대로 남습니다.
+
+```bash
+sudo mariadb -e "SELECT user, host FROM mysql.user WHERE user = 'jyahn';"
+sudo mariadb -e "DROP USER 'jyahn'@'%';"
+```
+
+`jyahn` 의 비밀번호가 8자 영단어+숫자 조합이라 약한 것은 그대로입니다.
+원거리에서 닿아야 하면 3306 을 여는 대신 SSH 터널을 씁니다.
 
 **8-2. 버전 통일** — 5.5.4(2022년판, 구동 중)와 5.7.7(빌드만 되어 있음, 소스는
 `~/Public/RetroLink/kamailio/`). 5.7.7 로 옮기려면 systemd 유닛의 `ExecStart`/`CFGFILE` 을
@@ -494,8 +505,8 @@ SELECT id, username FROM subscriber WHERE password = '';   -- 인증 불가 계�
 파일을 새로 쓰면서 해소됩니다. 그 전까지는 공개된 기본값이 world-readable 상태로 남아 있습니다.
 
 **8-5. SIP 비밀번호가 평문으로 저장됩니다** — 이 Kamailio 설정(`calculate_ha1=yes`)이
-평문 컬럼으로 인증하기 때문입니다. `jyahn` 이 `host=%` 이고 MariaDB 가 `0.0.0.0:3306` 에
-열려 있으므로, 8-1 을 함께 정리하는 것이 특히 중요합니다.
+평문 컬럼으로 인증하기 때문입니다. 그 평문에 닿을 수 있는 범위가 곧 `jyahn` 의
+범위이므로, 8-1 의 확인(옛 `jyahn@%` 가 남아 있지 않은가)이 특히 중요합니다.
 평문을 남기지 않으려면 `calculate_ha1` 을 끄는 방식으로 옮겨야 합니다. ([accounts.md](accounts.md))
 
 **8-4. `setup_mariadb.sh` 의 dry-run 부작용** — 비밀번호 생성 함수에 `--dry-run` 가드가 없어

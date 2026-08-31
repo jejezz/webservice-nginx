@@ -66,10 +66,14 @@ node --version        # v20 이상이어야 합니다
 ## 2. 한 줄
 
 ```bash
-git clone <이 저장소> webservices
+git clone -b release/22.04 <이 저장소> webservices
 cd webservices
 ./bootstrap.sh
 ```
+
+이 절차는 **22.04 를 전제로 합니다.** `master` 가 아니라 `release/22.04` 를 받는
+이유는, `master` 에는 OS 중립인 것만 살기 때문입니다 (최상위 [README](../README.md)
+의 '동작 환경').
 
 **여기서 볼 것**
 

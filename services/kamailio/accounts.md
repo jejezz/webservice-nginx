@@ -136,10 +136,17 @@ const pool = mysql.createPool({
 계정을 만들 때는 위 SQL 과 같은 방식으로 `ha1`/`ha1b` 를 계산해 넣습니다.
 평문 비밀번호는 저장하지 마세요 — digest 인증에는 해시만 있으면 됩니다.
 
-> 다만 `jyahn` 은 `host = %` 라서 LAN 어디서든 접속할 수 있고, 지금 MariaDB 는
-> `0.0.0.0:3306` 에 열려 있습니다. SIP 계정 해시까지 그 범위에 들어오므로,
-> 계정을 넣기 전에 `jyahn` 의 비밀번호를 강한 값으로 바꾸고 `host` 를 좁히는 편이 좋습니다.
-> 자세한 내용은 이 디렉토리의 `README.md` 마지막 절을 보세요.
+> 이 해시에 닿을 수 있는 범위는 곧 `jyahn` 의 범위입니다. 기본값은 이제
+> `bind_address = 127.0.0.1` 과 `jyahn@127.0.0.1` 이지만, **예전에 `jyahn@%` 로
+> 만들어 둔 장비에서는 그 계정이 그대로 남아 있습니다** — `setup_mariadb.sh` 는
+> 추가·갱신만 하고 지우지 않습니다. 계정을 넣기 전에 확인하세요.
+>
+> ```bash
+> sudo mariadb -e "SELECT user, host FROM mysql.user WHERE user = 'jyahn';"
+> ```
+>
+> `jyahn` 의 비밀번호를 강한 값으로 바꾸는 것도 함께. 자세한 내용은 이 디렉토리의
+> `README.md` 마지막 절을 보세요.
 
 ## 확인
 
