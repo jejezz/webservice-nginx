@@ -53,6 +53,48 @@ function requireAuth(req, res, next) {
   next();
 }
 
+/**
+ * 구축 마법사 전용 — 일반 세션 **또는** 관리자 콘솔 세션.
+ *
+ * 빈 장비에서는 일반 세션을 낼 수가 없다. 그 세션은 POST /login 에서만 나고,
+ * 그 라우트는 계정을 MariaDB 의 administrator 테이블에서 찾는데, **MariaDB 를
+ * 세우는 것이 이 마법사의 2단계**다. 들어가야 세울 수 있고 세워야 들어갈 수
+ * 있는 상태였다.
+ *
+ * 관리자 콘솔 세션은 그 고리 밖에 있다 — config.json 만으로 인증되고 DB 를
+ * 쓰지 않는다. 그래서 이 문을 그쪽에도 연다.
+ *
+ * **권한이 넓어지는 것이 아니다.** superAdmin 은 이미 모든 관리자 계정을 만들고
+ * 지울 수 있는, 이 시스템에서 가장 높은 자격이다. 그것이 서버 구축을 못 할
+ * 이유가 없다. 그리고 비밀번호가 없으면 콘솔 자체가 열리지 않으므로
+ * (routes/admin.js 의 fail-closed) 기본값으로 열리는 문이 생기지도 않는다.
+ *
+ * 여는 범위는 /setup* 뿐이다. /overview 나 /services/:name/health 처럼 운영
+ * 데이터를 보는 자리는 그대로 일반 세션만 받는다 — 필요하지 않은 것까지
+ * 넓히지 않는다.
+ *
+ * 콘솔로 들어온 경우 req.user.username 은 'console:<아이디>' 다.
+ * admin_audit_log 가 쓰는 표기와 같게 두어, 확인 기록(setup-attest.json)에도
+ * "누가 눌렀는가" 가 구분되어 남는다.
+ */
+function requireAuthOrConsole(req, res, next) {
+  const user = session.verify(req.cookies?.[config.cookieName]);
+  if (user) {
+    req.user = user;
+    req.viaConsole = false;
+    return next();
+  }
+
+  const admin = session.verifySuper(req.cookies?.[config.superAdmin.cookieName]);
+  if (admin) {
+    req.user = { username: `console:${admin.username}`, displayName: admin.username };
+    req.viaConsole = true;
+    return next();
+  }
+
+  return res.status(401).json({ error: 'unauthorized' });
+}
+
 const router = express.Router();
 
 // --- 관리자 콘솔 (로그인 화면의 설정 버튼) ---
@@ -219,13 +261,13 @@ router.get('/overview', requireAuth, async (req, res, next) => {
 
 // 단계 정의 + 각 단계의 마지막 점검 결과. 결과는 메모리에만 있으므로 재기동
 // 뒤에는 비어 있고, 화면이 들어오면서 다시 점검한다.
-router.get('/setup', requireAuth, (req, res) => {
+router.get('/setup', requireAuthOrConsole, (req, res) => {
   res.json(setup.overview());
 });
 
 // 그 단계의 점검 스크립트를 돌린다. 무엇을 돌릴지는 services/setup.js 의 표가
 // 정한다 — :stepId 는 그 표에서 한 줄을 고르는 데만 쓴다.
-router.post('/setup/check/:stepId', requireAuth, async (req, res, next) => {
+router.post('/setup/check/:stepId', requireAuthOrConsole, async (req, res, next) => {
   const step = setup.find(req.params.stepId);
   if (!step) return res.status(404).json({ error: 'unknown_step' });
 
@@ -243,7 +285,7 @@ router.post('/setup/check/:stepId', requireAuth, async (req, res, next) => {
 
 // 그 단계의 파라미터를 서비스의 settings.ini 에 쓴다. **값만 쓴다** — 설정
 // 파일을 만지지도, 서비스를 재기동하지도 않는다. 반영은 사람이 --apply 로 한다.
-router.put('/setup/settings/:stepId', requireAuth, (req, res, next) => {
+router.put('/setup/settings/:stepId', requireAuthOrConsole, (req, res, next) => {
   const step = setup.find(req.params.stepId);
   if (!step) return res.status(404).json({ error: 'unknown_step' });
   if (!step.settings) {
@@ -262,7 +304,7 @@ router.put('/setup/settings/:stepId', requireAuth, (req, res, next) => {
 
 // 사람의 확인을 기록한다. **통과로 바꾸는 것이 아니라 기록하는 것이다** —
 // 점검이 problem 이면 확인 기록이 있어도 problem 으로 남는다 (services/setup.js).
-router.post('/setup/attest/:stepId', requireAuth, (req, res) => {
+router.post('/setup/attest/:stepId', requireAuthOrConsole, (req, res) => {
   const step = setup.find(req.params.stepId);
   if (!step) return res.status(404).json({ error: 'unknown_step' });
   if (!step.attest) {
@@ -274,7 +316,7 @@ router.post('/setup/attest/:stepId', requireAuth, (req, res) => {
 });
 
 // 확인 기록을 지운다. 되돌렸거나 잘못 눌렀을 때 쓴다.
-router.delete('/setup/attest/:stepId', requireAuth, (req, res) => {
+router.delete('/setup/attest/:stepId', requireAuthOrConsole, (req, res) => {
   const step = setup.find(req.params.stepId);
   if (!step) return res.status(404).json({ error: 'unknown_step' });
 

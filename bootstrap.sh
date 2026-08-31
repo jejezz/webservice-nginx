@@ -202,9 +202,13 @@ cat <<EOF
       ${GREEN}http://127.0.0.1:${PORT}/manager/setup${OFF}
       ${DIM}(nginx 를 이미 반영했다면 https://<이 서버>/manager/setup)${OFF}
 
-  관리자 콘솔(로그인 화면의 설정 버튼)은 ${YELLOW}zoomon${OFF} 과 방금 정한
-  비밀번호로 들어갑니다. ${DIM}기본 비밀번호는 없습니다 — 비워 두면 콘솔이 열리지
-  않습니다(services/manager/config.json 의 superAdmin).${OFF}
+  ${YELLOW}처음에는 일반 로그인이 되지 않습니다.${OFF} 관리자 계정은 MariaDB 의
+  administrator 테이블에 있는데, ${DIM}그 테이블을 만드는 것이 마법사의 2단계입니다.${OFF}
+
+  로그인 화면의 ${GREEN}설정 버튼(⚙)${OFF} → ${YELLOW}zoomon${OFF} 과 방금 정한 비밀번호
+  → 헤더의 ${GREEN}구축 마법사${OFF} 로 들어가세요.
+  ${DIM}관리자 콘솔은 config.json 만으로 인증되어 그 고리 밖에 있습니다.
+  DB 를 세우고 자기 계정을 만든 뒤부터는 일반 로그인으로 들어가면 됩니다.${OFF}
 
   마법사가 나머지를 순서대로 안내합니다 — 사이트 값 → DB → pm2 → Kamailio →
   Janus → nginx → 릴레이 → 시험 통화. 각 단계는 무엇을 왜 하는지와 점검 결과를

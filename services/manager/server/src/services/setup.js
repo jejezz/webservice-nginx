@@ -456,8 +456,13 @@ function resolveCheck(step) {
   const cwd = path.resolve(config.repoRoot, step.check.cwd);
   const script = path.resolve(cwd, step.check.file);
 
-  const root = config.repoRoot.endsWith(path.sep) ? config.repoRoot : `${config.repoRoot}${path.sep}`;
-  if (!script.startsWith(root) || !cwd.startsWith(root)) {
+  // 저장소 루트 **자신**도 안쪽이다. 접두사 비교만 하면 cwd: '.' 이 걸린다 —
+  // path.resolve 가 끝의 구분자를 떼므로 '/…/repo' 는 '/…/repo/' 로 시작하지
+  // 않는다. 실제로 1단계(site.settings)가 이것 때문에 돌지 않고 있었다.
+  const root = config.repoRoot.endsWith(path.sep) ? config.repoRoot.slice(0, -1) : config.repoRoot;
+  const inside = (p) => p === root || p.startsWith(`${root}${path.sep}`);
+
+  if (!inside(script) || !inside(cwd)) {
     throw new Error(`check path escapes repo root: ${script}`);
   }
 

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   AlertCircle,
   Check,
+  ListChecks,
   LogOut,
   Pencil,
   Plus,
@@ -446,6 +447,12 @@ export default function AdminConsole() {
           </div>
 
           <div className="flex items-center gap-2">
+            {/* 빈 장비에서는 이 버튼이 마법사로 가는 유일한 길이다 — DB 가 아직
+                없어 일반 로그인을 할 수 없고, 콘솔 자격은 마법사에도 통한다. */}
+            <Button variant="outline" size="sm" onClick={() => navigate('/setup')}>
+              <ListChecks className="size-3.5" />
+              <span className="hidden sm:inline">구축 마법사</span>
+            </Button>
             <Button variant="outline" size="sm" onClick={load} disabled={refreshing}>
               <RefreshCw className={cn('size-3.5', refreshing && 'animate-spin')} />
               <span className="hidden sm:inline">새로고침</span>
@@ -465,7 +472,16 @@ export default function AdminConsole() {
         {error && (
           <Alert variant="destructive">
             <AlertCircle />
-            <AlertDescription>{error}</AlertDescription>
+            <AlertDescription>
+              {error}
+              {/* 빈 장비에서 처음 들어오면 여기가 막혀 있는 것이 정상이다.
+                  administrator 테이블은 마법사 2단계에서 생긴다. */}
+              <span className="mt-2 block text-xs opacity-80">
+                아직 데이터베이스를 세우지 않았다면 정상입니다 — 관리자 계정은
+                MariaDB 의 administrator 테이블에 있고, 그 테이블은 구축 마법사의
+                2단계에서 만들어집니다. 위의 <strong>구축 마법사</strong> 로 가세요.
+              </span>
+            </AlertDescription>
           </Alert>
         )}
 

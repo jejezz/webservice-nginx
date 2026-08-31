@@ -304,11 +304,11 @@ pm2 restart manager
 | `POST` | `/manager/api/verify-password` | 필요 | 지금 로그인한 사람이 맞는지 비밀번호로 재확인 (서비스 대시보드가 민감한 값을 꺼내기 전에 부름) |
 | `GET` | `/manager/api/overview` | 필요 | 서비스·Nginx 전체 상태 |
 | `GET` | `/manager/api/services/:name/health` | 필요 | 개별 서비스 재확인 |
-| `GET` | `/manager/api/setup` | 필요 | 구축 단계 정의 + 각 단계의 마지막 점검 결과 |
-| `POST` | `/manager/api/setup/check/:stepId` | 필요 | 그 단계의 점검 스크립트를 돌리고 판정을 반환 |
-| `PUT` | `/manager/api/setup/settings/:stepId` | 필요 | 그 단계의 파라미터를 서비스의 `settings.ini` 에 저장 |
-| `POST` | `/manager/api/setup/attest/:stepId` | 필요 | 사람의 확인을 기록 (기계가 확인할 수 없는 단계) |
-| `DELETE` | `/manager/api/setup/attest/:stepId` | 필요 | 그 확인 기록을 지움 |
+| `GET` | `/manager/api/setup` | 필요<sup>†</sup> | 구축 단계 정의 + 각 단계의 마지막 점검 결과 |
+| `POST` | `/manager/api/setup/check/:stepId` | 필요<sup>†</sup> | 그 단계의 점검 스크립트를 돌리고 판정을 반환 |
+| `PUT` | `/manager/api/setup/settings/:stepId` | 필요<sup>†</sup> | 그 단계의 파라미터를 서비스의 `settings.ini` 에 저장 |
+| `POST` | `/manager/api/setup/attest/:stepId` | 필요<sup>†</sup> | 사람의 확인을 기록 (기계가 확인할 수 없는 단계) |
+| `DELETE` | `/manager/api/setup/attest/:stepId` | 필요<sup>†</sup> | 그 확인 기록을 지움 |
 | `POST` | `/manager/api/admin/login` | — | 관리자 콘솔 로그인 (IP당 5회 실패 시 10분 차단) |
 | `POST` | `/manager/api/admin/logout` | — | 관리자 콘솔 로그아웃 |
 | `GET` | `/manager/api/admin/me` | 콘솔 | 콘솔 세션 확인 |
@@ -319,6 +319,24 @@ pm2 restart manager
 
 “콘솔” 인증은 `manager_admin` 쿠키이며, 일반 로그인 세션(`manager_session`)으로는 통과하지 못합니다.
 응답에 `password_hash`는 절대 포함되지 않습니다.
+
+<sup>†</sup> **`/setup*` 만은 둘 다 받습니다** — 일반 세션 **또는** 관리자 콘솔 세션.
+
+빈 장비에서는 일반 세션을 낼 수가 없기 때문입니다. 그 세션은 `POST /login` 에서
+나고, 그 라우트는 계정을 MariaDB 의 `administrator` 테이블에서 찾는데,
+**그 테이블을 만드는 것이 이 마법사의 2단계**입니다. 들어가야 세울 수 있고
+세워야 들어갈 수 있는 상태였습니다.
+
+콘솔 세션은 그 고리 밖에 있습니다 — `config.json` 만으로 인증되고 DB 를 쓰지
+않습니다. 그리고 **권한이 넓어지는 것이 아닙니다**: `superAdmin` 은 이미 모든
+관리자 계정을 만들고 지울 수 있는 가장 높은 자격입니다. 비밀번호가 없으면
+콘솔 자체가 열리지 않으므로 기본값으로 열리는 문도 생기지 않습니다.
+
+여는 범위는 `/setup*` 뿐입니다. `/overview` 나 `/services/:name/health` 처럼 운영
+데이터를 보는 자리는 그대로 일반 세션만 받습니다.
+
+콘솔로 들어온 경우 확인 기록의 `by` 는 `console:<아이디>` 입니다 —
+`admin_audit_log` 와 같은 표기라 누가 눌렀는지 구분되어 남습니다.
 
 대시보드는 5초마다 `/overview`를 갱신하며, 헤더의 스위치로 자동 갱신을 끌 수 있습니다.
 
