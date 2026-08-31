@@ -138,7 +138,10 @@ if ! systemctl is-active --quiet mariadb; then
     exit 1
 fi
 
-if ! resolve_mariadb_credentials; then
+# 자동 경로가 막히면 계정을 물어본다. 이 스크립트는 설치를 바꾸러 온 것이므로
+# 사람이 앞에 앉아 있고, 못 붙으면 아무것도 못 한다 — 여기서 묻는 것이 맞다.
+# (조용히 돌아야 하는 점검·상태 표시는 resolve_mariadb_credentials 를 쓴다)
+if ! resolve_mariadb_credentials_interactive; then
     echo "Error: MariaDB에 접속할 수 없습니다."
     echo ""
     mariadb_access_help
