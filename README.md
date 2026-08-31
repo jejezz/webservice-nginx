@@ -40,8 +40,8 @@
 | Janus | 양쪽 다 `/opt/janus` 소스 빌드 | |
 
 Node.js 는 **20 이상**이 필요합니다 (`fetch` · `AbortSignal.timeout`). 배포판
-기본값은 22.04 가 v12, 24.04 가 v18 이라 **어느 쪽이든 NodeSource 나 nvm 이
-필요합니다.**
+기본값은 22.04 가 v12, 24.04 가 v18 이라 **어느 쪽이든 배포판 apt 만으로는 안
+됩니다** — 설치 방법은 [docs/nodejs-install.md](docs/nodejs-install.md).
 
 > ⚠️ **24.04 에서는 둘이 먼저 걸립니다.**
 >
