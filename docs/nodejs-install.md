@@ -62,6 +62,61 @@ dpkg -S /usr/bin/npm
 node 12 시절의 `node-*` 의존성 수십 개를 끌고 오려다 `held broken packages` 로
 **실패**합니다. 장비가 망가지지는 않지만 시간을 버립니다.
 
+## `libnode-dev` 와 부딪히면
+
+배포판 node 12 가 깔려 있던 장비에서는 설치가 이렇게 멈춥니다:
+
+```
+trying to overwrite '/usr/include/node/common.gypi', which is also in package libnode-dev 12.22.9~dfsg-1ubuntu3.6
+```
+
+NodeSource 패키지가 선언하는 관계를 보면 이유가 보입니다:
+
+```bash
+dpkg -s nodejs | grep -E '^(Conflicts|Replaces)'
+```
+
+```
+Conflicts: nodejs-dev, nodejs-doc, nodejs-legacy, npm (<= 1.2.14)
+Replaces:  nodejs-dev (<= 0.8.22), nodejs-legacy, npm (<= 1.2.14)
+```
+
+`nodejs-dev` 를 비켜 가도록 만들어져 있는데 **우분투는 그 패키지를
+`libnode-dev` 로 개명했습니다.** 이름이 어긋나 `Replaces` 가 걸리지 않고, 두
+패키지가 `/usr/include/node/` 를 각자 자기 것이라 주장하다 dpkg 가 멈춥니다.
+NodeSource 쪽 선언이 개명을 따라오지 못한 것이라, node 12 가 깔린 22.04 라면
+누구나 밟습니다.
+
+지울 때 딸려 나가는 것이 있는지 먼저 봅니다:
+
+```bash
+sudo apt-get remove -s libnode-dev
+```
+
+보통 그 하나뿐입니다. 그러면 지우고 다시 설치합니다:
+
+```bash
+sudo apt-get remove -y libnode-dev && sudo apt-get install -y nodejs
+```
+
+> `nodejs` 를 `purge` 로 먼저 지우지 마세요. 그 장비에서 `nodejs` 에 의존하는
+> 패키지가 함께 끌려 나갑니다. 부딪히는 것은 **개발 헤더 패키지**지 런타임이
+> 아닙니다.
+
+배포판 `npm` 패키지가 깔린 장비라면 `/usr/bin/npm` 에서 같은 일이 한 번 더
+납니다. 위의 `Replaces: npm (<= 1.2.14)` 이 jammy 의 npm `8.5.1` 을 덮지 못하기
+때문입니다. 미리 함께 확인하십시오:
+
+```bash
+dpkg -l npm libnode-dev 2>/dev/null | grep ^ii
+```
+
+앞선 시도가 dpkg 를 중간에 끊어 놓았다면 이어서 정리합니다:
+
+```bash
+sudo apt-get -f install
+```
+
 ## 확인
 
 ```bash
