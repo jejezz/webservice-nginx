@@ -731,6 +731,8 @@ def main():
     parser.add_argument("--check", action="store_true", help="파싱과 충돌 검사만 하고 끝낸다")
     parser.add_argument("--json", action="store_true",
                         help="점검 결과를 기계가 읽는 형식으로 낸다 (docs/check-contract.md)")
+    parser.add_argument("--tls-mode", action="store_true",
+                        help="서버 인증서가 어느 쪽으로 갈렸는지만 JSON 으로 찍고 끝낸다")
     parser.add_argument("--installed", default=INSTALLED_CONF,
                         help="설치본 경로. 지금 선언과 같은지 비교한다")
     args = parser.parse_args()
@@ -739,6 +741,25 @@ def main():
     CHECK_JSON = args.json
 
     stack = Stack(args.config)
+
+    # 판정만 묻는 경로. **판정을 두 번 구현하지 않기 위해** 있다 —
+    # 마법사의 tls.decide 가 이것을 부른다. 규칙을 셸에 한 벌 더 적으면
+    # 언젠가 갈라지고, 갈라진 것을 알아차릴 방법이 없다.
+    if args.tls_mode:
+        json.dump({
+            "mode": "declared" if stack.cert_declared else stack.tls_mode,
+            "reason": ("nginx-stack.conf 의 [tls] 에 직접 적혀 있습니다"
+                       if stack.cert_declared else stack.tls_mode_reason),
+            "declared": stack.cert_declared,
+            "halfDeclared": stack.cert_half_declared,
+            "host": stack.server_name,
+            "cert": stack.cert,
+            "key": stack.key,
+            "clientCa": stack.client_ca,
+            "verifyClient": stack.verify_client,
+        }, sys.stdout, ensure_ascii=False, indent=2)
+        sys.stdout.write("\n")
+        return
 
     if not os.path.isdir(stack.services_dir):
         die(f"서비스 디렉토리가 없습니다: {stack.services_dir}")

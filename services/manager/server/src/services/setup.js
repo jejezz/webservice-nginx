@@ -95,6 +95,35 @@ const STEPS = [
     check: { cwd: '.', file: './site/apply.sh', args: ['--check', '--json'] },
   },
   {
+    id: 'tls.decide',
+    service: 'nginx',
+    title: '서버 인증서를 공인으로 갈지 사설로 갈지 정합니다',
+    why:
+      '**이 갈림길이 지금까지 아무 데도 없었습니다.** nginx 는 어느 쪽이든 멀쩡히 뜨고 ' +
+      '브라우저만 사설 CA 에 경고를 냅니다. 그래서 사설로 떨어진 것을 **앱이 안 붙는다는 ' +
+      '신고가 올 때까지 아무도 모릅니다.**\n\n' +
+      '여기서 한 번 소리 내어 정하고 지나갑니다. 사설이 잘못된 것은 아닙니다 — LAN 전용 ' +
+      '배치에서는 그쪽이 옳고, 도메인이 없거나 80 을 열 수 없는 장비가 실재합니다. ' +
+      '잘못된 것은 **모르고 지나가는 것**입니다.\n\n' +
+      '값은 1단계의 `tls_mode` 입니다 (`auto`·`public`·`private`). `auto` 로 두면 그 이름으로 ' +
+      '발급받은 것이 있을 때 저절로 공인이 됩니다 — 발급이 끝나는 순간 이 단계의 판정도 ' +
+      '따라 바뀝니다.\n\n' +
+      '⚠️ **앱을 스토어로 배포하는 배치라면 사설 CA 는 선택지가 아닙니다.** 앱이 그 CA 를 ' +
+      '믿게 만들 방법이 사실상 없습니다 (iOS 는 사용자가 손으로 신뢰를 켜야 하고, Android 는 ' +
+      'API 24+ 부터 앱이 자기가 선언한 CA 만 씁니다).',
+    // 이름이 정해져야 판정할 수 있다. host 가 곧 인증서 이름이다.
+    requires: ['site.settings'],
+    command: {
+      cwd: 'nginx',
+      run:
+        '# 값은 1단계(site/settings.ini)의 tls_mode 로 바꿉니다.\n' +
+        '# 사설로 간다면 인증서를 만듭니다:\n' +
+        './generate_certs.sh --auto <host>',
+      sudo: false,
+    },
+    check: { cwd: 'nginx', file: './tls-decide.sh', args: ['--check', '--json'] },
+  },
+  {
     id: 'database.schema',
     service: 'database',
     title: 'MariaDB 설치와 스키마 적용',
@@ -349,7 +378,9 @@ const STEPS = [
     // HTTP-01 챌린지는 반드시 80 으로 들어오는데, 80 은 전부 HTTPS 로 301 합니다.
     // 그 예외(acme_webroot)를 만드는 것이 nginx.routes 입니다. 뒤집으면 챌린지가
     // 301 로 튕겨 발급이 통과하지 못합니다.
-    requires: ['nginx.routes'],
+    // tls.decide 가 앞에 있는 이유는 순서가 아니라 **자각**입니다 — 공인으로 갈
+    // 수 있는 장비인지(이름·A 레코드·certbot)를 발급을 시도하기 전에 봅니다.
+    requires: ['nginx.routes', 'tls.decide'],
     optional: true,
     // 장비·단지마다 다른 값 — 도메인·알림 메일 (settings-schema.json)
     settings: { dir: 'nginx/public_ca' },
@@ -368,20 +399,22 @@ const STEPS = [
     service: 'nginx',
     title: '발급받은 인증서를 nginx 에 물리기',
     why:
-      '**발급받은 것과 내밀고 있는 것은 다릅니다.** nginx-stack.conf 의 [tls] 를 바꾸고 ' +
-      '반영해야 바뀝니다. 그리고 `cert.pem` 이 아니라 **`fullchain.pem`** 입니다 — 중간 ' +
-      '인증서가 빠지면 브라우저는 멀쩡한데 일부 안드로이드 기기에서만 실패하는, 찾기 아주 ' +
-      '어려운 버그가 납니다. 점검은 파일이 아니라 **실제 접속해서** 무엇이 나가고 있는지 ' +
-      '읽습니다.',
+      '**발급받은 것과 내밀고 있는 것은 다릅니다.** 발급은 certbot 이 ' +
+      '/etc/letsencrypt/ 에 두는 것이고, nginx 는 반영해야 그것을 읽습니다.\n\n' +
+      '경로를 손으로 적을 필요는 없습니다 — `tls_mode` 가 `auto` 면 발급이 끝나는 순간 ' +
+      '생성기가 `/etc/letsencrypt/live/<host>/fullchain.pem` 으로 저절로 갈아탑니다. ' +
+      '`cert.pem` 이 아니라 **`fullchain.pem`** 인 것도 생성기가 정합니다 — 중간 인증서가 ' +
+      '빠지면 브라우저는 멀쩡한데 일부 안드로이드 기기에서만 실패하는, 찾기 아주 어려운 ' +
+      '버그가 납니다.\n\n' +
+      '**남은 것은 반영뿐입니다.** 점검은 파일이 아니라 **실제 접속해서** 무엇이 나가고 ' +
+      '있는지 읽습니다.',
     requires: ['public_ca.issue'],
     optional: true,
     command: {
       cwd: 'nginx',
       run:
-        '# nginx-stack.conf 의 [tls] 를 이렇게 바꾼 뒤 반영합니다.\n' +
-        '#   cert_file = /etc/letsencrypt/live/<도메인>/fullchain.pem\n' +
-        '#   key_file  = /etc/letsencrypt/live/<도메인>/privkey.pem\n' +
-        '# 절대경로여도 됩니다 — 생성기가 cert_dir 을 무시합니다.\n' +
+        '# tls_mode 가 auto 면 경로는 저절로 잡힙니다. 반영만 하면 됩니다.\n' +
+        '#   python3 ./generate_nginx_conf.py --tls-mode   ← 어느 쪽으로 갈렸는지 확인\n' +
         'sudo ./install_nginx_stack.sh --skip-install',
       sudo: true,
     },
