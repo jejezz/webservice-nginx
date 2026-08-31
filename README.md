@@ -16,6 +16,45 @@
 번호 체계와 세 서비스가 같은 단말을 가리키는 방법은
 [docs/identity.md](docs/identity.md) 에 있습니다.
 
+## 동작 환경
+
+**기준은 Ubuntu 22.04 입니다.** 24.04 로 옮기는 중이고, 22.04 로 돌고 있는 것을
+끄는 시점은 아직 정하지 않았습니다. 그래서 브랜치를 나눕니다.
+
+| 브랜치 | 무엇이 사는가 |
+|---|---|
+| `master` | **OS 중립인 것 전부.** 수정은 원칙적으로 여기에 하고 아래로 merge 합니다 |
+| `release/22.04` | 22.04 에서만 다른 것 + 지금 돌고 있는 것의 수정 |
+| `release/24.04` | 24.04 에서만 다른 것 |
+
+가르는 기준은 하나입니다 — **다른 OS 에서도 참이면 `master`**, 이 OS 에서만
+참이면 그 `release/*`. `master` 에 해 두면 다른 쪽으로 자동으로 따라갑니다.
+
+| | 22.04 | 24.04 |
+|---|---|---|
+| MariaDB | 10.6 | 10.11 |
+| nginx | 1.18 | 1.24 |
+| Kamailio | 5.5.4 | 5.7.4 |
+| rtpengine | 배포판에 없음 | 11.5.1 |
+| rtpproxy | 있음 | **없음** |
+| Janus | 양쪽 다 `/opt/janus` 소스 빌드 | |
+
+Node.js 는 **20 이상**이 필요합니다 (`fetch` · `AbortSignal.timeout`). 배포판
+기본값은 22.04 가 v12, 24.04 가 v18 이라 **어느 쪽이든 NodeSource 나 nvm 이
+필요합니다.**
+
+> ⚠️ **24.04 에서는 둘이 먼저 걸립니다.**
+>
+> - `rtpproxy` 가 24.04 저장소에 **없습니다.** 아래 '전부 멈추기' 의 `systemctl`
+>   명령이 실패합니다. 대신 `rtpengine` 이 배포판에 들어와 있어, 저장소가 원래
+>   가려던 쪽(`rtpengine.conf` · `WITH_RTPENGINE`)이 오히려 쉬워집니다
+> - Kamailio 가 **5.7** 입니다. 이 저장소의 `kamailio.cfg` 는 5.5 기준이라
+>   **아직 검증되지 않았습니다**
+>
+> 이 문서와 [docs/clean-install-test.md](docs/clean-install-test.md) 는 22.04 를
+> 전제로 쓰여 있습니다. 차이표와 옮기는 순서는
+> [docs/unify-plan.md](docs/unify-plan.md) 의 '서버 환경' 절에 있습니다.
+
 ## 처음이라면 — 여기서 시작하세요
 
 ```bash
@@ -245,6 +284,7 @@ pm2 등록(`pm2 delete` 후 재등록)만 손보면 됩니다.
 - 대시보드와 로그인 → [services/manager/README.md](services/manager/README.md)
 - 데이터베이스 → [database/README.md](database/README.md)
 - 이 구조로 옮긴 과정 → [docs/migration-plan.md](docs/migration-plan.md)
+- `WebServices` 저장소와 하나로 합치는 계획 → [docs/unify-plan.md](docs/unify-plan.md)
 
 통화 시스템을 다룬다면 이쪽입니다.
 

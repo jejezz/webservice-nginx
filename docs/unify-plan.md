@@ -1,0 +1,1164 @@
+# 두 저장소를 하나로 — 통합 계획
+
+`Public/WebServices` 와 `Public/webservice-nginx` 는 같은 날(2026-08-18)에 시작해
+같은 일을 하는 두 저장소입니다. 비슷한 뼈대를 공유하지만 간 거리가 다릅니다.
+이 문서는 **어느 쪽을 베이스로 삼고, 무엇을 건져 오고, 합칠 때 무엇이 조용히
+깨지는가**를 적습니다.
+
+관련: [migration-plan.md](migration-plan.md) (이 저장소가 지금 구조로 온 과정) ·
+[clean-install-test.md](clean-install-test.md) (빈 장비 완주 절차) ·
+[adding-a-service.md](adding-a-service.md)
+
+아래에서 **W** 는 `WebServices`, **N** 은 `webservice-nginx` 를 가리킵니다.
+
+> **범위에서 뺀 것.** W 의 `apartment-mgmt-server` · `face-recognition-server` ·
+> `logd-server` 는 이 계획이 다루지 않습니다. 서비스는 plug-in 형태라 나중에
+> 각자 선언 둘(`nginx-conf/` · `pm2-conf/`)만 갖추면 붙습니다.
+> 다루는 것은 **프레임워크**(`nginx/` `pm2/` `database/` `site/` `lib/` `docs/`)와
+> `services/manager` · `services/ntp` · `services/websocket-relay` 입니다.
+
+## 베이스는 N 입니다
+
+취향이 아니라 **스키마의 포함 관계** 때문입니다.
+
+W 의 `nginx-conf/service.ini` 는 N 의 생성기에 그대로 넣어도 동작합니다. 반대는
+깨집니다 — W 의 생성기는 `port`(라우트별 포트) · `default_route` ·
+`public_*_port` · `client_ca`/`verify_client` · `acme_webroot` 를 모릅니다.
+**N 의 스키마가 W 의 상위집합**이므로, N 을 베이스로 하면 이관이 "선언을 옮기는
+일" 이고 W 를 베이스로 하면 "생성기를 다시 쓰는 일" 이 됩니다.
+
+층으로 봐도 같습니다.
+
+| | W | N |
+|---|---|---|
+| 층 | `nginx` `pm2` `docs` `services` | + `site/` `lib/` `database/` `bootstrap.sh` |
+| nginx 생성기 | 344줄 | 678줄 |
+| 규약 문서 | 2개 | 12개 (점검·설정 규약 포함) |
+| 부트스트랩 | 없음 | `bootstrap.sh` → 구축 마법사 19단계 |
+
+W 를 베이스로 하면 `site/` · `lib/` · `database/` · 마법사를 다시 만들어야 합니다.
+
+## 빈 장비에서 시작하면 — 문제 절반이 사라집니다
+
+**이번 작업은 nginx 가 없는 새 서버에서 합니다.** 이 조건이 계획을 크게
+바꿉니다. 아래 문제들은 "기존 설치본과 새 규약이 부딪히는" 것이라, 부딪힐
+기존 설치본이 없으면 애초에 생기지 않습니다.
+
+| 문제 | 빈 장비에서는 |
+|---|---|
+| pm2 앱 이름 개명 (§7.6) | **사라짐** — 처음부터 규약대로 짓는다 |
+| DB 계정 두 벌 공존 (§7.5) | **사라짐** — 한 벌만 만든다 |
+| 인증서 디렉토리 이름 충돌 (§7.7) | **사라짐** — 한 이름만 쓴다 |
+| 부팅 복원 경로 둘 (§7.8) | **사라짐** — 하나만 건다 |
+| 설치본이 저장소와 어긋남 | **사라짐** — 설치본이 없다 |
+
+**대신 남는 것**은 규약 자체의 충돌입니다. 이건 장비와 무관합니다.
+
+| 문제 | 빈 장비에서도 |
+|---|---|
+| `degraded` HTTP 코드 (§7.1) | 남음 — 코드에 박혀 있다 |
+| `max_body` 기본값 (§7.2) | 남음 — 값을 정해야 한다 |
+| DB 가 모든 인터페이스에 열림 (§7.3) | 남음 — 기본값 문제다 |
+| 저장소 경계 정책 (§7.4) | 남음 — 먼저 정해야 파일을 옮긴다 |
+| websocket-relay 가 갈라짐 (§7.9) | 남음 — 소스가 두 갈래다 |
+
+그래서 **§7.1 · §7.2 · §7.3 · §7.4 넷만 Phase 0 에서 결정하면** 나머지는 빈
+장비의 이점으로 넘어갑니다.
+
+**대신 빈 장비에서만 생기는 결정이 하나 늘어납니다 — 어느 Ubuntu 를 깔 것인가.**
+두 저장소가 서로 다른 버전 위에서 자랐고, 지금은 고를 수 있습니다 (§2).
+
+빈 장비의 순서는 [clean-install-test.md](clean-install-test.md) 를 그대로 씁니다.
+이 문서의 Phase 4 는 "검증" 이 아니라 **첫 설치 그 자체**가 됩니다.
+
+---
+
+## 1. 무엇을 어디서 가져오나
+
+| 영역 | 채택 | 이유 |
+|---|---|---|
+| nginx 라우팅 선언 · 생성기 | **N** | W 스키마가 부분집합. 그대로 얹힌다 |
+| nginx 설치 | **N** | `install_nginx.sh`(설치)와 `install_nginx_stack.sh`(생성·반영)가 나뉘어 있다 |
+| pm2 앱 정의 | **N** | 스캐너 — §3 |
+| 데이터베이스 | **N** | 층 전체 — §4 |
+| 공인 인증서 | **N** | W 에 아예 없다 |
+| 사설 CA 발급 | **N** + W 조각 | §6 |
+| 클라이언트 인증서 번들 | **W** | N 에 없다 — §6 |
+| manager | **N** + W 조각 셋 | §5 |
+| 설정 규약 · 점검 규약 · 사이트 층 | **N** | W 에 없다 |
+| `services/ntp` | **W** | N 에 없는 서비스 |
+
+### 버리는 것
+
+- `nginx/run_nginx_stack.py` (209줄) — face-recognition 전용 멀티인스턴스 런처.
+  범위 밖 서비스 전용이고 역할이 pm2 와 겹칩니다.
+- `nginx/register_nginx_cron.sh` — §7.8.
+- `nginx/pass2.png` (1.4MB) — W 의 `.gitignore` 가 이미 "문서에서 참조하지 않는
+  잔재" 로 막고 있는 파일입니다.
+
+---
+
+## 2. 서버 환경 — 22.04 와 24.04
+
+두 저장소는 서로 다른 Ubuntu 위에서 자랐습니다.
+
+| | Ubuntu |
+|---|---|
+| N (`webservice-nginx`) | **22.04** |
+| W (`WebServices`) | **24.04** |
+
+> ⚠️ **그런데 두 저장소가 놓인 이 장비는 24.04 입니다** (`Ubuntu 24.04.4 LTS`).
+> N 의 문서는 22.04 를 전제로 쓰여 있으므로 이미 어긋나 있습니다 —
+> [clean-install-test.md](clean-install-test.md) 가 *"Ubuntu 22.04 를 쓰세요"* 라고
+> 적고, [database/README.md](../database/README.md) 가 MariaDB 10.6 을 전제합니다.
+
+### 무엇이 다른가
+
+24.04 쪽 값은 이 장비에서 `apt-cache policy` 로 실측한 것이고, 22.04 쪽은 N 의
+문서가 적어 둔 값입니다.
+
+| | 22.04 | 24.04 | 통합에 미치는 영향 |
+|---|---|---|---|
+| MariaDB | 10.6 | **10.11** | `database/` 가 10.6 을 명시적으로 전제한다 (③) |
+| nginx | 1.18 | **1.24** | 템플릿의 `listen … ssl http2` 는 1.24 까지 유효. 1.25+ 에서 deprecate |
+| Kamailio | 5.5.4 | **5.7.4** | `kamailio.cfg` 가 5.5 기준. **가장 큰 위험** (②) |
+| rtpengine | 배포판에 없음 | **11.5.1 있음** | 소스 빌드가 하나 사라진다 (①) |
+| rtpproxy | 있음 | **없음** | ⚠️ README 의 systemd 명령이 깨진다 (①) |
+| Node.js | 12 | 18 | **둘 다 부족하다** — `bootstrap.sh` 가 20 이상을 요구한다 (④) |
+| Python | 3.10 | 3.12 | 생성기는 표준 라이브러리만 쓴다. `distutils` 미사용 — 영향 없음 |
+| certbot | apt / snap | 2.9.0 (apt) | `setup_letsencrypt.sh` 의 `apt-get install -y certbot` 이 그대로 통한다 |
+| OpenSSL | 3.0.2 | 3.0.13 | 둘 다 3.x. `generate_certs.sh` 에 영향 없음 |
+
+### 걸리는 자리 넷
+
+#### ① `rtpproxy` 가 24.04 에 없다 — 대신 `rtpengine` 이 생겼다
+
+[최상위 README](../README.md) 의 '전부 멈추기' 절이 `systemctl … rtpproxy` 를 네
+군데에서 부릅니다. **24.04 에는 그 패키지가 없어** 명령이 실패합니다.
+
+바꿔 말하면 이건 손해가 아닙니다. `services/kamailio/bootstrap.sh` 는
+*"rtpengine 데몬 — 배포판에 없음"* 이라고 적어 두었는데, **24.04 에서는 그것이
+더 이상 사실이 아닙니다.** 저장소에는 이미 `services/kamailio/rtpengine.conf` 가
+있고 `kamailio-websocket.cfg` 에 `WITH_RTPENGINE` 스위치도 있습니다. 즉 저장소가
+원래 가려던 곳에 배포판이 따라온 셈이고, **24.04 로 가면 소스 빌드가 하나
+줄어듭니다.**
+
+#### ② Kamailio 5.5.4 → 5.7.4 — 가장 큰 위험
+
+`kamailio.cfg` · `kamailio-local.cfg` · `kamailio-websocket.cfg` 가 5.5 기준으로
+쓰여 있습니다. 5.7 에서 모듈 파라미터가 바뀐 것이 있으면 **문법 검사
+(`kamailio -c`)는 통과하고 런타임에야 드러납니다.**
+
+**W 가 24.04 에서 돈다는 사실이 여기서는 근거가 되지 않습니다** — W 에는
+Kamailio 가 없습니다. 즉 SIP 스택은 24.04 에서 아직 한 번도 검증된 적이
+없습니다. 빈 장비 완주에서 가장 먼저 확인할 자리입니다.
+
+#### ③ MariaDB 10.6 → 10.11
+
+`database/` 가 10.6 을 세 곳에서 명시합니다.
+
+| 자리 | 무엇을 적어 두었나 | 10.11 에서 |
+|---|---|---|
+| `setup_mariadb.sh:199` | "10.6 에는 `--validate-config` 가 없어 이 방식을 쓴다" | 자체 옵션 이름 검사는 버전과 무관하게 동작한다 — **깨지지 않는다.** 10.11 에 그 플래그가 있다면 단순화할 수 있다는 뜻일 뿐이다 (확인 필요) |
+| `database/README.md` | 10.6 기본 패키지 · `debian.cnf` 스텁 · `mariadb-upgrade` 출력 | 관찰 기반 기록이라 **10.11 에서 다시 확인해야 한다** |
+| `lib_mariadb.sh:7` | 22.04 의 `debian.cnf` 동작 | 같음 |
+
+깨지는 것은 없고, **틀린 문서가 남는 것**이 문제입니다.
+
+#### ④ Node 는 어느 쪽도 충분하지 않다
+
+`bootstrap.sh` 는 20 이상을 요구하는데 22.04 는 12, 24.04 는 18 입니다.
+**두 환경 모두 NodeSource 나 nvm 이 필요합니다.** 이건 차이가 아니라 공통
+전제이므로, `clean-install-test.md` 의 경고를 24.04 에도 그대로 적용하면 됩니다.
+
+### 정해진 것 — 22.04 를 먼저, 24.04 를 뒤에
+
+버전을 **고르는** 문제가 아닙니다. **22.04 운영본이 이미 돌고 있어 버릴 수
+없기** 때문에, 두 줄기를 얼마 동안 함께 들고 가야 합니다.
+
+```
+① 22.04 를 전제로 통합을 끝낸다   →  release/22.04
+② 그 지점에서 24.04 용을 낸다     →  release/24.04
+```
+
+| | |
+|---|---|
+| **작업 환경** | VM. 22.04 로 먼저 만들고, 통과하면 24.04 VM 을 새로 만든다 |
+| **20.04 PC** | **쓰지 않습니다** (아래) |
+| **최종 목적지** | 24.04. 다만 22.04 운영본을 끄는 시점은 따로 정한다 |
+
+시간은 더 걸리지만, 한 번에 24.04 로 건너뛰면 **통합이 깨진 것인지 OS 가 바뀌어
+깨진 것인지 가릴 수 없습니다.** 한 번에 하나씩 바꾸는 쪽이 결국 빠릅니다.
+
+#### 20.04 는 업그레이드하지 않습니다
+
+시도하려던 PC 가 20.04 입니다. `do-release-upgrade` 로 올리면 MariaDB
+10.3 → 10.6 인플레이스 업그레이드가 함께 따라오고, Kamailio 도 5.3 에서 건너뜁니다.
+**통합 작업과 OS 업그레이드가 같은 장비에서 겹치면 무엇이 깨뜨렸는지 알 수
+없습니다.** 20.04 는 표준 지원도 이미 끝났습니다(2025-05, 이후는 Ubuntu Pro).
+
+**그리고 업그레이드할 이유가 없습니다.** 작업은 VM 안에서 하므로 **호스트 OS 는
+20.04 그대로 두어도 됩니다** — VirtualBox·KVM·Multipass 다 20.04 에서 돕니다.
+게스트가 22.04 면 됩니다.
+
+### 브랜치 셋 — 어디에 고치는가
+
+태그는 읽기 전용 이정표라 22.04 운영본의 수정을 받을 수 없습니다. 그래서
+**브랜치로 갑니다.**
+
+| 브랜치 | 무엇이 사는가 | 언제 생기나 |
+|---|---|---|
+| `master` | **OS 중립인 것 전부** — 프레임워크·규약·문서 뼈대 | 지금 (그대로) |
+| `release/22.04` | 22.04 에서만 다른 것 + 운영본 수정 | ① 통합을 여기서 끝낸다 |
+| `release/24.04` | 24.04 에서만 다른 것 | ② 22.04 완주 뒤에 낸다 |
+
+**수정은 원칙적으로 `master` 에 합니다.** 릴리스 브랜치에 직접 커밋하는 것은
+*"이 OS 에서만 참인 것"* 뿐입니다.
+
+```
+master ──●──────●──────●────▶   프레임워크·규약·서비스 코드
+          \      \      \
+           ●──────●──────●      release/22.04   (merge 받는다)
+            \             
+             ●───────────▶      release/24.04   (merge 받는다)
+```
+
+가르는 기준은 하나입니다.
+
+| 이 수정이… | 어디에 |
+|---|---|
+| 다른 OS 에서도 참인가 | **`master`** → 양쪽으로 merge |
+| 이 OS 에서만 참인가 | 그 `release/*` 에만 |
+
+`master` 에 해 두면 `release/24.04` 를 낼 때 자동으로 따라옵니다. 릴리스
+브랜치에 직접 해 두면 **손으로 옮겨야 하고, 옮기는 것을 잊습니다.**
+
+```bash
+# ① 지금부터
+git switch -c release/22.04           # 통합 작업은 여기서 (master 에서 갈라져 나옴)
+
+# ② 22.04 완주 뒤
+git switch -c release/24.04 release/22.04
+
+# 그 뒤 프레임워크 수정은
+git switch master && git commit …
+git switch release/22.04 && git merge master
+git switch release/24.04 && git merge master
+```
+
+> 태그는 버리지 않아도 됩니다 — 브랜치 위의 **"여기까지 완주했다"** 표시로는
+> 여전히 쓸모가 있습니다 (`v1.0-ubuntu22.04`). 다만 그것이 유지보수를 받는
+> 그릇은 아닙니다.
+
+### 갈래는 최소로 — 정말 달라야 할 것은 셋뿐입니다
+
+브랜치를 나누면 **모든 프레임워크 수정을 두 번 merge 해야 합니다.** 그 값을
+줄이는 방법은 하나뿐입니다 — **릴리스 브랜치에 남는 차이를 최소로 만드는 것.**
+
+실제로 무엇이 갈리는지 보면 놀랄 만큼 적습니다.
+
+| 차이 | 브랜치가 갈라져야 하나 |
+|---|---|
+| nginx 1.18 / 1.24 | **아니오** — 템플릿의 `listen … ssl http2` 가 양쪽에서 유효 |
+| Node 12 / 18 | **아니오** — 양쪽 다 부족해서 어차피 nvm 을 쓴다 |
+| certbot · OpenSSL · Python | **아니오** |
+| MariaDB 10.6 / 10.11 | **아니오** — `setup_mariadb.sh` 는 버전과 무관하게 돈다. 문서만 다르다 |
+| rtpproxy / rtpengine | **아니오로 만들 수 있다** (아래) |
+| Kamailio 5.5 / 5.7 | **모름 — 검증해야 안다.** 진짜 갈래가 있다면 여기다 |
+
+즉 지금 알려진 것 중 브랜치가 **꼭** 갈라져야 하는 것은 하나도 없습니다.
+Kamailio 5.7 검증 결과에 달렸습니다.
+
+#### 미디어 데몬은 설정으로 올립니다
+
+```
+services/kamailio/kamailio-websocket.cfg:59
+##!define WITH_RTPENGINE      ← 주석. 손으로 풀어야 켜진다
+```
+
+**커밋된 파일을 손으로 고쳐야 바뀌는 값**이라, 이대로 두면 두 브랜치가 이 파일
+하나 때문에 영구히 갈라지고 **`kamailio-websocket.cfg` 를 고칠 때마다 충돌**합니다.
+
+그런데 이 저장소의 규약은 *"장비마다 다른 값은 `settings.ini` 로"* 입니다
+([settings-contract.md](settings-contract.md)) — **OS 버전이야말로 장비마다 다른
+값입니다.**
+
+`services/kamailio/settings-schema.json` 에 `media_daemon`
+(`rtpproxy` | `rtpengine`) 을 더하고 `install.sh` 가 값에 따라 `#!define` 을
+넣고 빼면, **두 브랜치가 같은 파일을 쓰고 충돌이 사라집니다.**
+
+#### 문서는 지우지 말고 나란히 적습니다
+
+22.04 운영본이 남아 있는 동안은 **둘 다 참인 문서**여야 합니다. `release/24.04`
+에서 22.04 서술을 덮어쓰면, 그 문장은 `master` 로 돌아가지 못하고 브랜치에
+갇힙니다.
+
+한 표에 두 열로 적으면 **그 문서는 `master` 에 살 수 있습니다.**
+
+### 순서
+
+1. `release/22.04` 를 내고 **22.04 를 전제로 통합을 끝낸다** (§10 의 Phase 1~3)
+2. 22.04 VM 에서 완주한다 — 여기까지가 ①
+3. **`media_daemon` 을 설정으로 올린다** (22.04 에서는 `rtpproxy` 로 두면 지금과 같다)
+4. `release/24.04` 를 내고 24.04 VM 에서 돌려 본다 — ②
+5. Kamailio 5.7 에서 **정말로** 설정이 갈리면, 그때만 그 파일을 브랜치에 남긴다
+
+**갈래는 필요해진 것이 확인된 뒤에 만듭니다.** 통합해 놓고 곧바로 둘로 나누면
+통합한 보람이 없습니다.
+
+### 버전마다 고쳐야 하는 자리
+
+문서가 22.04·10.6 을 전제로 적혀 있는 곳입니다. **① 에서는 그대로 두고, ② 에서
+두 열로 바꿉니다.**
+
+| 파일 | 무엇 |
+|---|---|
+| [README.md](../README.md) | `rtpproxy` 네 군데 |
+| [docs/clean-install-test.md](clean-install-test.md) | `ubuntu:22.04` 세 군데 · Kamailio 5.5.4 · node v12 경고 |
+| [database/README.md](../database/README.md) | 10.6 두 군데 · 복구 절차 재확인 |
+| `database/lib_mariadb.sh:7` | 22.04 주석 |
+| `database/setup_mariadb.sh:199` | `--validate-config` 주석 |
+| `services/kamailio/bootstrap.sh:213` | "rtpengine — 배포판에 없음" |
+
+## 3. pm2 — 서비스를 붙일 때 중앙 파일을 고치지 않는다
+
+W 의 `pm2/ecosystem.config.js` 는 앱 6개가 **손으로 적혀** 있습니다. 서비스를
+하나 붙이면 이 파일을 고쳐야 하고, 서비스를 옮기면 `cwd` 가 남습니다.
+
+N 은 `services/*/pm2-conf/*.ini` 를 훑습니다. pm2 는 설정이 `.js` 면 실행 결과를
+쓰므로, 파일 안에서 스캔해 `apps` 배열을 돌려주면 그대로 등록됩니다. 서비스
+추가는 **파일 둘**이고 중앙 파일은 건드리지 않습니다
+([pm2-conf.md](pm2-conf.md) · [adding-a-service.md](adding-a-service.md)).
+
+그보다 중요한 것은 스캐너가 **셋을 견준다**는 점입니다.
+
+```
+선언 (pm2-conf/*.ini)  ↔  실행 중 (pm2 jlist)  ↔  재부팅 목록 (dump.pm2)
+```
+
+세 번째가 핵심입니다. `pm2 save` 를 잊으면 **재부팅 전까지 아무 증상이 없다가**
+몇 주 전 설정으로 서비스가 올라옵니다. W 에는 이 검사가 없습니다.
+
+```bash
+node pm2/ecosystem.config.js --check
+```
+
+`nginx-conf` 의 `[service] ports` 와 `pm2-conf` 의 `[env] PORT` 교차 검사도 여기서
+합니다 — 어긋나면 그 경로는 502 인데 어느 쪽 선언도 혼자서는 알 수 없습니다.
+
+---
+
+## 4. 데이터베이스 — N 의 `database/` 층
+
+| | W | N |
+|---|---|---|
+| 범위 | manager 스키마 하나 | 서버 설정 + 다중 DB + 계정 |
+| 진입점 | `manager/schema/setup_database.sh` (대화형) | `install_mariadb.sh` · `setup_mariadb.sh` · `check-database.sh` |
+| 선언 | 없음 (스크립트 인자) | `database.ini` |
+| 안전장치 | 없음 | 옵션 이름 검사 · 재시작 실패 시 롤백 · purge 전 덤프 |
+| 스키마 소유 | manager 안에 | `schema_dir` 로 각 서비스가 소유 |
+| sudo 없는 점검 | 없음 | `check-database.sh --json` |
+
+N 을 그대로 씁니다 ([database/README.md](../database/README.md)).
+
+### 다만 W 에서 한 조각을 가져옵니다 — 관리자 접속 폴백
+
+N 의 `setup_mariadb.sh` 는 `root` 가 `unix_socket` 인증이라고 가정합니다. 그
+가정이 깨진 장비에서는 손쓸 방법이 없습니다.
+
+W 의 `setup_database.sh` 는 네 가지를 순서대로 시도합니다.
+
+1. 옵션 파일 무시 + 소켓 (`unix_socket` 인증)
+2. 기본 옵션 파일 (`/root/.my.cnf` 가 유효한 경우)
+3. `/etc/mysql/debian.cnf` (Debian/Ubuntu 유지보수 계정)
+4. 관리자 계정·비밀번호 직접 입력
+
+**3번이 실질적인 탈출구**입니다 — `root` 비밀번호를 모르거나 `/root/.my.cnf` 가
+낡았을 때 대개 이 계정은 살아 있습니다. 이 폴백을 `setup_mariadb.sh` 로
+옮깁니다.
+
+> 빈 장비라면 1번이 바로 통합니다. 이 폴백은 **나중에** 필요해집니다 —
+> `database/README.md` 의 '문제 해결' 절이 다루는 상황이 실제로 그것입니다.
+
+---
+
+## 5. manager — N 베이스에 W 의 조각 셋
+
+| N 에만 | W 에만 |
+|---|---|
+| `services/setup.js` (마법사 19단계) | `services/host.js` |
+| `services/setup-attest.js` · `setup-settings.js` | |
+| `services/cert.js` (TLS 카드) | |
+| `web/src/pages/Setup.jsx` | |
+
+### ① `host.js` 를 가져옵니다
+
+로그인 화면에 `hostname` 과 **마스킹된 IP**(`x.x.x.224`)를 띄웁니다. 장비가
+여럿일 때 "지금 어느 장비에 로그인하는 중인지" 를 **로그인 전에** 알 수 있어야
+합니다. 마지막 옥텟만 보이는 것은 의도적입니다 — 인증 전에 응답하는 값이라
+내부망 구조를 통째로 드러낼 이유가 없고, 장비 구분에는 그 자리만으로 충분합니다.
+
+N 에는 이 기능이 없습니다.
+
+### ② 관리자 계정을 fail-closed 로 되돌립니다
+
+N 의 `config.example.json` 은 이렇습니다.
+
+```json
+"superAdmin": { "username": "zoomon", "password": "77887788", ... }
+```
+
+평문 기본 비밀번호가 커밋돼 있고 [최상위 README](../README.md) 와
+`bootstrap.sh` 출력에도 그대로 나옵니다. 이 콘솔은 **모든 관리자 계정을 만들고
+지울 수 있습니다.**
+
+W 는 `password` 와 `passwordHash` 가 둘 다 비어 있으면 관리자 로그인을 **항상
+실패**시킵니다(fail-closed). 이쪽이 옳습니다.
+
+```bash
+npm run hash-password -- '<비밀번호>'   # scrypt$... 를 config.json 에 넣는다
+```
+
+> **빈 장비에서는 이것이 첫 관문이 됩니다.** 지금은 기본 비밀번호 덕에
+> `bootstrap.sh` 다음 바로 마법사에 들어갈 수 있는데, fail-closed 로 바꾸면
+> 그 사이에 한 단계가 생깁니다. `bootstrap.sh` 가 **`config.json` 이 없으면
+> 비밀번호를 받아 만들어 주도록** 함께 고치세요 — 그러지 않으면 클론한 사람이
+> 로그인 화면 앞에서 막힙니다.
+
+### ③ `basePath` 는 N 의 `/manager` 로
+
+| | W | N |
+|---|---|---|
+| `basePath` | `''` (루트) | `/manager` |
+| 루트 `/` | manager 가 응답 | `default_route` 로 302 |
+
+N 방식을 씁니다. W 의 `session.js` 주석이 스스로 인정하듯, `basePath = ''` 면
+쿠키 `Path` 를 좁힐 수 없어 같은 오리진의 다른 location 에도 전부 전달됩니다.
+
+> 바꾸면 `web/vite.config.js` 의 `base` 도 함께 바꾸고 **프론트를 다시
+> 빌드해야** 합니다. 빌드 결과(`server/public/`)는 커밋되지 않습니다.
+
+---
+
+## 6. TLS — 가능할 때와 불가능할 때
+
+이 저장소에는 사설 CA(`nginx/generate_certs.sh`)와 공인 인증서
+(`nginx/public_ca/`) 둘 다 있습니다. 없는 것은 **"둘 중 무엇으로 갈지 정하는
+자리"** 입니다.
+
+### ⚠️ 지금의 문제 — 장비별 값이 커밋돼 있다
+
+`nginx/nginx-stack.conf` 는 커밋되는 파일인데 이 장비 전용 경로가 박혀 있습니다.
+
+```ini
+cert_file = /etc/letsencrypt/live/c-a3f19c04.rtc.zoomon.art/fullchain.pem
+key_file  = /etc/letsencrypt/live/c-a3f19c04.rtc.zoomon.art/privkey.pem
+```
+
+**새 서버에 클론하면 없는 경로를 가리키고 `nginx -t` 가 실패합니다.**
+`site/settings.ini`(장비별·커밋 제외)를 만들어 두고도 TLS 만 그 규약 밖에
+있습니다 ([settings-contract.md](settings-contract.md) ·
+[site/README.md](../site/README.md)).
+
+**이번 작업이 빈 장비라 이 문제를 가장 먼저 만납니다.** 그래서 Phase 1 입니다.
+
+### 제안 — `tls_mode` 를 사이트 값으로
+
+`site/settings-schema.json` 에 필드를 하나 더합니다.
+
+| `tls_mode` | 뜻 |
+|---|---|
+| `auto` (기본) | 공인 인증서가 있고 유효하면 `public`, 아니면 `private` |
+| `public` | Let's Encrypt 고정. 없으면 `problem` |
+| `private` | 사설 CA 고정 (LAN 전용 배치) |
+
+생성기가 경로를 **파생**합니다 — `nginx-stack.conf` 에서 절대경로가 사라집니다.
+
+```
+public   → /etc/letsencrypt/live/<site.host>/fullchain.pem  ·  privkey.pem
+private  → <cert_dir>/server/server.crt  ·  server.key
+```
+
+`cert_file`/`key_file` 을 직접 적으면 그것이 이깁니다 — 지금 쓰는 사람이 깨지지
+않게 합니다.
+
+**`auto` 로 갈렸을 때 어느 쪽으로 판정했는지를 로그와 `--json` 에 반드시
+남깁니다.** 조용히 사설로 떨어지는 것이 가장 나쁩니다 — 서버는 멀쩡히 뜨고
+브라우저만 경고를 내므로, 앱이 안 붙는다는 신고가 올 때까지 모릅니다.
+
+### 판정 — 넷을 본다
+
+이미 `public_ca/setup_letsencrypt.sh --check` 가 보는 것들입니다. 이것을 새 단계
+`tls.decide` 로 앞에 세웁니다.
+
+| 보는 것 | 방법 | 통과 못하면 |
+|---|---|---|
+| 소유한 도메인인가 | `site.host` 가 DDNS(`*.iptime.org`)·사설 이름이 아닌가 | `private` |
+| A 레코드가 이 서버인가 | `public_ca/check-dns.sh` | `private` |
+| 외부 80 이 도달하는가 | 없는 이름을 부르고 **404** 가 오는가 | `private` |
+| certbot 을 깔 수 있는가 | 패키지 확인 | `private` |
+
+80 포트를 404 로 확인하는 이유는 [public_ca/README.md](../nginx/public_ca/README.md)
+에 있습니다 — 점검은 sudo 없이 돌아야 하기 때문입니다.
+
+### 흐름
+
+```
+site.settings  (host 를 정한다)
+        │
+   tls.decide   ← 새 단계. 넷을 보고 판정하고, 안 되는 것은 이유를 그대로 보여 준다
+        │
+   ┌────┴─────────────────────────────────┐
+ public                                 private
+   │                                       │
+ nginx.routes    (acme 예외를 먼저!)     generate_certs.sh --auto
+ public_ca.issue --staging                 (SAN = site.host + LAN IP)
+ public_ca.issue --prod                    │
+ nginx.tls       (경로 파생 · 반영)      nginx.tls  (경로 파생 · 반영)
+ public_ca.nginx (실제로 내밀고 있나)     cert-status.sh → kind=private-ca
+ public_ca.renew (90일 뒤에도 내미나)      → warn 으로 계속 남는다
+ public_ca.dns   (이름이 아직 여기인가)     │
+   └────┬─────────────────────────────────┘
+        │
+   mTLS (선택 · tls_mode 와 직교)
+   generate_client_certificates.sh 로 단말 번들을 만든다
+```
+
+**`public_ca.issue` 가 `nginx.routes` 뒤여야 하는 이유.** 80 은 전부 HTTPS 로
+301 하는데 HTTP-01 챌린지만 평문으로 응답해야 합니다. 그 예외를 만드는
+`acme_webroot` 라우트 반영이 먼저 끝나 있어야 하고, 뒤집으면 챌린지가 301 로
+튕깁니다.
+
+**mTLS 는 `tls_mode` 와 직교합니다.** `ssl_certificate`(내미는 것)와
+`ssl_client_certificate`(검증하는 것)는 다른 지시자이고 같은 뿌리에서 나올
+필요가 없습니다. 오히려 공인 인증서가 mTLS 를 **가능하게** 만듭니다 —
+신뢰할 수 있는 통로가 있어야 그 통로로 단말 인증서를 안전하게 내려보냅니다.
+
+### 규칙 넷
+
+1. **공인 불가는 오류가 아니다.** 마법사에서 `skip` 이지 `problem` 이 아닙니다.
+   LAN 전용 설치는 사설 CA 로 도는 것이 옳고, 도메인이 없거나 80 을 열 수 없는
+   배치가 실재합니다 ([check-contract.md](check-contract.md) 의 `skip`/`pending` 구분).
+2. **다만 잊히지 않는다.** `cert-status.sh` 의 `kind = private-ca` 는 계속
+   `warn` 입니다. 대시보드 TLS 카드에 남아 이관이 안 끝났음을 알립니다.
+3. **staging 이 배포에 물리면 `critical`.** 브라우저가 믿지 않는 인증서입니다.
+4. **`private` 에서는 CA 배포가 절차의 일부다.** 지금 이 자리가 비어 있습니다 —
+   §6.1 이 그것을 메웁니다.
+
+위 1~3 은 이 저장소가 **이미** 그렇게 동작합니다. 새로 만드는 것은 4 와
+`tls.decide` 뿐입니다.
+
+### 6.1 W 에서 가져올 것 — 클라이언트 인증서 번들
+
+N 의 `generate_certs.sh` 는 CA 와 서버 인증서를 만들지만, **단말에 배포할 번들을
+만들지 않습니다.** 사설 CA 배치에서 앱이 서버를 믿으려면 CA 를 심어야 하고,
+mTLS 를 쓰려면 단말마다 인증서가 있어야 합니다.
+
+W 의 `nginx/generate_client_certificates.sh` (193줄) 가 한 번에 만듭니다.
+
+| 대상 | 산출물 |
+|---|---|
+| 웹 | `.p12` |
+| Android | `.p12` + CA `.crt` |
+| iOS | `.p12` |
+
+이것을 `nginx/` 로 가져옵니다. N 의 `cert/ca/` 를 CA 로 쓰도록 경로만 맞추면
+됩니다.
+
+> W 의 `generate_all_certificates.sh` 는 가져오지 않습니다 — CA·서버·클라이언트를
+> 한 번에 만드는 스크립트인데, 앞의 둘은 N 의 `generate_certs.sh` 가 이미 하고
+> 그쪽이 `--auto` 로 로컬·외부 IP 를 SAN 에 넣어 줍니다.
+
+### 6.2 되돌아가는 길 — 지금 설계에 없다
+
+| 방향 | 언제 | 무엇이 필요한가 |
+|---|---|---|
+| `public` → `private` | 갱신이 계속 실패해 만료가 임박 | `daysLeft < 7` 이고 갱신 시도가 실패면 `problem`. `tls_mode = private` 로 내리면 앱은 끊기지만 관리 화면은 산다 |
+| `private` → `public` | 도메인이 생겼을 때 | `site.host` 를 바꾸고 `tls.decide` 를 다시 → `issue` |
+
+강등 경로를 적어 두지 않으면 **만료 당일에 처음 고민하게 됩니다.**
+[public_ca/README.md](../nginx/public_ca/README.md) 의 '⚠️ 유동 IP' 절이 말하는
+상황이 정확히 그 입구입니다.
+
+---
+
+## 7. 점검 — 합칠 때 조용히 깨지는 것들
+
+심각한 순서입니다. 앞의 네 개(§7.1 · §7.2 · §7.3 · §7.4)가 **빈 장비에서도
+남는** 것들이라 Phase 0 에서 결정해야 합니다.
+
+### ⚠️ 7.1 `degraded` 의 HTTP 코드가 정반대다
+
+| | W | N |
+|---|---|---|
+| `degraded` | **503** | **200** |
+
+같은 낱말이 두 저장소에서 반대 코드를 뜻합니다. 합치면 한쪽 서비스들이
+대시보드에서 전부 "중단" 으로 보이거나, 반대로 이상이 아예 안 보입니다.
+
+**N(200) 을 씁니다.** `degraded` 는 "떠 있지만 온전하지 않음" 이므로 5xx 면
+로드밸런서가 백엔드를 아예 빼 버립니다. 상태 판정은 본문의 `status` 로 하고
+대시보드가 주의(노랑)로 그립니다 ([health-contract.md](health-contract.md)).
+
+W 쪽에서 옮겨 오는 서비스는 `/health` 의 응답 코드를 고쳐야 합니다.
+
+### ⚠️ 7.2 `max_body` 기본값이 100m → 1m 로 줄어든다
+
+| | W | N |
+|---|---|---|
+| `[general] max_body` | `100m` | 비움 (= nginx 기본 `1m`) |
+
+N 기준으로 합치면 W 쪽 서비스의 업로드가 **1m 에서 413** 으로 끊깁니다.
+nginx 가 요청을 거절하므로 애플리케이션 로그에는 아무것도 남지 않습니다.
+
+기본값을 올리지 말고, 큰 본문이 필요한 **라우트에만** `[route:*] max_body` 를
+줍니다. 전체를 열어 두면 잘못된 요청 하나가 디스크와 대역폭을 오래 뭅니다.
+
+이관하는 서비스마다 이 항목을 확인 목록에 넣으세요.
+
+### ⚠️ 7.3 DB 가 모든 인터페이스에 열려 있다
+
+`database/database.ini` 의 지금 값입니다.
+
+```ini
+bind_address = 0.0.0.0
+[user:jyahn]
+host = %
+databases = manager, ws_bridge, kamailio, stock_analyzer, rtc_relay
+privileges = ALL
+```
+
+이 저장소를 단지마다 배포하는 것이 전제라면 기본값으로 맞지 않습니다.
+**기본을 `127.0.0.1` 로 두고**, 여는 것은 장비별 결정으로 남깁니다. 열어야 할
+장비에서는 `database.ini` 를 고치면 되고, 그 파일은 어차피 장비마다 다릅니다.
+
+`jyahn` 의 `host` 도 함께 좁힙니다 — §7.5 의 사고가 여기서 나옵니다.
+
+### ⚠️ 7.4 저장소 경계 정책이 정반대다
+
+| | W | N |
+|---|---|---|
+| `.gitignore` | `services/*` 를 통째로 제외, `manager` 만 예외 | 대부분 직접 추적, `stock-analyzer`·`ws-bridge` 만 제외 |
+
+**이걸 먼저 정해야 파일을 옮길 수 있습니다.**
+
+**N 방식(직접 추적)을 권합니다.** `bootstrap.sh` 한 번으로 "클론 → 마법사" 가
+성립하려면 코드가 클론에 따라와야 합니다. 서비스가 각자 저장소면 클론한 사람이
+서비스마다 별도로 받아야 하고, 그 순간 `bootstrap.sh` 의 전제가 무너집니다.
+
+별도 저장소로 둘 것은 예외로 `.gitignore` 에 이름을 적습니다 — 지금
+`stock-analyzer` · `ws-bridge` 가 그렇게 돼 있습니다.
+
+### 7.5 DB 계정이 두 벌로 공존할 수 있다
+
+**빈 장비에서는 생기지 않습니다.** 기존 장비에 합칠 때만 해당합니다.
+
+| | W | N |
+|---|---|---|
+| 계정 | `jyahn@127.0.0.1` | `jyahn@%` |
+| 권한 | `SELECT,INSERT,UPDATE,DELETE` | `ALL` |
+| 비밀번호 | `services/manager/secrets/manager-db.pw` | `database/secrets/jyahn.pw` |
+
+MariaDB 는 `user@host` 가 키라 **둘은 별개 계정이고 비밀번호도 따로**입니다.
+게다가 접속할 때 더 구체적인 `host` 를 먼저 매칭하므로, `127.0.0.1` 로 붙으면
+W 쪽 계정의 비밀번호가 쓰입니다. 파일에 적힌 비밀번호는 맞는데 접속이 거부되는,
+원인을 찾기 어려운 상태가 됩니다.
+
+기존 장비에 합칠 때는 **`DROP USER 'jyahn'@'127.0.0.1'` 을 명시적 단계로** 넣고,
+비밀번호 파일을 `database/secrets/jyahn.pw` 하나로 모읍니다. manager 의
+`config.json` 에서 `database.passwordFile` 이 그것을 가리키게 합니다.
+
+### 7.6 pm2 앱 이름이 규약을 어긴다
+
+**빈 장비에서는 생기지 않습니다** — 처음부터 규약대로 지으면 됩니다.
+
+N 의 규약은 `[app] name` == `[service] name` == `/health` 의 `service` 가 모두
+같아야 합니다. W 는 어긋납니다.
+
+| 디렉토리 | W 의 pm2 앱 이름 |
+|---|---|
+| `manager` | `nginx-manager` |
+| `apartment-mgmt-server` | `Huygens-Server` |
+
+기존 장비에서 이름을 바꿀 때는 **`pm2 delete <옛 이름>` → 재등록 → `pm2 save`**
+가 필요합니다. `pm2 save` 를 빠뜨리면 유령 앱이 재부팅 때 되살아납니다.
+`node pm2/ecosystem.config.js --check` 가 그 상태를 잡아 줍니다.
+
+### 7.7 인증서 디렉토리 이름이 달라 개인키가 샐 수 있다
+
+| | W | N |
+|---|---|---|
+| 디렉토리 | `nginx/certs/` | `nginx/cert/` |
+| 서버 인증서 | `cert.pem` · `key.pem` | `server/server.crt` · `server.key` |
+| `.gitignore` | `nginx/certs/` | `nginx/cert/` |
+
+각자 자기 이름만 막습니다. **합칠 때 한 이름만 남기면 다른 쪽 경로에 있는 CA
+개인키가 커밋됩니다.** CA 를 다시 만들면 이미 배포한 클라이언트 인증서가 전부
+무효가 되므로, 이건 "다시 만들면 되는 것" 이 아니라 따로 백업해야 하는
+자산입니다.
+
+**두 패턴을 모두 `.gitignore` 에 남깁니다.** 쓰지 않는 이름 한 줄이 남는 대가는
+없고, 빠뜨렸을 때의 대가는 큽니다.
+
+### 7.8 부팅 복원 경로가 둘이다
+
+| | W | N |
+|---|---|---|
+| crontab `@reboot` | `pm2-boot.sh` **+** `install_nginx_stack.sh --skip-install` | `pm2-boot.sh` 만 |
+
+W 는 부팅마다 nginx 설정을 재생성합니다. 선언과 설치본이 어긋날 수 없다는
+장점이 있지만 문제가 둘입니다.
+
+- 그 cron 은 **사용자 crontab** 이라 `/etc/nginx/` 에 쓸 권한이 없습니다.
+  실제로 동작해 왔는지 의심스럽습니다.
+- 선언에 오류가 있으면 부팅 직후 reload 가 실패하고, 그 사실은 로그 파일에만
+  남습니다.
+
+**N 방식을 씁니다.** 어긋남은 부팅 때 덮어쓰는 것이 아니라, 생성기가 설치본을
+원본과 통째로 비교해 잡습니다 ([check-contract.md](check-contract.md) 의
+'설치본이 저장소와 같은가'). 그쪽이 **언제든** 물어볼 수 있고 sudo 도 필요
+없습니다.
+
+### 7.9 websocket-relay 가 실질적으로 갈라져 있다
+
+뿌리는 같지만 지금 트리는 두 갈래입니다.
+
+| W 에만 | N 에만 |
+|---|---|
+| `src/db/` `src/push/` `src/ws/` `src/dashboard/` `src/lib/` | `src/auth/` `src/http/` `src/libs/` `routes/sipPush.ts` |
+
+공통 파일 12개(`app.ts` `config.ts` `gateway.ts` `health.ts` `index.ts` ·
+`routes/` 7개)도 **전부 내용이 다릅니다.**
+
+**이건 프레임워크 통합과 분리합니다.** 한 작업에 묶으면 "선언 구조를 바꾼
+것" 과 "릴레이 로직을 합친 것" 이 같은 커밋에 섞여, 무엇이 무엇을 깼는지
+가릴 수 없게 됩니다.
+
+통합 1차에서는 N 의 것을 그대로 둡니다. 병합은 별도 작업으로 잡고, 그때
+[identity.md](identity.md) 와
+[services/websocket-relay/docs/](../services/websocket-relay/docs/) 의 규약을
+기준으로 견줍니다.
+
+---
+
+## 8. 다단지 배치 전제
+
+단지 하나가 도는 것과 여러 단지를 배포하는 것은 다른 문제입니다. 아래 셋은
+**설계에 실제 변경을 요구하는** 전제입니다.
+
+### 8.1 배치 — 한 VM 에 전부, face-recognition 만 밖
+
+무거운 `face-recognition-server` 하나만 자기 장비를 쓰고, 나머지는 단지마다
+**한 대**에 모두 들어갑니다.
+
+이것이 선언 스키마의 전제 하나를 깹니다. 지금 모든 `service.ini` 가
+`host = 127.0.0.1` 이고, [nginx-conf.md](nginx-conf.md) 는 그 근거를
+*"루프백에 묶어 두면 Nginx 를 우회한 직접 접근이 차단됩니다"* 로 적어 두었습니다.
+
+스키마에 `host` 키가 이미 있어 **값만 바꾸면 되지만**, 둘이 따라옵니다.
+
+| | 무엇이 달라지나 |
+|---|---|
+| 헬스 체크 | manager 는 nginx 를 우회해 백엔드를 **직접** 부릅니다. 그 대상이 원격이 되므로 방화벽이 열려 있어야 하고, `healthTimeoutMs: 3000` 도 재검토 대상입니다 |
+| 루프백 보호 | 사라집니다. face 서버가 자기 방화벽으로 nginx 장비만 허용하거나 mTLS 를 걸어야 합니다 — W 에서 가져오는 클라이언트 인증서 번들(§6.1)이 여기서 쓸모가 생깁니다 |
+
+**VM 사양.** [clean-install-test.md](clean-install-test.md) 는 Janus 소스 빌드를
+기준으로 2코어·4GB·20GB 를 적었습니다. 전 서비스와 MariaDB 를 한 곳에 넣으면
+**4코어·8GB·40GB** 를 권합니다.
+
+### 8.2 전제 ① — 외부에서 하나의 계정으로 모든 DB 에 닿을 것
+
+원거리 출장 중에도 제어할 수 있어야 합니다. 닿지 못하면 배포 후에 큰 문제가
+됩니다.
+
+**요구를 정확히 읽으면 "원거리에서 닿아야 한다" 이지 "3306 을 인터넷에 열어야
+한다" 가 아닙니다.** 셋 다 요구를 만족합니다.
+
+| | 계정 하나로 전 단지 | 3306 노출 | 변경량 |
+|---|---|---|---|
+| 3306 직접 개방 (`bind 0.0.0.0` + `jyahn@%`) | ✅ | **인터넷 전체** | 지금 그대로 |
+| **SSH 터널** | ✅ (SSH 키 하나) | 없음 | `bind 127.0.0.1` 로 되돌리기만 |
+| WireGuard VPN | ✅ | VPN 안에서만 | VPN 구축 필요 |
+
+**SSH 터널을 권합니다.**
+
+```bash
+ssh -L 3306:127.0.0.1:3306 admin@1.cpx.ptype.co.kr
+```
+
+서버에 SSH 는 이미 있고, `bind_address = 127.0.0.1` 을 유지할 수 있고, MariaDB
+인증이 뚫려도 SSH 한 겹이 더 남습니다. 상시 직결이 필요해지면 WireGuard 로
+올립니다. **§7.3 의 기본값 조이기와 충돌하지 않습니다** — 오히려 그것을
+유지한 채 요구를 만족하는 유일한 길입니다.
+
+#### 전 단지가 같은 비밀번호를 쓰는 것의 대가
+
+이 저장소는 Let's Encrypt 와일드카드를 거부하며 이렇게 적었습니다 —
+*"같은 개인키가 모든 단지에 복사됩니다. 한 곳이 털리면 전부 무너집니다."*
+([public_ca/README.md](../nginx/public_ca/README.md)) **DB 계정도 같습니다.**
+
+절충안은 **계정 이름은 통일하고 비밀번호는 단지마다 다르게** 두는 것입니다.
+`database/secrets/jyahn.pw` 가 이미 장비마다 다른 파일이므로 구조는 그대로이고,
+목록을 관리 장부 한 곳에 두면 출장 중에도 봅니다.
+
+요구대로 전 단지 동일 비밀번호로 가도 됩니다. **그 경우 SSH 터널이 선택이 아니라
+필수가 됩니다** — 3306 개방과 비밀번호 공유가 겹치면 단지 하나의 유출이 전체 DB
+접근으로 이어집니다.
+
+### 8.3 전제 ② — 단지마다 서브도메인, 등록 도메인은 하나
+
+`1.cpx.ptype.co.kr` · `2.cpx.ptype.co.kr` … 처럼 **하나의 도메인에서 분기**합니다.
+단지마다 서버 한 대, 공인 IP 하나입니다.
+
+Let's Encrypt 가 이것을 까다롭게 보는 것이 맞습니다. 이유는 **한도가 서브도메인이
+아니라 등록 도메인(`ptype.co.kr`) 단위**이기 때문입니다. 서브도메인이 아무리
+늘어도 **하나의 예산을 나눠 씁니다.**
+
+| 한도 | 값 | 이 배치에서 |
+|---|---|---|
+| 등록 도메인당 인증서 | 주 50건 | **초기 대량 구축이 병목** |
+| 갱신 (같은 이름 조합) | 위 한도에서 **제외** | 안전 — 90일 갱신은 영향 없음 |
+| 중복 인증서 | 주 5건 | 설정을 더듬으며 `--prod` 를 반복하면 소진 |
+| 실패한 검증 | 시간당 5건 | DNS 가 퍼지기 전에 반복 시도하면 걸림 |
+
+> 수치는 여러 번 바뀌어 왔습니다. **대량 발급 전에 Let's Encrypt 현재 문서로
+> 확인하세요.**
+
+**HTTP-01 이든 DNS-01 이든 이 한도는 같습니다.** 검증 방식의 문제가 아니라
+*같은 등록 도메인을 공유한다는 사실 자체* 가 원인입니다. 와일드카드로 묶는 것도
+답이 아닙니다 — 위의 개인키 논증 그대로입니다.
+
+대책은 셋입니다.
+
+1. **`--staging` 을 먼저** — 저장소가 이미 강제하는 규칙이고, 여기서 진가가 납니다
+2. **단지 추가를 배치로 몰지 않기** — 주당 50건 아래로 나눠 올립니다
+3. 그보다 빨리 늘면 → **별도 등록 도메인**(서브도메인으로는 안 됩니다)이나
+   Let's Encrypt 한도 상향 신청, 또는 다른 ACME CA 병행
+
+**그런데 이것보다 먼저 터지는 것이 있습니다** — 단지마다 유동 IP 입니다. §9.
+
+### 8.4 전제 ③ — Firestore 를 덮어쓰지 않을 것
+
+같은 정보가 Firestore 에 올라가고, 나중에 필드가 늘 수 있습니다. **예전 서버가
+그것을 덮어쓰면 안 됩니다.** Add/Update 만 되어야 합니다.
+
+#### ⚠️ 지금 코드가 정확히 그 사고를 냅니다
+
+[services/websocket-relay/tools/directory.js](../services/websocket-relay/tools/directory.js) 의 push 입니다.
+
+```js
+batch.set(db.doc('regions/_index'), { regions: index, updatedAt: now });
+batch.set(db.doc(`regions/${r.code}`), { name: r.name, complexes: r.complexes, updatedAt: now });
+```
+
+**`merge` 없는 `set` 은 문서 전체를 교체합니다.** 그리고 스키마가 하필 이렇습니다.
+
+```
+regions/41135  →  { name, updatedAt, complexes: [ {단지A}, {단지B}, {단지C} ] }
+```
+
+**단지들이 한 문서의 배열을 공유합니다.** 그래서 옛 `tools/directory.json` 을 가진
+장비에서 push 를 돌리면 **그 파일에 없는 단지가 전부 사라집니다.**
+`regions/_index` 도 통째로 교체되어 앱 목록에서 지역이 없어지고, `--prune` 을
+주면 문서까지 지웁니다.
+
+#### `merge: true` 로는 해결되지 않습니다
+
+Firestore 의 merge 는 **필드 단위**입니다. 맵은 병합하지만 **배열은 통째로
+교체**합니다. `complexes` 가 배열인 한 merge 를 켜도 다른 단지는 그대로 날아갑니다.
+
+새 필드(`minAppVersion` 같은)를 옛 서버가 지우는 문제는 merge 로 막히지만,
+**단지가 사라지는 문제는 구조를 바꿔야 막힙니다.**
+
+#### 두 겹으로 고칩니다
+
+**① 지금 — push 를 read-merge-write 로.**
+원격을 먼저 읽어 **단지 단위로 병합**하고, 파일에 없는 단지는 남깁니다. 지우는
+것은 `--prune` 으로만. 이건 이 파일이 **지역 문서에 대해 이미 채택한 사상**을
+단지 항목까지 내리는 것이라 설계가 일관됩니다 — 주석에 *"일부만 담은 파일을
+올렸을 때 나머지가 조용히 사라지면 그게 더 위험하다"* 고 적혀 있습니다. 단지에는
+그 보호가 빠져 있을 뿐입니다.
+
+항목마다 `updatedAt` 을 두고 **원격이 더 최신이면 거부**하면, 옛 파일이 최신 값을
+되돌리는 것까지 막힙니다.
+
+**② 다음 — 쓰기 단위를 단지로 분리.**
+
+```
+complexes/{complexId}     단지가 자기 문서만 쓴다. 서로 못 건드린다
+regions/{code}            앱이 읽는 목록. 위에서 파생한다
+```
+
+원 설계가 배열을 고른 이유는 **읽기 비용**(`2 reads`)입니다. 읽기 구조를 그대로
+두고 **쓰기만 분리**하면 그 이득을 잃지 않습니다.
+
+## 9. 부팅 시 공인 IP 반영
+
+이 회선은 유동 IP 이고, 지금은 **규정상 공유기와 서버를 매일 껐다 켭니다.**
+현장에 배포된 뒤에는 그런 일이 거의 없고 **전체 정전 뒤 복전**이 전부입니다.
+
+두 경우가 같은 모양입니다 — **서버가 부팅하는 순간이 곧 IP 가 바뀌는 순간**
+입니다. 그래서 운영 중에 감시하는 대신 **부팅 순서에 끼워 넣으면** 됩니다.
+
+### 인증서는 이 목록에 없습니다
+
+먼저 정리해 둡니다. **TLS 인증서에는 IP 주소가 들어 있지 않습니다.** 이름·공개키·
+유효기간·서명뿐입니다. IP 가 매일 바뀌어도 **인증서는 그대로이고 재발급도
+필요 없습니다.**
+
+인증서가 IP 에 닿는 지점은 **갱신 시도 순간** 하나입니다 — HTTP-01 은 A 레코드의
+IP 로 80 포트에 접속하므로, 그때 어긋나 있으면 그 시도만 실패합니다. certbot 은
+만료 30일 전부터 **하루 두 번** 시도하므로 기회가 60번쯤 있습니다. 하루쯤
+어긋나는 것은 흡수됩니다.
+
+정말로 IP 를 따라가야 하는 것은 셋입니다.
+
+| | IP 의존 | 어떻게 | 틀리면 |
+|---|---|---|---|
+| **TLS 인증서** | ❌ **없음** | — | — |
+| DNS A 레코드 | ✅ | 등록업체 도구 (지금 수동) | 앱이 서버를 못 찾음 — **즉시 전면** |
+| Janus `public_ip` | ✅ | `settings.ini` → `install.sh --apply` → 재시작 | 통화는 연결되는데 **무음** |
+| rtpengine `interface` | ✅ | `rtpengine.conf` 의 `LAN!<공인IP>` → 재시작 | 한쪽만 들리거나 **무음** |
+
+뒤의 둘이 더 고약합니다. DNS 가 틀리면 아예 못 붙으니 바로 알지만, 미디어 설정이
+옛 IP 를 광고하면 **신호도 정상이고 통화도 연결되는데 소리만 안 납니다.**
+[rtpengine.conf](../services/kamailio/rtpengine.conf) 가 그것을 그대로 적어
+두었습니다 — *"한쪽만 들리거나 무음 — 조용히 실패하는 대표적인 형태입니다."*
+
+### Janus 는 뜬 뒤에 고쳐도 소용없습니다
+
+[janus.service](../services/janus/janus.service) 의 주석입니다.
+
+> ICE 후보를 기동 시점에 모으므로 주소가 없으면 후보 없이 뜹니다.
+
+**설정이 맞은 뒤에 Janus 가 떠야 합니다.** 순서가 뒤집히면 옛 후보로 뜨고, 그
+상태는 재시작 전까지 유지됩니다. 이 절의 설계가 필요한 이유가 바로 이것입니다.
+
+### ⚠️ "공유기가 먼저 켜진다" 에 기대지 않습니다
+
+둘은 다릅니다.
+
+| | 뜻 |
+|---|---|
+| 공유기 전원 인가 | 부팅 시작 |
+| **WAN 확립** | ISP 에서 주소를 받음 — 여기서 수십 초 더 |
+
+그리고 `network-online.target` 은 **"내 인터페이스에 주소가 붙었다"** 는 뜻일 뿐
+인터넷에 닿는다는 뜻이 아닙니다. janus.service 가 이미 그것에 걸려 있지만, LAN 만
+올라온 상태에서도 그 조건은 만족됩니다.
+
+**"공유기가 켜졌는가" 가 아니라 "공인 IP 를 실제로 받았는가" 를 기다립니다.**
+재시도 루프가 이 설계의 핵심입니다. 서버가 공유기보다 느리게 뜬다는 예상은
+대체로 맞지만, UPS 가 있으면 서버가 이미 살아 있는 경우도 생깁니다.
+
+### systemd `oneshot` + `Before=`
+
+crontab `@reboot` 은 쓰지 않습니다 — systemd 가 이미 janus 를 띄우고 있을 수 있어
+**순서가 보장되지 않습니다.** (`pm2-boot.sh` 가 `sleep 20` 으로 때우고 있는 것도
+같은 한계입니다.)
+
+```ini
+[Unit]
+Description=공인 IP를 확인해 미디어 설정에 반영
+Wants=network-online.target
+After=network-online.target
+# 이 셋보다 먼저 끝난다. Requires= 는 걸지 않는다 (아래)
+Before=janus.service rtpengine.service kamailio.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/…/boot/sync-public-ip.sh --apply
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target
+```
+
+`Type=oneshot` 이라 **끝날 때까지 뒤엣것이 기다립니다.** 이것이 *"서비스가 살기
+전에 돌린다"* 를 그대로 구현합니다.
+
+#### ⚠️ `Requires=` 를 걸지 마세요
+
+`Before=` 만 겁니다. `Requires=` 를 걸면 **인터넷이 끊긴 상태에서 Janus 가 아예
+뜨지 않습니다.**
+
+인터넷이 없어도 서버는 떠야 합니다 — 대시보드로 진단할 수 있어야 하고,
+**LAN 내부 통화(월패드↔인터폰)는 공인 IP 없이도 됩니다.** 제한 시간 안에 못
+받으면 마지막으로 알던 값으로 진행하고 크게 로그를 남기는 편이 낫습니다.
+
+### 스크립트가 할 일
+
+```
+① 공인 IP 획득          재시도. 출처 둘 이상을 대조한다
+② 이전 값과 비교        같으면 여기서 끝           ← 중요
+③ 다르면 갱신
+     services/janus/settings.ini      public_ip   → install.sh --apply → 재시작
+     services/kamailio/rtpengine.conf interface   → 재시작
+     DNS A 레코드                                  → API 가 있으면. 없으면 알림만
+```
+
+**②를 빠뜨리지 마세요.** 정전 없이 그냥 재부팅하면 IP 가 그대로일 수 있는데,
+매번 apply 와 재시작을 하면 불필요한 다운타임만 생깁니다.
+
+**바퀴를 다시 만들 필요는 없습니다.**
+[check-public-ip.sh](../services/janus/check-public-ip.sh) 가 이미 ①②와
+`--write` 를 합니다. 새 스크립트는 그것을 부르고 **apply · rtpengine · DNS 를
+묶는 얇은 층**이면 됩니다.
+
+같은 스크립트를 cron 에도 걸어 두면 ISP 리스 갱신까지 덮습니다. 값이 같으면
+아무것도 하지 않으므로 비용이 없습니다.
+
+### 어디에 두나 — `boot/`
+
+경계가 애매한 자리입니다. Janus 만의 것이 아니고(rtpengine · DNS 도),
+[site/README.md](../site/README.md) 는 *"`public_ip` 는 사람이 정하는 값이 아니라
+회선이 알려 주는 값"* 이라며 사이트 층에서 **명시적으로 제외**해 두었습니다.
+
+**`boot/` 를 새로 만듭니다.** "여러 서비스에 걸친 부팅 훅" 이라는 자리가 지금
+저장소에 없습니다. `pm2/` 가 부팅 스크립트를 담고 있지만 pm2 전용이라는 인상이
+강합니다.
+
+유닛은 저장소가 소유합니다 — `services/janus/janus.service` 가 이미 그 선례입니다.
+
+### DNS 는 CNAME 으로 사람 손을 뗍니다
+
+A 레코드를 등록업체 도구로 손수 고치는 것은 **단지가 하나일 때만** 됩니다.
+
+```
+1.cpx.ptype.co.kr.   CNAME   1-cpx.<ddns제공자>.net.
+                             └─ 공유기 DDNS 가 IP 를 따라간다
+```
+
+A 레코드를 **영영 건드리지 않습니다.** 인증서는 여전히 `1.cpx.ptype.co.kr` 로
+발급됩니다 — HTTP-01 은 이름을 정상적으로 해석하므로 CNAME 체인을 따라가고,
+DDNS 이름으로 발급받는 것이 아니라서 *"그 존에 레코드를 만들 권한이 없다"* 는
+제약에 걸리지 않습니다.
+
+[public_ca/README.md](../nginx/public_ca/README.md) 가 *"예전에는 공유기의 DDNS 가
+따라갔지만 그 이름은 삭제됐습니다"* 라고 적어 둔 그 둘을 **다시 이어 붙이는
+것**입니다.
+
+> **CNAME 이 덮는 것은 DNS 하나뿐입니다.** Janus 와 rtpengine 은 이름이 아니라
+> **숫자 IP** 를 설정에 넣어야 하므로, 그 둘은 위의 부팅 스크립트가 맡습니다.
+
+### 그러면 사람 손이 사라집니다
+
+| | 누가 |
+|---|---|
+| DNS A 레코드 | 공유기 DDNS (CNAME 으로 붙여 두면) |
+| Janus `public_ip` | **부팅 스크립트** |
+| rtpengine `interface` | **부팅 스크립트** |
+| TLS 인증서 | certbot 타이머 — IP 와 무관 |
+
+규정상 매일 껐다 켜야 하는 지금 환경에서도 손댈 것이 없어지고, 현장 배포 뒤의
+정전 복구도 **같은 경로**로 처리됩니다.
+
+## 10. 순서
+
+### Phase 0 — 결정 (코드 없음)
+
+빈 장비에서도 남는 넷을 정합니다.
+
+> **OS 는 정해졌습니다** — 22.04 로 먼저, 그다음 24.04. 브랜치 셋으로 갑니다 (§2).
+
+- [x] ~~새 서버의 Ubuntu 버전~~ → **22.04 먼저 · 24.04 뒤** (§2)
+- [ ] `release/22.04` 를 내고 통합 작업을 그 위에서 시작 (§2)
+- [ ] 저장소 이름과 원격 (§7.4 — 직접 추적 / 서브모듈)
+- [ ] `degraded` 의 HTTP 코드 (§7.1 — 권장 200)
+- [ ] `max_body` 기본값 (§7.2 — 권장 비움 + 라우트별)
+- [ ] `bind_address` 와 `jyahn` 의 `host` (§7.3 — 권장 `127.0.0.1`)
+- [ ] 원격 DB 접근 경로 (§8.2 — 권장 SSH 터널)
+- [ ] 전 단지가 DB 비밀번호를 공유할 것인가 (§8.2 — 공유하면 SSH 터널이 필수)
+
+### Phase 1 — 프레임워크 (서비스는 건드리지 않는다)
+
+- [ ] `nginx/generate_client_certificates.sh` 를 가져온다 (§6.1)
+- [ ] `manager/server/src/services/host.js` 를 가져온다 (§5-①)
+- [ ] 관리자 계정을 fail-closed 로 (§5-②) — `bootstrap.sh` 도 함께 고친다
+- [ ] `setup_mariadb.sh` 에 관리자 접속 폴백을 더한다 (§4)
+- [ ] `nginx-stack.conf` 에서 장비별 절대경로를 뺀다 (§6)
+- [ ] `database.ini` 기본값을 조인다 (§7.3)
+- [ ] `.gitignore` 에 `nginx/certs/` 와 `nginx/cert/` 를 모두 남긴다 (§7.7)
+- [ ] 정한 Ubuntu 버전에 맞게 문서를 고친다 (§2 의 '정한 뒤 고쳐야 하는 자리')
+
+### Phase 2 — 서비스 이식
+
+- [ ] `services/ntp` — `nginx-conf` 는 그대로, `pm2-conf/app.ini` 만 새로 쓴다
+- [ ] `services/manager` — N 베이스에 조각 셋을 얹고 **프론트를 다시 빌드**한다
+- [ ] `services/websocket-relay` — **보류** (§7.9)
+
+### Phase 3 — TLS 흐름
+
+- [ ] `site/settings-schema.json` 에 `tls_mode` 를 더한다
+- [ ] 생성기가 `tls_mode` 로 인증서 경로를 파생하게 한다
+- [ ] `setup.js` 에 `tls.decide` 단계를 넣는다
+- [ ] `private` 모드의 CA·단말 번들 배포 절차를 문서로 남긴다
+- [ ] 강등·승격 경로를 문서로 남긴다 (§6.2)
+
+### Phase 4 — VM 에서 두 번 완주
+
+**이번 작업에서는 이것이 검증이 아니라 첫 설치입니다.** 절차는
+[clean-install-test.md](clean-install-test.md) 를 그대로 씁니다.
+
+**① 22.04 VM — `release/22.04`**
+
+- [ ] `bootstrap.sh` → 마법사 완주
+- [ ] `private` 모드로 (nginx 도 인증서도 없는 상태에서 시작)
+- [ ] 여기까지가 합격선. 태그를 하나 남긴다 (`v1.0-ubuntu22.04`)
+
+**② 24.04 VM — `release/24.04`**
+
+- [ ] `media_daemon` 을 설정으로 올린 뒤 갈라 낸다 (§2)
+- [ ] **Kamailio 5.7 에서 설정이 그대로 도는가** — 여기가 첫 관문 (§2)
+- [ ] `rtpengine` 으로 미디어가 흐르는가
+- [ ] MariaDB 10.11 에서 `database/` 문서가 아직 맞는가
+
+**둘 다 끝난 뒤**
+
+- [ ] 도메인이 준비되면 `public` 모드로 승격해 한 번 더 (§6)
+
+### Phase 5 — 다단지 준비 (§8 · §9)
+
+단지 하나가 완주한 **뒤에** 합니다. 순서를 뒤집으면 무엇이 깨졌는지 가릴 수
+없습니다.
+
+- [ ] `boot/sync-public-ip.sh` + systemd 유닛 (§9) — **미디어 무음의 유일한 예방책**
+- [ ] `tools/directory.js` 의 push 를 read-merge-write 로 (§8.4) — **다단지 이전에 필수**
+- [ ] DNS 를 CNAME + DDNS 로 붙여 A 레코드 수작업을 없앤다 (§9)
+- [ ] 원격 DB 접근 경로를 세운다 (§8.2)
+- [ ] face-recognition 을 다른 장비로 뺄 때 `host` 와 방화벽·mTLS (§8.1)
+- [ ] 단지 추가를 주당 50건 아래로 나누는 규칙을 적어 둔다 (§8.3)
+
+---
+
+## 결정 기록
+
+| 정한 것 | 이유 |
+|---|---|
+| 베이스는 N | W 의 선언 스키마가 N 의 부분집합. 반대 방향은 생성기를 다시 써야 한다 |
+| pm2 는 스캐너 | 서비스 추가에 중앙 파일을 고치지 않는다. `dump.pm2` 까지 견준다 |
+| DB 는 N 의 층 | 선언 하나로 서버 설정·다중 DB·계정을 다루고 롤백과 백업이 있다 |
+| 관리자 접속 폴백만 W 에서 | root 인증이 깨진 장비의 탈출구가 N 에 없다 |
+| manager 는 N + 조각 셋 | 마법사를 다시 만들 수 없다. `host.js` 와 fail-closed 는 N 에 없다 |
+| `basePath = /manager` | 루트에 붙으면 쿠키 `Path` 를 좁힐 수 없다 |
+| `tls_mode` 를 사이트 값으로 | 인증서 경로는 장비마다 다르다. 지금은 커밋된 파일에 박혀 있다 |
+| 공인 불가는 `skip` | LAN 전용·도메인 없는 배치가 실재한다. 잊히는 것은 TLS 카드가 막는다 |
+| mTLS 는 `tls_mode` 와 직교 | 내미는 인증서와 검증하는 CA 는 같은 뿌리일 필요가 없다 |
+| 클라이언트 번들은 W 에서 | 사설 CA 배치에서 단말 배포 절차가 N 에 비어 있다 |
+| `degraded` 는 200 | 5xx 면 로드밸런서가 백엔드를 뺀다. 떠 있는 것을 뺄 이유가 없다 |
+| `max_body` 는 라우트별로 | 전체를 열면 잘못된 요청 하나가 대역폭을 오래 문다 |
+| 부팅 때 nginx 를 재생성하지 않음 | 사용자 crontab 은 `/etc/nginx/` 에 못 쓴다. 어긋남은 diff 점검이 잡는다 |
+| 22.04 를 먼저, 24.04 를 뒤에 | 22.04 운영본을 버릴 수 없다. 한 번에 건너뛰면 통합이 깨진 것인지 OS 가 바뀌어 깨진 것인지 가릴 수 없다 |
+| 태그가 아니라 브랜치 | 태그는 읽기 전용이라 22.04 운영본의 수정을 받을 수 없다 |
+| 수정은 `master` 에, 릴리스 브랜치에는 OS 전용만 | 릴리스 브랜치에 직접 하면 손으로 옮겨야 하고, 옮기는 것을 잊는다 |
+| `media_daemon` 을 설정으로 | 커밋된 파일을 손으로 고치면 두 브랜치가 그 파일에서 영구히 충돌한다 |
+| 20.04 는 업그레이드하지 않음 | 통합과 OS 업그레이드가 겹치면 원인을 가릴 수 없다. VM 호스트로는 20.04 로 충분하다 |
+| Kamailio 5.7 검증이 ② 의 첫 관문 | SIP 스택은 24.04 에서 검증된 적이 없다. W 는 24.04 에서 돌지만 Kamailio 를 쓰지 않는다 |
+| 원격 DB 는 SSH 터널로 | 요구는 '원거리에서 닿는 것' 이지 '3306 을 여는 것' 이 아니다. `bind 127.0.0.1` 을 지키면서 만족한다 |
+| 인증서는 IP 를 따라가지 않는다 | 인증서에 IP 가 없다. 따라가야 하는 것은 DNS·Janus·rtpengine 셋이다 |
+| 공인 IP 반영은 부팅 순서에 | 부팅하는 순간이 곧 IP 가 바뀌는 순간이다. Janus 는 ICE 후보를 기동 시점에 모아서 뜬 뒤에 고쳐도 늦다 |
+| `Requires=` 대신 `Before=` | 인터넷이 끊겨도 서버는 떠야 한다. LAN 내부 통화는 공인 IP 없이도 된다 |
+| DNS 는 CNAME + DDNS | A 레코드 수작업은 단지가 하나일 때만 된다. 인증서는 여전히 내 도메인으로 발급된다 |
+| Firestore 는 read-merge-write | 지금은 merge 없는 set 이라 옛 파일 하나가 다른 단지를 지운다. 배열이라 merge:true 로도 안 된다 |
+| relay 병합은 분리 | 선언 구조 변경과 로직 병합이 한 커밋에 섞이면 원인을 가릴 수 없다 |
