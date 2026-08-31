@@ -29,6 +29,10 @@ services/websocket-relay/src/.secret-room-id
 # 이 키는 FCM 발송 자격이라 커밋되면 누구나 이 단지 단말에 푸시를 보낼 수 있다.
 **/*firebase-adminsdk*.json
 
+# Python 바이트코드. 생성기를 돌리면 옆에 생긴다.
+__pycache__/
+*.pyc
+
 # 런타임 산출물
 logs/
 services/*/logs/

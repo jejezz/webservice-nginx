@@ -416,6 +416,11 @@ class Stack:
         self.services_dir = os.path.abspath(os.path.join(base, g("services_dir", "../services")))
 
         cert_dir = os.path.abspath(os.path.join(base, t("cert_dir", "./cert")))
+
+        # 비워 두면 사설 CA 로 떨어진다. **그 사실을 반드시 드러내야 한다** —
+        # 서버는 멀쩡히 뜨고 브라우저만 경고를 내므로, 조용히 떨어지면 앱이 안
+        # 붙는다는 신고가 올 때까지 아무도 모른다.
+        self.cert_declared = bool(t("cert_file") or t("key_file"))
         self.cert = os.path.join(cert_dir, t("cert_file", "server/server.crt"))
         self.key = os.path.join(cert_dir, t("key_file", "server/server.key"))
         client_ca = t("client_ca")
@@ -443,6 +448,25 @@ class Stack:
         except OSError:
             # PermissionError 를 포함한다 — 상위 디렉토리를 지나갈 수 없는 경우다.
             return "unknown"
+
+    def report_certificate(self):
+        """어느 인증서로 갈렸는지 남긴다.
+
+        판정 자체는 막지 않는다. 사설 CA 는 LAN 전용 배치에서 옳은 선택이고,
+        도메인이 없거나 80 을 열 수 없는 장비가 실재한다. 잘못된 것이 아니라
+        **선택된 것**이므로 problem 이 아니라 skip 이다 (docs/check-contract.md).
+        """
+        if self.cert_declared:
+            judge("ok", f"서버 인증서: {self.cert}")
+            print(f"  ok      서버 인증서 {self.cert}", file=sys.stderr)
+            return
+
+        judge("skip",
+              f"서버 인증서: 사설 CA 입니다 ({self.cert}). "
+              "공인 인증서를 쓰려면 이 장비의 nginx-stack.conf 에서 [tls] cert_file/key_file 을 채우세요")
+        print(f"  --      서버 인증서 사설 CA — {self.cert}", file=sys.stderr)
+        print("            공인 인증서를 쓰는 장비라면 [tls] cert_file/key_file 을 채우세요.",
+              file=sys.stderr)
 
     def check_files(self):
         paths = [self.cert, self.key]
@@ -641,6 +665,7 @@ def main():
         die(f"nginx-conf/*.ini 를 하나도 찾지 못했습니다: {stack.services_dir}")
 
     check_conflicts(services)
+    stack.report_certificate()
     stack.check_files()
 
     for service in services:

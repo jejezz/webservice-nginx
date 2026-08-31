@@ -78,7 +78,44 @@ sudo ./install_nginx_stack.sh --skip-install
 | `default_route` | `/manager` | 루트 `/` 접속을 302 로 보냅니다 |
 | `public_http_port` / `public_https_port` | `28080` / `28443` | 공유기 포워딩 |
 | `[tls] cert_dir` … | `./cert` | 인증서 원본 위치 |
+| `[tls] cert_file`, `key_file` | (비움) | 비우면 **사설 CA** (`server/server.crt`) |
 | `[tls] client_ca`, `verify_client` | `ca/ca.crt`, `optional` | mTLS |
+
+### ⚠️ `cert_file` 은 장비마다 다른 값입니다
+
+**이 파일은 커밋됩니다.** 예전에는 이 자리에 한 장비의 Let's Encrypt 경로가
+박혀 있었고, 클론한 새 서버에서는 그 디렉토리가 없어 `nginx -t` 가 실패했습니다.
+그 실패는 화면에 *"설정이 틀렸다"* 로 보여서, 원인이 남의 장비 이름이라는 것을
+알아채기까지 오래 걸립니다.
+
+지금은 비어 있고, 비면 **사설 CA** 를 씁니다. 공인 인증서를 쓰는 장비에서는
+그 장비에서만 두 줄을 채우고 **커밋하지 않습니다.**
+
+```ini
+cert_file = /etc/letsencrypt/live/<이 장비의 host>/fullchain.pem
+key_file  = /etc/letsencrypt/live/<이 장비의 host>/privkey.pem
+```
+
+**어느 쪽으로 갈렸는지는 매번 보고합니다.** 조용히 사설 CA 로 떨어지는 것이
+가장 나쁘기 때문입니다 — 서버는 멀쩡히 뜨고 브라우저만 경고를 내므로, 앱이
+안 붙는다는 신고가 올 때까지 아무도 모릅니다.
+
+```
+  --      서버 인증서 사설 CA — …/cert/server/server.crt
+  ok      서버 인증서 /etc/letsencrypt/live/…/fullchain.pem
+```
+
+사설 CA 판정은 `problem` 이 아니라 `skip` 입니다. LAN 전용 배치에서는 그것이
+옳은 선택이라 마법사를 막지 않습니다 ([check-contract.md](../docs/check-contract.md)).
+
+> **커밋되는 파일에 장비별 값을 적는 것은 임시 방편입니다.** 채운 장비는 작업
+> 트리가 계속 더러워지고 `git pull` 때 충돌합니다. 이 값을 `site/settings.ini`
+> 의 `host` 에서 파생하게 만드는 것이 다음 단계입니다
+> ([unify-plan.md](../docs/unify-plan.md) 의 `tls_mode`).
+
+`ssl_client_certificate`(mTLS) 는 이것과 **직교**합니다. 내미는 인증서가
+공인이어도 클라이언트를 검증하는 CA 는 사설 그대로입니다 — 검증하는 쪽이
+다르기 때문입니다.
 
 ### 포트 포워딩 (`public_*_port`)
 
