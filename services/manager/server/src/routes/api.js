@@ -122,7 +122,7 @@ router.post('/login', async (req, res) => {
     return res.status(429).json({ error: 'too_many_attempts', message: '로그인 시도가 너무 많습니다. 잠시 후 다시 시도하세요.' });
   }
 
-  const { username, password } = req.body || {};
+  const { username, password, passwordConfirm } = req.body || {};
   if (!username || !password) {
     return res.status(400).json({ error: 'missing_credentials', message: '이메일과 비밀번호를 입력하세요.' });
   }
@@ -132,7 +132,11 @@ router.post('/login', async (req, res) => {
     return res.status(400).json({ error: 'invalid_email', message: '아이디는 이메일 주소여야 합니다.' });
   }
 
-  const result = await userStore.authenticate(email, String(password), { ip: key });
+  const result = await userStore.authenticate(email, String(password), {
+    ip: key,
+    // 값이 없으면 넘기지 않는다. authenticate() 는 '입력 없음' 과 '빈 문자열' 을 구분한다.
+    passwordConfirm: passwordConfirm === undefined ? undefined : String(passwordConfirm),
+  });
 
   switch (result.status) {
     case 'ok': {
@@ -143,14 +147,42 @@ router.post('/login', async (req, res) => {
       return res.json({ user: result.user, expiresAt });
     }
 
-    case 'pending':
+    case 'pending': {
       // 승인 대기는 실패 횟수에 넣지 않는다. 아직 자격 증명을 틀린 게 아니다.
       log.info(`Login pending approval: ${email} from ${key}`);
+
+      // 비밀번호가 저장됐다는 사실을 반드시 알린다. 이걸 모르면 승인이 난 뒤
+      // 로그인이 안 될 때 원인을 찾을 수 없다.
+      let message = '승인 대기 중인 계정입니다. 관리자 승인 후 로그인할 수 있습니다.';
+      if (result.firstRequest) {
+        message =
+          '승인 요청이 등록되었습니다. 방금 입력한 비밀번호가 이 계정의 비밀번호로 저장되었습니다. ' +
+          '관리자 승인 후 로그인할 수 있습니다.';
+      } else if (result.passwordUpdated) {
+        message = '비밀번호를 다시 설정했습니다. 관리자 승인 후 로그인할 수 있습니다.';
+      }
+
+      return res.status(403).json({ error: 'pending_approval', message });
+    }
+
+    // 비밀번호가 새로 저장되는 경우다. 확인 입력을 받기 전에는 쓰지 않는다.
+    // 자격 증명을 틀린 게 아니므로 실패 횟수에 넣지 않는다.
+    case 'confirm_required':
+      log.info(`Password confirmation required (${result.reason}) for ${email} from ${key}`);
       return res.status(403).json({
-        error: 'pending_approval',
-        message: result.firstRequest
-          ? '승인 요청이 등록되었습니다. 관리자 승인 후 로그인할 수 있습니다.'
-          : '승인 대기 중인 계정입니다. 관리자 승인 후 로그인할 수 있습니다.',
+        error: 'password_confirm_required',
+        reason: result.reason,
+        message:
+          result.reason === 'signup'
+            ? '등록되지 않은 이메일입니다. 여기서 입력한 비밀번호가 이 계정의 비밀번호가 됩니다. 확인을 위해 한 번 더 입력하세요.'
+            : '승인 대기 중인 계정입니다. 비밀번호를 다시 설정하려면 확인을 위해 한 번 더 입력하세요.',
+      });
+
+    case 'confirm_mismatch':
+      return res.status(400).json({
+        error: 'password_mismatch',
+        reason: result.reason,
+        message: '두 비밀번호가 일치하지 않습니다. 다시 입력하세요.',
       });
 
     case 'unavailable':

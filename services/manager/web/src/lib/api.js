@@ -9,6 +9,9 @@ export class ApiError extends Error {
     this.code = code;
     // 항목별 오류처럼 본문에 더 실려 오는 것이 있다 (설정 폼).
     this.data = data;
+    // 같은 code 안에서 상황을 더 나눌 때 쓴다.
+    // (예: password_confirm_required 의 signup / reset)
+    this.reason = data?.reason;
   }
 }
 
@@ -40,8 +43,16 @@ export const api = {
   // 로그인 화면이 어느 장비인지 표시하기 위해 부른다. 인증 전에도 응답한다.
   host: () => request('/host'),
 
-  login: (username, password) =>
-    request('/login', { method: 'POST', body: JSON.stringify({ username, password }) }),
+  // passwordConfirm 은 비밀번호가 **새로 저장되는** 경우(신규 등록, 승인 전
+  // 재설정)에만 보낸다. 서버는 '없음' 과 '빈 문자열' 을 구분하므로 undefined 면
+  // 아예 넣지 않는다.
+  login: (username, password, passwordConfirm) =>
+    request('/login', {
+      method: 'POST',
+      body: JSON.stringify(
+        passwordConfirm === undefined ? { username, password } : { username, password, passwordConfirm }
+      ),
+    }),
   logout: () => request('/logout', { method: 'POST' }),
   me: () => request('/me'),
   overview: () => request('/overview'),

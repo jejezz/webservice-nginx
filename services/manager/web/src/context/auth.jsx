@@ -28,8 +28,8 @@ export function AuthProvider({ children }) {
     };
   }, []);
 
-  const login = useCallback(async (username, password) => {
-    const data = await api.login(username, password);
+  const login = useCallback(async (username, password, passwordConfirm) => {
+    const data = await api.login(username, password, passwordConfirm);
     setUser(data.user);
     return data.user;
   }, []);

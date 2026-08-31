@@ -9,11 +9,18 @@ const log = require('../logger');
  * 등록되지 않은 이메일로 로그인을 시도하면 approved=0 인 승인 요청 행을 만들고,
  * approved=1 이 되어야 실제 로그인이 성공한다.
  *
+ * 비밀번호가 **새로 저장되는** 경우(신규 등록, 승인 전 재설정)에는 확인 입력을
+ * 한 번 더 받는다. 확인 없이는 password_hash 를 쓰지 않는다 — 첫 시도의 오타가
+ * 그대로 계정 비밀번호가 되어 버리는 것을 막기 위함이다. 그 오타는 승인이 난
+ * **뒤에야** 드러나고, 그때는 왜 로그인이 안 되는지 알 길이 없다.
+ *
  * authenticate() 반환값
- *   { status: 'ok', user }        인증 성공
- *   { status: 'pending' }         승인 대기 (요청이 새로 생겼거나 이미 대기 중)
- *   { status: 'invalid' }         이메일/비밀번호 불일치
- *   { status: 'unavailable' }     DB 접속 실패
+ *   { status: 'ok', user }            인증 성공
+ *   { status: 'pending' }             승인 대기 (요청이 새로 생겼거나 이미 대기 중)
+ *   { status: 'confirm_required' }    확인 입력이 필요 (reason: signup | reset)
+ *   { status: 'confirm_mismatch' }    두 비밀번호가 다름 (reason: signup | reset)
+ *   { status: 'invalid' }             이메일/비밀번호 불일치
+ *   { status: 'unavailable' }         DB 접속 실패
  */
 class DbUserStore {
   constructor() {
@@ -51,8 +58,18 @@ class DbUserStore {
      */
     if (!row && ctx.verifyOnly) return { status: 'invalid' };
 
+    // 확인 입력은 **값이 왔을 때만** 검사한다. 빈 문자열도 '입력했다' 로 본다 —
+    // 그래야 확인 칸을 비워 두고 보낸 것과 아예 보내지 않은 것이 갈린다.
+    const confirm = ctx.passwordConfirm;
+    const confirmed = confirm !== undefined && confirm !== null;
+    const confirmMatches = confirmed && String(confirm) === String(plain);
+
     // 처음 보는 이메일 — 승인 요청으로 등록한다.
+    // 여기서 입력한 비밀번호가 그대로 계정 비밀번호가 되므로 확인을 받는다.
     if (!row) {
+      if (!confirmed) return { status: 'confirm_required', reason: 'signup' };
+      if (!confirmMatches) return { status: 'confirm_mismatch', reason: 'signup' };
+
       try {
         await db.query(
           'INSERT INTO administrator (email, password_hash, approved) VALUES (?, ?, 0)',
@@ -76,17 +93,25 @@ class DbUserStore {
     // (처음 요청할 때 오타가 났어도 승인 전에 바로잡을 수 있다. 아직 접근 권한은 없다)
     // ⚠️ 확인만 하는 호출에서는 그 재설정도 하지 않는다.
     if (!row.approved) {
-      if (!ok && !ctx.verifyOnly) {
-        try {
-          await db.query('UPDATE administrator SET password_hash = ? WHERE id = ?', [
-            password.hash(plain),
-            row.id,
-          ]);
-        } catch (err) {
-          log.warn(`Pending password update failed for ${normalized}: ${err.message}`);
-        }
+      // 비밀번호가 맞으면 그냥 대기 안내다. 바꿀 것이 없다.
+      if (ok) return { status: 'pending', firstRequest: false };
+
+      // 확인만 하는 호출에서는 재설정도 하지 않는다.
+      if (ctx.verifyOnly) return { status: 'pending', firstRequest: false };
+
+      // 계정 비밀번호를 바꾸는 일이므로 등록 때와 똑같이 확인을 받는다.
+      if (!confirmed) return { status: 'confirm_required', reason: 'reset' };
+      if (!confirmMatches) return { status: 'confirm_mismatch', reason: 'reset' };
+
+      try {
+        await db.query('UPDATE administrator SET password_hash = ? WHERE id = ?', [
+          password.hash(plain),
+          row.id,
+        ]);
+      } catch (err) {
+        log.warn(`Pending password update failed for ${normalized}: ${err.message}`);
       }
-      return { status: 'pending', firstRequest: false };
+      return { status: 'pending', firstRequest: false, passwordUpdated: true };
     }
 
     if (!ok) {
