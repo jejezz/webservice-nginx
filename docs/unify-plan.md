@@ -1,6 +1,6 @@
 # 두 저장소를 하나로 — 통합 계획
 
-`Public/WebServices` 와 `Public/webservice-nginx` 는 같은 날(2026-08-18)에 시작해
+`Public/WebServices` 와 `Public/webservices` 는 같은 날(2026-08-18)에 시작해
 같은 일을 하는 두 저장소입니다. 비슷한 뼈대를 공유하지만 간 거리가 다릅니다.
 이 문서는 **어느 쪽을 베이스로 삼고, 무엇을 건져 오고, 합칠 때 무엇이 조용히
 깨지는가**를 적습니다.
@@ -9,7 +9,7 @@
 [clean-install-test.md](clean-install-test.md) (빈 장비 완주 절차) ·
 [adding-a-service.md](adding-a-service.md)
 
-아래에서 **W** 는 `WebServices`, **N** 은 `webservice-nginx` 를 가리킵니다.
+아래에서 **W** 는 `WebServices`, **N** 은 `webservices` 를 가리킵니다.
 
 > **범위에서 뺀 것.** W 의 `apartment-mgmt-server` · `face-recognition-server` ·
 > `logd-server` 는 이 계획이 다루지 않습니다. 서비스는 plug-in 형태라 나중에
@@ -104,7 +104,7 @@ W 를 베이스로 하면 `site/` · `lib/` · `database/` · 마법사를 다�
 
 | | Ubuntu |
 |---|---|
-| N (`webservice-nginx`) | **22.04** |
+| N (`webservices`) | **22.04** |
 | W (`WebServices`) | **24.04** |
 
 > ⚠️ **그런데 두 저장소가 놓인 이 장비는 24.04 입니다** (`Ubuntu 24.04.4 LTS`).
