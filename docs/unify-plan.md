@@ -628,20 +628,35 @@ site.settings  (host 를 정한다)
 
 ### 6.1 W 에서 가져올 것 — 클라이언트 인증서 번들
 
-N 의 `generate_certs.sh` 는 CA 와 서버 인증서를 만들지만, **단말에 배포할 번들을
-만들지 않습니다.** 사설 CA 배치에서 앱이 서버를 믿으려면 CA 를 심어야 하고,
-mTLS 를 쓰려면 단말마다 인증서가 있어야 합니다.
+> **적어 둔 것이 틀렸습니다.** 이 절은 원래 *"N 의 `generate_certs.sh` 는 CA 와
+> 서버 인증서를 만들지만 단말 번들을 만들지 않는다"* 고 적었는데, 실제로는
+> `client/electron` · `client/android` · `client/ios` 를 `.key .crt .pem .p12` 와
+> `ca.crt` 까지 만듭니다. 진짜 빈 자리는 다른 곳이었습니다.
 
-W 의 `nginx/generate_client_certificates.sh` (193줄) 가 한 번에 만듭니다.
+**빈 자리는 "번들을 만드는 것" 이 아니라 "단말을 나중에 더하는 것" 입니다.**
+
+`generate_certs.sh` 는 CA 부터 처음부터 만듭니다. 단말이 하나 늘었다고 다시
+돌리면 **CA 가 새로 나고, 이미 배포한 단말이 전부 무효가 됩니다.** 되돌리려면
+그 단말들을 하나씩 다시 방문해야 합니다. 그런데 단말이 느는 것은 운영 중에
+계속 생기는 일이라, 이 자리가 비어 있으면 결국 CA 를 다시 만들게 됩니다.
+
+W 의 `nginx/generate_client_certificates.sh` (193줄) 가 **이름을 받아 한 벌씩**
+발급하는 모양입니다. 그 골격을 가져옵니다.
 
 | 대상 | 산출물 |
 |---|---|
-| 웹 | `.p12` |
+| 웹 · Electron | `.crt` `.key` `.pem` |
 | Android | `.p12` + CA `.crt` |
-| iOS | `.p12` |
+| iOS | `.p12` + CA `.cer` (DER) |
 
-이것을 `nginx/` 로 가져옵니다. N 의 `cert/ca/` 를 CA 로 쓰도록 경로만 맞추면
-됩니다.
+**⚠️ 그대로 옮기면 안 됩니다.** W 의 것은 돌 때마다 **자기 CA 를 새로 만들어**
+서명합니다(`openssl genrsa -out "$CA_KEY"`). 그 CA 는 nginx 의 `client_ca` 가
+가리키는 CA 가 아니므로, 발급받은 단말은 인증서를 가졌는데 서버가 거절합니다.
+게다가 그 실패는 TLS 핸드셰이크에서 나므로 **애플리케이션 로그에 아무것도
+남지 않습니다.**
+
+가져오면서 그 자리를 뒤집습니다 — **CA 를 만들지 않고 `cert/ca/` 로 서명만
+하고, CA 가 없으면 만들지 말고 멈춥니다.**
 
 > W 의 `generate_all_certificates.sh` 는 가져오지 않습니다 — CA·서버·클라이언트를
 > 한 번에 만드는 스크립트인데, 앞의 둘은 N 의 `generate_certs.sh` 가 이미 하고
@@ -1160,7 +1175,7 @@ DDNS 이름으로 발급받는 것이 아니라서 *"그 존에 레코드를 만
 
 ### Phase 1 — 프레임워크 (서비스는 건드리지 않는다)
 
-- [ ] `nginx/generate_client_certificates.sh` 를 가져온다 (§6.1)
+- [x] ~~`nginx/generate_client_certificates.sh` 를 가져온다~~ → **가져왔다.** 새 CA 를 만들지 않고 `cert/ca/` 로 서명하게 고쳤다 (§6.1)
 - [ ] `manager/server/src/services/host.js` 를 가져온다 (§5-①)
 - [ ] 관리자 계정을 fail-closed 로 (§5-②) — `bootstrap.sh` 도 함께 고친다
 - [ ] `setup_mariadb.sh` 에 관리자 접속 폴백을 더한다 (§4)

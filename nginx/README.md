@@ -17,7 +17,8 @@ nginx 프로세스 자체는 systemd 가 관리합니다 (80/443 바인딩에 ro
 | `nginx-stack.conf` | listen 포트, TLS, mTLS, 포트 포워딩, default_route |
 | `server.conf.template` | 생성될 설정의 골격 |
 | `install_nginx.sh` | nginx 설치/업데이트 (apt) |
-| `generate_certs.sh` | 사설 CA·서버·클라이언트 인증서 생성 |
+| `generate_certs.sh` | 사설 CA·서버·클라이언트 인증서 생성 (**처음 한 번**) |
+| `generate_client_certificates.sh` | 단말 하나에 배포할 클라이언트 번들 (**단말이 늘 때마다**) |
 | `cert/` | 인증서 원본. nginx 가 이 경로를 직접 읽습니다 |
 
 ## 자주 쓰는 명령
@@ -122,6 +123,37 @@ cert/
 ```bash
 ./generate_certs.sh example.com && sudo ./install_nginx_stack.sh --skip-install
 ```
+
+### ⚠️ 단말이 늘 때는 `generate_certs.sh` 를 다시 돌리지 않습니다
+
+이 스크립트는 **CA 부터 새로 만듭니다.** 다시 돌리면 이미 배포한 단말의 인증서가
+전부 무효가 되고, 되돌리려면 그 단말들을 하나씩 다시 방문해야 합니다. CA 개인키는
+"다시 만들면 되는 것" 이 아니라 **따로 백업해야 하는 자산**입니다.
+
+단말을 더할 때는 `generate_client_certificates.sh` 를 씁니다. **이미 있는 CA 로
+서명만** 하므로 CA·서버 인증서는 그대로입니다.
+
+```bash
+./generate_client_certificates.sh wallpad-102          # cert/client/wallpad-102/
+./generate_client_certificates.sh --days 730 intercom-3f
+./generate_client_certificates.sh --p12-password 'secret' android-app
+```
+
+| | 산출물 |
+|---|---|
+| 웹 · Electron | `<name>.crt` `<name>.key` `<name>.pem` |
+| Android | `<name>.p12` + `ca.crt` |
+| iOS | `<name>.p12` + `ca.cer` (DER — 구성 프로파일이 이 형식을 요구합니다) |
+
+**서버 쪽은 손댈 것이 없습니다.** `client_ca` 가 그 CA 를 이미 가리키고 있으므로
+새 단말의 인증서는 reload 없이 그대로 검증됩니다.
+
+CA 가 없으면 스크립트가 멈춥니다. **없다고 새로 만들지 않는 것이 의도**입니다 —
+nginx 가 검증에 쓰는 CA 와 갈라지면 단말은 인증서를 가졌는데 서버가 거절하는
+상태가 되고, 그 실패는 TLS 단계에서 나므로 앱 로그에 아무것도 남지 않습니다.
+
+`.p12` 비밀번호는 기본이 빈 값입니다. 빈 비밀번호를 거부하는 단말이 있으므로,
+그럴 때는 `--p12-password` 로 다시 발급합니다.
 
 ### mTLS
 
