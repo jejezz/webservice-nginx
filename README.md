@@ -13,6 +13,7 @@ WebServices/
     ├── face-recognition-server/  # /face/
     ├── apartment-mgmt-server/    # /complex/*  (web-cassini, electron-cassini 포함)
     ├── websocket-relay/          # /relay/   (WebSocket 릴레이)
+    ├── ntp/                      # /ntp/     (chrony NTP 서버 + 상태 사이드카)
     └── logd-server/              # 아직 미등록 — zip 파일만 있고 라우팅·프로세스 없음
 ```
 

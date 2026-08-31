@@ -151,5 +151,31 @@ module.exports = {
       error_file: './logs/pm2-error.log',
       time: true,
     },
+    {
+      // NTP 상태 사이드카.
+      //
+      // 시각 제공은 이 프로세스가 하지 않는다 — chronyd 가 systemd 아래에서
+      // UDP 123 을 연다 (낮은 포트라 root 가 필요하다). 여기는 chronyc 로
+      // 상태를 읽어 HTTP 로 보여 줄 뿐이라, 죽어도 시각 제공은 멈추지 않는다.
+      //
+      // 기동 전 준비: cd services/ntp && npm install && npm run build
+      // chrony 설치와 설정 배포: npm run ntp:install
+      name: 'ntp-server',
+      cwd: service('ntp'),
+      script: 'dist/index.js',
+      instances: 1,
+      exec_mode: 'fork',
+      env: {
+        // services/ntp/nginx-conf/service.ini 의 ports 와 같아야 한다.
+        PORT: 28094,
+        HOST: '127.0.0.1',
+        NODE_ENV: 'production',
+      },
+      autorestart: true,
+      max_restarts: 10,
+      out_file: './logs/pm2-out.log',
+      error_file: './logs/pm2-error.log',
+      time: true,
+    },
   ],
 };

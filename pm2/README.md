@@ -19,6 +19,7 @@
 | `web-cassini` | ✅ pm2로 관리 | `../services/apartment-mgmt-server/web-cassini`. nginx가 `/cassini/`를 이 서비스(28093)로 보냅니다. 예전에는 `Huygens-Server`가 복사본을 서빙했습니다 |
 | `nginx-manager` | ✅ pm2로 관리 | `../services/manager/server`. 루트(`/`)의 서비스 관리 대시보드 |
 | `websocket-relay` | ✅ pm2로 관리 | `../services/websocket-relay`. nginx가 `/relay/*`를 이 서비스(28090)로 보냅니다. WebRTC/IoT 시그널링 릴레이 |
+| `ntp-server` | ✅ pm2로 관리 | `../services/ntp`. NTP 상태 사이드카(28094). **시각 제공은 chronyd(systemd)가 UDP 123 에서** 하고 이 프로세스는 상태만 보여줍니다 |
 | `nginx` | ❌ systemd로 유지 | 80/443 바인딩에 root 권한이 필요해서 systemd가 더 적합. [nginx는 왜 pm2로 안 옮겼나](#nginx는-왜-pm2로-관리하지-않나) 참고 |
 | `logd-server` | ⏳ 아직 미등록 | 현재 zip 파일만 있는 상태 |
 
@@ -53,6 +54,7 @@ curl -sk -o /dev/null -w '%{http_code}\n' https://127.0.0.1/cassini/
 | `Huygens-Server` | `dist/` 컴파일 결과 + `.env`의 `USE_HTTPS=false` |
 | `nginx-manager` | npm 의존성, 프론트 빌드, `config.json`, DB 스키마 |
 | `websocket-relay` | `dist/` 컴파일 결과, MariaDB DB·계정, `.env` 의 DB 접속 정보. FCM 푸시를 쓰면 `secrets/firebase-admin.json` |
+| `ntp-server` | `dist/` 컴파일 결과. chrony 설치와 설정 배포는 `npm run ntp:install` |
 
 ### `face-recognition-server`
 
@@ -114,6 +116,23 @@ FCM 푸시 키가 없어도 프로세스는 정상이고 푸시만 꺼집니다
 여러 개를 띄우면 클라이언트마다 다른 방 테이블을 보게 됩니다.
 
 자세한 내용은 [../services/websocket-relay/README.md](../services/websocket-relay/README.md).
+
+### `ntp-server`
+
+시각 제공은 이 프로세스가 하지 않습니다 — **chronyd 가 systemd 아래에서
+UDP 123 을 엽니다.** pm2 가 띄우는 것은 상태를 HTTP 로 보여 주는 사이드카라,
+죽어도 시각 제공은 멈추지 않습니다.
+
+```bash
+cd services/ntp && npm install && npm run setup
+```
+
+chrony 설치(apt)와 설정 배포(/etc)는 sudo 가 필요해 `setup` 이 물어봅니다.
+`systemd-timesyncd` 는 클라이언트 전용이라 시각을 제공할 수 없고, chrony 를
+설치하면 자동으로 비활성화됩니다.
+
+상태는 `npm run ntp:status`, 전반 점검은 `npm run doctor` 입니다.
+자세한 내용은 [../services/ntp/README.md](../services/ntp/README.md).
 
 ### `Huygens-Server`
 
