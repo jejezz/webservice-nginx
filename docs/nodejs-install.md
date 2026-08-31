@@ -27,7 +27,32 @@ systemd 가 되살립니다. systemd 유닛은 로그인 셸이 아니라서 `~/
 nvm 은 한 장비에서 여러 node 버전을 오가야 할 때 쓰는 도구입니다. 이 서버는
 한 버전만 쓰므로 쓸 이유가 없습니다.
 
-## 설치
+## 스크립트로 하기
+
+저장소 뿌리의 `install-node.sh` 가 아래 절차와 함정을 전부 담고 있습니다.
+**먼저 점검만 해 보세요** — 인자 없이 부르면 아무것도 바꾸지 않습니다.
+
+```bash
+./install-node.sh
+```
+
+지금 node 가 무엇이고, 부딪히는 패키지가 있는지, 저장소가 붙어 있는지를
+말해 줍니다. 그다음 설치합니다:
+
+```bash
+sudo ./install-node.sh --apply
+```
+
+지울 패키지가 있으면 **무엇이 함께 나가는지 먼저 보여 주고 묻습니다.** 확인
+없이 진행하려면 `-y` 를 붙입니다. 되돌리려면 `sudo ./install-node.sh --remove`
+입니다.
+
+기본은 node 20 입니다. 더 올리려면 `NODE_MAJOR=22 sudo -E ./install-node.sh --apply`.
+
+아래는 그 스크립트가 하는 일을 손으로 하는 방법입니다. 스크립트가 멈춘
+자리를 짚을 때 보세요.
+
+## 손으로 설치하기
 
 ```bash
 sudo apt-get install -y ca-certificates curl gnupg

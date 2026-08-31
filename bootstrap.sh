@@ -52,15 +52,15 @@ need() {
 
 # 배포판 패키지는 22.04 가 12, 24.04 가 18 이라 어느 쪽도 모자랍니다. npm 은 따로
 # 설치하지 마세요 — NodeSource 의 nodejs 패키지가 이미 담고 있습니다.
-need node "서비스가 node 로 돕니다" "docs/nodejs-install.md 를 보세요 (배포판 apt 로는 안 됩니다)"
-need npm  "의존성을 받습니다"        "docs/nodejs-install.md 를 보세요 (nodejs 패키지에 들어 있습니다)"
+need node "서비스가 node 로 돕니다" "${ROOT}/install-node.sh          ${DIM}(먼저 점검만 합니다)${OFF}"
+need npm  "의존성을 받습니다"        "${ROOT}/install-node.sh          ${DIM}(nodejs 패키지에 함께 들어 있습니다)${OFF}"
 
 # node 20 미만이면 릴레이가 뜨지 않는다 (fetch·AbortSignal.timeout 을 쓴다).
 if command -v node >/dev/null 2>&1; then
     major="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)"
     if [[ "$major" -lt 20 ]]; then
         bad "node 20 이상이 필요합니다 (지금 ${major}) — websocket-relay 가 fetch 와 AbortSignal.timeout 을 씁니다"
-        echo "      docs/nodejs-install.md"
+        echo "      ${ROOT}/install-node.sh    ${DIM}(설치 스크립트. 배경은 docs/nodejs-install.md)${OFF}"
         PROBLEMS=$((PROBLEMS + 1))
     fi
 fi
