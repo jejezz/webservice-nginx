@@ -679,6 +679,18 @@ public   → /etc/letsencrypt/live/<site.host>/fullchain.pem  ·  privkey.pem
 private  → <cert_dir>/server/server.crt  ·  server.key
 ```
 
+#### `auto` 를 무엇으로 판정하나 — `live/` 가 아니라 `renewal/`
+
+*"공인 인증서가 있고 유효하면"* 을 **파일 유무로 보면 안 됩니다.**
+`/etc/letsencrypt/live/` 는 `0700 root` 이고, 생성기는 `--check` 로 **sudo 없이
+도는 경로**가 있습니다. 파일 유무로 갈랐다면 같은 장비가 sudo 로 돌릴 때와 아닐
+때 **다른 판정**을 냅니다 — 조용히 사설로 떨어지는 그 사고가 여기서 납니다.
+
+그 옆의 `/etc/letsencrypt/renewal/<이름>.conf` 는 `0755` 라 누구나 읽습니다.
+그리고 그 파일이 있다는 것은 곧 **certbot 이 이 이름으로 발급해 갱신까지 걸어
+두었다** 는 뜻이라, 알고 싶은 것과 정확히 같습니다. 저장소가 이미 이 사실을
+알고 있었습니다 — `setup_letsencrypt.sh` 의 주석이 그 권한 차이를 적어 둡니다.
+
 `cert_file`/`key_file` 을 직접 적으면 그것이 이깁니다 — 지금 쓰는 사람이 깨지지
 않게 합니다.
 
@@ -1348,8 +1360,9 @@ N 은 `nginx-conf.js` 에서 `ports[0]` 만 씁니다. **인스턴스 하나가 
 
 ### Phase 3 — TLS 흐름
 
-- [ ] `site/settings-schema.json` 에 `tls_mode` 를 더한다
-- [ ] 생성기가 `tls_mode` 로 인증서 경로를 파생하게 한다
+- [x] ~~`site/settings-schema.json` 에 `tls_mode` 를 더한다~~ → **더했다** (`auto`·`public`·`private`)
+- [x] ~~생성기가 `tls_mode` 로 인증서 경로를 파생하게 한다~~ → **한다.** `auto` 는 `renewal/` 로 판정하고,
+      갈린 쪽과 그 이유를 매번 보고한다
 - [ ] `setup.js` 에 `tls.decide` 단계를 넣는다
 - [ ] `private` 모드의 CA·단말 번들 배포 절차를 문서로 남긴다
 - [ ] 강등·승격 경로를 문서로 남긴다 (§6.2)
@@ -1408,6 +1421,8 @@ N 은 `nginx-conf.js` 에서 `ports[0]` 만 씁니다. **인스턴스 하나가 
 | manager 는 N + 조각 셋 | 마법사를 다시 만들 수 없다. `host.js` 와 fail-closed 는 N 에 없다 |
 | `basePath = /manager` | 루트에 붙으면 쿠키 `Path` 를 좁힐 수 없다 |
 | `tls_mode` 를 사이트 값으로 | 인증서 경로는 장비마다 다르다. 지금은 커밋된 파일에 박혀 있다 |
+| `auto` 는 `renewal/` 로 판정 | `live/` 는 0700 이라 sudo 유무에 따라 판정이 달라진다. `renewal/` 은 0755 이고 '발급해 갱신까지 걸어 두었다' 를 그대로 뜻한다 |
+| `cert_file` 을 한쪽만 적으면 problem | 공인 인증서에 사설 개인키가 짝지어져 nginx 가 'key values mismatch' 로 거절한다 |
 | 공인 불가는 `skip` | LAN 전용·도메인 없는 배치가 실재한다. 잊히는 것은 TLS 카드가 막는다 |
 | mTLS 는 `tls_mode` 와 직교 | 내미는 인증서와 검증하는 CA 는 같은 뿌리일 필요가 없다 |
 | 서버 인증서는 공인, 클라이언트는 사설 | 검증하는 쪽이 다르다. 앱은 OS 신뢰 저장소를 쓰고, 서버는 CA 를 파일로 지정한다 |

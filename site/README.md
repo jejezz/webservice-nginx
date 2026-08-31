@@ -36,6 +36,32 @@
 | `sip_domain` | websocket-relay 의 SIP 계정 발급 · Kamailio 의 kamctlrc·alias |
 | `host` | nginx `server_name` · Let's Encrypt 발급 도메인 |
 | `host` | `tools/directory.json` 의 이 단지 항목 (push 할 때 채워집니다) |
+| `tls_mode` | nginx 가 내밀 **서버 인증서의 경로** — 공인이냐 사설이냐 |
+
+### `tls_mode` — 인증서 경로가 여기서 나옵니다
+
+| 값 | 서버 인증서 |
+|---|---|
+| `auto` (기본) | 이 `host` 로 발급받은 공인 인증서가 있으면 `public`, 없으면 `private` |
+| `public` | `/etc/letsencrypt/live/<host>/fullchain.pem` · `privkey.pem` |
+| `private` | `nginx/cert/server/server.crt` · `server.key` (`generate_certs.sh`) |
+
+**이 값이 여기 있는 이유는 `host` 와 같습니다** — 인증서 경로가 그 이름에서
+나오고, 장비마다 다릅니다. 예전에는 `nginx/nginx-stack.conf` 에 절대경로가
+박혀 있었는데 그 파일은 **커밋됩니다.** 클론한 새 서버는 없는 경로를 가리키고
+`nginx -t` 가 실패했습니다. `site/settings.ini` 는 커밋되지 않으므로 그 문제가
+사라집니다.
+
+`nginx-stack.conf` 의 `[tls] cert_file` 을 직접 적으면 **그것이 이깁니다** —
+파생이 맞지 않는 장비를 위한 탈출구입니다.
+
+> **mTLS 는 이 값과 직교합니다.** 내미는 인증서(`ssl_certificate`)와 클라이언트를
+> 검증하는 CA(`ssl_client_certificate`)는 다른 지시자이고, 검증하는 쪽이
+> 다릅니다 — 서버 인증서는 앱이 OS 신뢰 저장소로 검증하므로 공인이어야 하고,
+> 클라이언트 인증서는 서버가 파일로 지정한 CA 로 검증하므로 사설로 충분합니다.
+> `tls_mode = public` 이어도 `client_ca` 는 사설 CA 그대로입니다.
+
+판정 근거와 어떻게 보고되는지는 [nginx/README.md](../nginx/README.md) 에 있습니다.
 
 ### 여기 두지 않는 것
 

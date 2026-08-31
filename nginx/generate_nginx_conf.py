@@ -46,6 +46,47 @@ def site_get(key, fallback=""):
     except OSError:
         pass
     return fallback
+
+
+LETSENCRYPT_DIR = "/etc/letsencrypt"
+
+
+def resolve_tls_mode(host):
+    """site/settings.ini 의 tls_mode 를 실제 경로로 쓸 값 하나로 굳힌다.
+
+    돌려주는 것은 ('public' | 'private', 왜 그렇게 갈렸는지).
+
+    ── auto 를 무엇으로 판정하나 ────────────────────────────────────
+    **`live/` 를 보지 않는다.** 거기는 0700 root 라 sudo 없이는 못 읽고, 이
+    생성기는 `--check` 로 sudo 없이 도는 경로가 있다. 파일 유무로 갈랐다면
+    같은 장비가 sudo 로 돌릴 때와 아닐 때 **다른 판정**을 내게 된다.
+
+    그 옆의 `renewal/<이름>.conf` 는 0755 라 누구나 읽는다. 그리고 그 파일이
+    있다는 것은 곧 **certbot 이 이 이름으로 발급해 갱신까지 걸어 두었다** 는
+    뜻이다 — 우리가 알고 싶은 것이 정확히 그것이다.
+    """
+    mode = (site_get("tls_mode") or "auto").strip().lower()
+
+    if mode == "public":
+        return "public", "site/settings.ini 의 tls_mode = public"
+    if mode == "private":
+        return "private", "site/settings.ini 의 tls_mode = private"
+
+    if mode != "auto":
+        # 모르는 값으로 조용히 public 에 가지 않는다. 안전한 쪽으로 떨어뜨리고
+        # 그 사실을 이유에 적는다.
+        return "private", f"tls_mode 값을 알 수 없어 private 로 둡니다: {mode!r}"
+
+    if not host or host == "localhost":
+        return "private", "auto — 공개 호스트 이름이 없습니다 (site/settings.ini 의 host)"
+
+    renewal = os.path.join(LETSENCRYPT_DIR, "renewal", f"{host}.conf")
+    if os.path.isfile(renewal):
+        return "public", f"auto — certbot 이 {host} 로 발급해 두었습니다 ({renewal})"
+
+    return "private", f"auto — {host} 로 발급받은 공인 인증서가 없습니다 ({renewal} 없음)"
+
+
 import re
 import sys
 
@@ -417,12 +458,38 @@ class Stack:
 
         cert_dir = os.path.abspath(os.path.join(base, t("cert_dir", "./cert")))
 
-        # 비워 두면 사설 CA 로 떨어진다. **그 사실을 반드시 드러내야 한다** —
-        # 서버는 멀쩡히 뜨고 브라우저만 경고를 내므로, 조용히 떨어지면 앱이 안
-        # 붙는다는 신고가 올 때까지 아무도 모른다.
-        self.cert_declared = bool(t("cert_file") or t("key_file"))
-        self.cert = os.path.join(cert_dir, t("cert_file", "server/server.crt"))
-        self.key = os.path.join(cert_dir, t("key_file", "server/server.key"))
+        # ── 서버 인증서를 어디서 가져오나 ───────────────────────────────
+        #
+        # 여기 적으면 그것이 이긴다. 비어 있으면 site/settings.ini 의 tls_mode
+        # 에서 **파생**한다 — 장비마다 다른 절대경로가 커밋되는 파일에 박히지
+        # 않게 하기 위해서다.
+        #
+        # 어느 쪽으로 갈렸는지는 report_certificate() 가 반드시 남긴다.
+        # 조용히 사설로 떨어지는 것이 가장 나쁘다.
+        declared_cert = t("cert_file")
+        declared_key = t("key_file")
+        self.cert_declared = bool(declared_cert or declared_key)
+
+        # 한쪽만 적은 것은 거의 확실히 실수다. 그대로 두면 공인 인증서에 사설
+        # 개인키를 짝지어 nginx 가 "key values mismatch" 로 죽는다 — 그 메시지에서
+        # 원인을 되짚기 어렵다.
+        self.cert_half_declared = bool(declared_cert) != bool(declared_key)
+
+        self.tls_mode = ""          # 선언한 경우 빈 문자열
+        self.tls_mode_reason = ""
+
+        if self.cert_declared:
+            self.cert = os.path.join(cert_dir, declared_cert or "server/server.crt")
+            self.key = os.path.join(cert_dir, declared_key or "server/server.key")
+        else:
+            self.tls_mode, self.tls_mode_reason = resolve_tls_mode(self.server_name)
+            if self.tls_mode == "public":
+                live = os.path.join(LETSENCRYPT_DIR, "live", self.server_name)
+                self.cert = os.path.join(live, "fullchain.pem")
+                self.key = os.path.join(live, "privkey.pem")
+            else:
+                self.cert = os.path.join(cert_dir, "server/server.crt")
+                self.key = os.path.join(cert_dir, "server/server.key")
         client_ca = t("client_ca")
         self.client_ca = os.path.join(cert_dir, client_ca) if client_ca else ""
         self.verify_client = t("verify_client")
@@ -450,23 +517,41 @@ class Stack:
             return "unknown"
 
     def report_certificate(self):
-        """어느 인증서로 갈렸는지 남긴다.
+        """어느 인증서로 갈렸는지, 왜 그렇게 갈렸는지 반드시 남긴다.
+
+        **조용히 사설로 떨어지는 것이 가장 나쁘다.** 서버는 멀쩡히 뜨고
+        브라우저만 경고를 내므로, 앱이 안 붙는다는 신고가 올 때까지 아무도
+        모른다. 그래서 판정과 이유를 항상 한 줄씩 남긴다.
 
         판정 자체는 막지 않는다. 사설 CA 는 LAN 전용 배치에서 옳은 선택이고,
         도메인이 없거나 80 을 열 수 없는 장비가 실재한다. 잘못된 것이 아니라
         **선택된 것**이므로 problem 이 아니라 skip 이다 (docs/check-contract.md).
         """
+        if self.cert_half_declared:
+            judge("problem",
+                  "[tls] cert_file 과 key_file 중 하나만 적혀 있습니다 — "
+                  "둘 다 적거나 둘 다 비우세요. 한쪽만 적으면 공인 인증서에 사설 "
+                  "개인키가 짝지어져 nginx 가 'key values mismatch' 로 거절합니다")
+            print("  !!      [tls] cert_file 과 key_file 중 하나만 적혀 있습니다", file=sys.stderr)
+
         if self.cert_declared:
-            judge("ok", f"서버 인증서: {self.cert}")
+            judge("ok", f"서버 인증서: {self.cert} (nginx-stack.conf 에 직접 적은 값)")
             print(f"  ok      서버 인증서 {self.cert}", file=sys.stderr)
+            print("            (nginx-stack.conf 의 [tls] 에 직접 적힌 값이라 tls_mode 를 보지 않습니다)",
+                  file=sys.stderr)
+            return
+
+        if self.tls_mode == "public":
+            judge("ok", f"서버 인증서: 공인 — {self.cert} · {self.tls_mode_reason}")
+            print(f"  ok      서버 인증서 공인 — {self.cert}", file=sys.stderr)
+            print(f"            {self.tls_mode_reason}", file=sys.stderr)
             return
 
         judge("skip",
-              f"서버 인증서: 사설 CA 입니다 ({self.cert}). "
-              "공인 인증서를 쓰려면 이 장비의 nginx-stack.conf 에서 [tls] cert_file/key_file 을 채우세요")
+              f"서버 인증서: 사설 CA — {self.cert} · {self.tls_mode_reason}. "
+              "공인으로 옮기려면 site/settings.ini 의 tls_mode 와 nginx/public_ca/ 를 보세요")
         print(f"  --      서버 인증서 사설 CA — {self.cert}", file=sys.stderr)
-        print("            공인 인증서를 쓰는 장비라면 [tls] cert_file/key_file 을 채우세요.",
-              file=sys.stderr)
+        print(f"            {self.tls_mode_reason}", file=sys.stderr)
 
     def check_files(self):
         paths = [self.cert, self.key]
