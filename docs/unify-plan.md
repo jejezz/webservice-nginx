@@ -829,6 +829,12 @@ W 의 `nginx/generate_client_certificates.sh` (193줄) 가 **이름을 받아 �
 [public_ca/README.md](../nginx/public_ca/README.md) 의 '⚠️ 유동 IP' 절이 말하는
 상황이 정확히 그 입구입니다.
 
+> **적었습니다** — 같은 문서의 '되돌아가는 길' 절입니다. 쓰면서 하나가 더
+> 나왔습니다: **강등할 때 `tls_mode` 를 `auto` 로 두면 안 됩니다.** 인증서가
+> 만료돼도 `renewal/<host>.conf` 는 그대로 남아 있어 판정이 계속 `public`
+> 입니다. 강등은 명시적으로 `private` 로 못박아야 하고, 되올라갈 때 그것을
+> 되돌리는 것을 잊으면 발급이 성공해도 계속 사설을 내밉니다.
+
 ---
 
 ## 7. 점검 — 합칠 때 조용히 깨지는 것들
@@ -1387,8 +1393,8 @@ N 은 `nginx-conf.js` 에서 `ports[0]` 만 씁니다. **인스턴스 하나가 
       갈린 쪽과 그 이유를 매번 보고한다
 - [x] ~~`setup.js` 에 `tls.decide` 단계를 넣는다~~ → **넣었다** (2단계). 판정은 생성기에 물어보고,
       공인 가능성은 **막지 않고 보여만 준다**
-- [ ] `private` 모드의 CA·단말 번들 배포 절차를 문서로 남긴다
-- [ ] 강등·승격 경로를 문서로 남긴다 (§6.2)
+- [x] ~~`private` 모드의 CA·단말 번들 배포 절차를 문서로 남긴다~~ → [nginx/README.md](../nginx/README.md) 의 '`private` 배치'
+- [x] ~~강등·승격 경로를 문서로 남긴다~~ → [public_ca/README.md](../nginx/public_ca/README.md) 의 '되돌아가는 길' (§6.2)
 
 ### Phase 4 — VM 에서 두 번 완주
 
@@ -1444,6 +1450,7 @@ N 은 `nginx-conf.js` 에서 `ports[0]` 만 씁니다. **인스턴스 하나가 
 | manager 는 N + 조각 셋 | 마법사를 다시 만들 수 없다. `host.js` 와 fail-closed 는 N 에 없다 |
 | `basePath = /manager` | 루트에 붙으면 쿠키 `Path` 를 좁힐 수 없다 |
 | `tls_mode` 를 사이트 값으로 | 인증서 경로는 장비마다 다르다. 지금은 커밋된 파일에 박혀 있다 |
+| 강등은 `tls_mode` 를 못박아야 한다 | 만료돼도 `renewal/` 은 남아 있어 `auto` 는 계속 `public` 으로 판정한다 |
 | `tls.decide` 는 생성기에 물어본다 | 판정을 셸에 한 벌 더 적으면 갈라지고, 갈라진 것을 알아차릴 방법이 없다 |
 | 공인 가능성 점검은 전부 `skip` | LAN 전용 배치에서 사설은 옳은 선택이다. `pending` 이면 그 장비의 마법사가 영영 끝나지 않는다 |
 | `auto` 는 `renewal/` 로 판정 | `live/` 는 0700 이라 sudo 유무에 따라 판정이 달라진다. `renewal/` 은 0755 이고 '발급해 갱신까지 걸어 두었다' 를 그대로 뜻한다 |

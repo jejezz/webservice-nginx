@@ -235,6 +235,93 @@ TTL 이 600초라 고치면 10분 안에 퍼집니다.
 > 바뀔 때 스크립트가 레코드를 갱신할 수 있습니다. 나중에 `ptype.co.kr` 을
 > `_acme-challenge` 위임으로 붙일 때도 같은 것이 필요합니다.
 
+## 되돌아가는 길 — 승격과 강등
+
+`tls_mode` 는 한 번 정하고 끝나는 값이 아닙니다. 도메인이 생기면 올라가고,
+갱신이 계속 실패하면 내려와야 합니다. **강등 경로를 미리 적어 두지 않으면
+만료 당일에 처음 고민하게 됩니다.**
+
+### 승격 — `private` → `public`
+
+도메인이 생겼을 때입니다.
+
+```bash
+# 1. 이름을 정합니다 (site/settings.ini). 마법사 1단계의 폼도 같은 자리입니다.
+#      host = c-<단지id>.rtc.<도메인>
+# 2. A 레코드를 이 서버로 맞춥니다. 그다음 확인:
+./check-dns.sh
+
+# 3. 갈 수 있는 장비인지 봅니다
+../tls-decide.sh
+
+# 4. 발급 — staging 을 건너뛰지 마세요
+./setup_letsencrypt.sh --check
+sudo ./setup_letsencrypt.sh --staging
+sudo ./setup_letsencrypt.sh --prod
+
+# 5. 반영. tls_mode 가 auto 면 경로는 저절로 잡힙니다.
+sudo ../install_nginx_stack.sh --skip-install
+./cert-status.sh
+```
+
+`tls_mode` 를 손댈 필요가 **없습니다.** `auto` 로 두면 4번이 끝나는 순간
+`renewal/<host>.conf` 가 생겨 판정이 `public` 으로 바뀝니다.
+
+> 이미 사설 CA 로 단말을 배포했다면, 그 단말들은 공인 인증서도 **그대로
+> 받아들입니다** — CA 를 심어 둔 것은 신뢰를 *더한* 것이지 다른 것을 막지
+> 않습니다. 앱에 커스텀 `TrustManager` 를 넣어 **사설 CA 만** 믿게 해 두었다면
+> 그 코드를 먼저 걷어내야 합니다.
+
+### 강등 — `public` → `private`
+
+**갱신이 계속 실패해 만료가 임박했을 때**입니다. 대개 원인은 A 레코드가 이 서버를
+가리키지 않는 것(유동 IP)이거나 80 이 막힌 것입니다.
+
+먼저 **강등이 정말 필요한지** 가릅니다. certbot 은 만료 30일 전부터 하루 두 번
+시도하므로 기회가 60번쯤 있습니다 — 하루 이틀 어긋나는 것은 흡수됩니다.
+
+```bash
+./cert-status.sh        # daysLeft 와 kind
+./check-dns.sh          # 이름이 아직 이 서버를 가리키나
+sudo certbot renew --dry-run
+```
+
+`daysLeft < 7` 이고 갱신 시도가 계속 실패하면 강등합니다.
+
+```bash
+# 1. 사설 인증서가 있는지 확인하고, 없으면 만듭니다
+ls ../cert/server/server.crt || ../generate_certs.sh --auto <host>
+
+# 2. site/settings.ini
+#      tls_mode = private          ← auto 로 두면 renewal/ 이 남아 있어 public 으로 갑니다
+# 3. 반영
+sudo ../install_nginx_stack.sh --skip-install
+./cert-status.sh                   # kind = private-ca, status = warn
+```
+
+**`auto` 로 두면 안 됩니다.** 만료된 인증서라도 `renewal/<host>.conf` 는 그대로
+남아 있어 판정이 계속 `public` 입니다. 강등은 **명시적으로** 못박아야 합니다.
+
+#### 무엇을 잃나
+
+| | |
+|---|---|
+| 스토어 앱 | **끊깁니다.** 사설 CA 를 믿게 만들 방법이 사실상 없습니다 |
+| 브라우저 | 경고를 넘기면 들어갑니다 — **관리 화면은 삽니다** |
+| LAN 내부 통화 | 영향 없습니다 |
+| mTLS | 영향 없습니다 — 클라이언트 CA 는 원래 사설이라 그대로입니다 |
+
+강등은 **관리 화면을 살려 두기 위한 것**이지 서비스를 살리는 것이 아닙니다.
+앱이 붙어야 하는 배치라면 강등이 아니라 **원인(A 레코드·80 포트)을 고치는 것**이
+답입니다.
+
+#### 되올라갈 때
+
+원인을 고친 뒤 위의 '승격' 을 그대로 밟되, `tls_mode` 를 `auto` 나 `public` 으로
+**되돌리는 것을 잊지 마세요.** 못박아 둔 `private` 가 남아 있으면 발급이 성공해도
+계속 사설을 내밉니다 — 그리고 그 상태는 `cert-status.sh` 의 `warn` 하나로만
+보입니다.
+
 ## 갱신은 어떻게 도나
 
 certbot 을 설치하면 **자기 systemd 타이머를 같이 깝니다.** 유닛을 쓸 필요가
