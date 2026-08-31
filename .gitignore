@@ -14,10 +14,37 @@ services/manager/server/public/
 #    (generate_certs.sh 는 저장소에 있으므로 새 환경에서는 새로 만들 수 있다)
 nginx/cert/
 
+# nginx/certs/ 는 이 저장소가 쓰지 않는 이름이다. 그래도 남긴다.
+#
+# 합쳐 온 다른 저장소가 이 이름을 썼다. 거기서 온 스크립트나 문서, 손에 익은
+# 경로를 따라 여기에 키가 놓일 수 있는데, 한 글자 차이라 눈으로는 안 걸린다.
+# **쓰지 않는 이름 한 줄이 남는 대가는 없고, 빠뜨렸을 때 새는 것은 CA 개인키다.**
+nginx/certs/
+
 database/secrets/
 services/*/secrets/
 services/*/.env
+
+# 위 규약을 벗어난 자리에 놓인 것까지 잡는 그물.
+#
+# 경로로만 막으면 "그 경로에 두지 않은 것" 이 그대로 새어 나간다 — 디버깅하다
+# 홈에서 복사해 온 키, 예제 디렉토리에 딸려 들어온 키, 새로 만든 서비스가 아직
+# secrets/ 규약을 따르지 않는 경우가 전부 그렇다.
+#
+# .crt 와 .cer 은 넣지 않는다. 공개 인증서라 커밋해야 하는 자리가 실제로 있다
+# (예: 단말에 배포하는 CA). 개인키가 든 형식만 막는다.
+*.pem
+*.key
+*.p12
+*.pfx
+*.srl
 *.pw
+secrets/
+
+# .env 는 어느 깊이에 있든 막고, 예제만 통과시킨다.
+.env
+.env.*
+!.env.example
 services/manager/config.json
 # 관리용 비밀 방 번호. src/ 아래에 만들어진다 (index.ts 의 __dirname 기준).
 # services/websocket-relay/.gitignore 도 같은 것을 잡지만, 여기에도 둬서
