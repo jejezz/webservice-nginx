@@ -75,16 +75,6 @@ print(g("general", "server_name", "localhost"))
 PY
 }
 
-# [tls] 의 값 하나. cert_file 이 무엇을 가리키는지 보는 데 쓴다.
-read_tls() {
-    python3 - "$STACK_CONF" "$1" <<'TLSPY' 2>/dev/null || true
-import configparser, sys
-p = configparser.ConfigParser(interpolation=None)
-p.read(sys.argv[1], encoding="utf-8")
-print((p.get("tls", sys.argv[2], fallback="") or "").strip())
-TLSPY
-}
-
 mapfile -t _conf < <(read_conf)
 SSL_PORT="${_conf[0]:-443}"
 SERVER_NAME="${_conf[1]:-localhost}"
@@ -152,31 +142,59 @@ STATUS="ok"
 # 내밀고 있나"** 다. 둘은 다르다. 설정 파일을 바꿔 놓고 reload 를 잊으면 설정은
 # 새것인데 나가는 것은 옛것이고, 그 상태는 파일만 봐서는 절대 보이지 않는다.
 if [[ $CHECK -eq 1 ]]; then
-    # nginx-stack.conf 가 무엇을 가리키는가 (설정 쪽)
-    CERT_FILE="$(read_tls cert_file)"
+    # ── nginx 설정이 무엇을 가리키는가 (설정 쪽) ────────────────────────
+    #
+    # ⚠️ **[tls] cert_file 을 직접 읽지 않는다. 그 값은 비어 있는 것이 정상이다.**
+    #
+    # 경로는 site/settings.ini 의 tls_mode 에서 파생한다 — 장비마다 다른
+    # 절대경로가 커밋되는 nginx-stack.conf 에 박히지 않게 하려는 것이다.
+    # 예전에는 사람이 그 줄을 손으로 적었고, 이 점검도 그때 만들어졌다.
+    #
+    # 그래서 비어 있는 것을 "cert_file 이 없습니다" 라고 말하고 있었다. 규약이
+    # 하지 말라는 일을 하라고 시키는 셈이고, tls_mode 를 auto 로 둔 장비 —
+    # 즉 기본 상태 — 에서는 이 단계가 영영 통과하지 못한다. 마법사의 이 단계
+    # 설명이 "경로를 손으로 적을 필요는 없습니다" 라고 적고 있는데도 그랬다.
+    #
+    # 판정을 셸에 한 벌 더 적지도 않는다. 실제로 어느 인증서가 nginx 에
+    # 들어가는지는 생성기가 정하므로 그쪽에 묻는다 (tls-decide.sh 와 같다).
+    VERDICT="$(python3 "${NGINX_DIR}/generate_nginx_conf.py" --tls-mode 2>/dev/null || true)"
+    jget() { python3 -c "import json,sys;print(json.load(sys.stdin).get('$1',''))" <<< "$VERDICT" 2>/dev/null || true; }
 
-    case "$CERT_FILE" in
-        /etc/letsencrypt/live/*/fullchain.pem)
-            configured="${CERT_FILE#/etc/letsencrypt/live/}"
-            configured="${configured%%/*}"
-            ok "nginx-stack.conf 의 [tls] 가 ${configured} 의 fullchain.pem 을 가리킵니다"
-            ;;
-        /etc/letsencrypt/live/*/cert.pem)
-            # 브라우저는 멀쩡한데 일부 안드로이드 기기에서만 실패하는, 찾기 아주
-            # 어려운 버그가 여기서 난다.
-            configured="${CERT_FILE#/etc/letsencrypt/live/}"
-            configured="${configured%%/*}"
-            warn "[tls] cert_file 이 cert.pem 입니다 — 중간 인증서가 빠집니다. fullchain.pem 으로 바꾸세요"
-            ;;
-        "")
-            configured=""
-            pend "nginx-stack.conf 에 [tls] cert_file 이 없습니다"
-            ;;
-        *)
-            configured=""
-            pend "nginx-stack.conf 의 [tls] 가 아직 공인 인증서를 가리키지 않습니다 (${CERT_FILE}) — /etc/letsencrypt/live/<도메인>/fullchain.pem 으로 바꾸고 sudo ../install_nginx_stack.sh --skip-install"
-            ;;
-    esac
+    MODE=""; REASON=""; CERT_FILE=""
+    if [[ -n "$VERDICT" ]]; then
+        MODE="$(jget mode)"
+        REASON="$(jget reason)"
+        CERT_FILE="$(jget cert)"
+    fi
+
+    configured=""
+    if [[ -z "$CERT_FILE" ]]; then
+        skip "어느 인증서로 갈렸는지 읽지 못했습니다 — python3 ../generate_nginx_conf.py --tls-mode 를 직접 돌려 보세요"
+    else
+        case "$CERT_FILE" in
+            /etc/letsencrypt/live/*/fullchain.pem)
+                configured="${CERT_FILE#/etc/letsencrypt/live/}"
+                configured="${configured%%/*}"
+                ok "nginx 설정이 ${configured} 의 fullchain.pem 을 가리킵니다 (${REASON})"
+                ;;
+            /etc/letsencrypt/live/*/cert.pem)
+                # 브라우저는 멀쩡한데 일부 안드로이드 기기에서만 실패하는, 찾기 아주
+                # 어려운 버그가 여기서 난다. 파생 경로는 늘 fullchain.pem 이므로,
+                # 여기에 걸리는 것은 [tls] 에 직접 적은 경우뿐이다.
+                configured="${CERT_FILE#/etc/letsencrypt/live/}"
+                configured="${configured%%/*}"
+                warn "[tls] cert_file 이 cert.pem 입니다 — 중간 인증서가 빠집니다. 그 두 줄을 비우면 fullchain.pem 으로 저절로 잡힙니다"
+                ;;
+            *)
+                # 사설 CA 로 갈렸거나, [tls] 에 공인이 아닌 경로를 직접 적었다.
+                if [[ "$MODE" == "declared" ]]; then
+                    pend "[tls] 에 직접 적은 경로가 공인 인증서가 아닙니다 (${CERT_FILE}) — cert_file·key_file 두 줄을 비우면 tls_mode 에서 저절로 잡힙니다"
+                else
+                    pend "아직 공인 인증서로 갈리지 않았습니다 — ${REASON}"
+                fi
+                ;;
+        esac
+    fi
 
     # 지금 실제로 나가고 있는 것 (실물 쪽)
     case "$KIND" in

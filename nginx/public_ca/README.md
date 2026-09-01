@@ -126,22 +126,31 @@ sudo ./setup_letsencrypt.sh --prod
 
 ### 4. nginx 에 물리기
 
-`../nginx-stack.conf` 의 `[tls]` 를 바꿉니다.
-
-```ini
-cert_file = /etc/letsencrypt/live/<도메인>/fullchain.pem
-key_file  = /etc/letsencrypt/live/<도메인>/privkey.pem
-```
+**경로를 손으로 적지 않습니다.** `site/settings.ini` 의 `tls_mode` 가 `auto`(기본)
+면, 발급이 끝나는 순간 생성기가 `/etc/letsencrypt/live/<host>/fullchain.pem` 으로
+저절로 갈아탑니다 — 장비마다 다른 절대경로가 커밋되는 `nginx-stack.conf` 에 박히지
+않게 하려는 것입니다 ([../README.md](../README.md) 의 '서버 인증서 경로는 `tls_mode`
+에서 나옵니다').
 
 > **`cert.pem` 이 아니라 `fullchain.pem` 입니다.** 중간 인증서가 빠지면 브라우저는
 > 멀쩡한데 일부 안드로이드 기기에서만 실패하는, 찾기 아주 어려운 버그가 납니다.
+> 그것도 생성기가 정하므로 손이 갈 자리가 없습니다.
 
-경로가 절대경로여도 됩니다 — 생성기가 `os.path.join` 으로 조립하는데 오른쪽이
-절대경로면 `cert_dir` 을 무시합니다. **생성기는 고칠 필요가 없습니다.**
+어느 쪽으로 갈렸는지 먼저 봅니다.
+
+```bash
+python3 ../generate_nginx_conf.py --tls-mode
+```
+
+남은 것은 반영뿐입니다.
 
 ```bash
 sudo ../install_nginx_stack.sh --skip-install
 ```
+
+파생이 맞지 않는 장비라면 `[tls] cert_file` · `key_file` 에 직접 적을 수 있고 그것이
+이깁니다. 다만 **둘 중 하나만 적지 마세요** — 공인 인증서에 사설 개인키가 짝지어져
+nginx 가 `key values mismatch` 로 거절합니다.
 
 `nginx -t` 로 먼저 검사하고 실패하면 reload 하지 않습니다.
 

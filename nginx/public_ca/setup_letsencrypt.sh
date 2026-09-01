@@ -181,8 +181,11 @@ check_config() {
     info "[1/4] 설정"
     if [[ $HAVE_DOMAIN -eq 0 ]]; then
         # 이미 물려 있는 것이 있으면 무엇을 적어야 하는지 같이 알려 준다.
+        # [tls] cert_file 이 아니라 **생성기의 판정**을 본다. 그 줄은 비어 있는
+        # 것이 정상이고, 경로는 site/settings.ini 의 tls_mode 에서 파생한다.
         local current
-        current="$(read_tls cert_file)"
+        current="$(python3 "${NGINX_DIR}/generate_nginx_conf.py" --tls-mode 2>/dev/null \
+                   | python3 -c "import json,sys;print(json.load(sys.stdin).get('cert',''))" 2>/dev/null || true)"
         if [[ "$current" == /etc/letsencrypt/live/* ]]; then
             current="${current#/etc/letsencrypt/live/}"
             p_pend "발급받을 도메인이 정해지지 않았습니다 — settings.ini 의 domain (지금 nginx 설정은 ${current%%/*} 를 가리킵니다)"
@@ -454,15 +457,19 @@ fi
 chmod 644 "$APPLIED_FILE"
 
 cat <<EOF
-발급됐습니다. nginx 에 물리려면 nginx-stack.conf 의 [tls] 를 바꾸세요:
+발급됐습니다. **경로를 손으로 적을 필요는 없습니다.**
 
-  cert_file = ${live}/fullchain.pem
-  key_file  = ${live}/privkey.pem
+site/settings.ini 의 tls_mode 가 auto(기본)면, 생성기가 방금 발급된 것을 보고
+${live}/fullchain.pem 으로 저절로 갈아탑니다. 장비마다 다른 절대경로를 커밋되는
+nginx-stack.conf 에 적지 않으려고 그렇게 되어 있습니다. cert.pem 이 아니라
+fullchain.pem 인 것도 생성기가 정합니다 — 중간 인증서가 빠지면 일부 안드로이드
+기기에서만 실패하는, 찾기 어려운 버그가 납니다.
 
-  ※ cert.pem 이 아니라 fullchain.pem 입니다. 중간 인증서가 빠지면
-     일부 안드로이드 기기에서만 실패하는, 찾기 어려운 버그가 납니다.
+어느 쪽으로 갈렸는지 먼저 봅니다:
 
-그리고 반영합니다:
+  python3 ../generate_nginx_conf.py --tls-mode
+
+남은 것은 반영뿐입니다:
 
   sudo ../install_nginx_stack.sh --skip-install
 
