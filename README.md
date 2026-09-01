@@ -295,6 +295,7 @@ pm2 등록(`pm2 delete` 후 재등록)만 손보면 됩니다.
 - 프로세스를 추가·수정하려면 → 그 서비스의 `pm2-conf/app.ini` ([스키마](docs/pm2-conf.md))
 - 서버 수준 설정(listen 포트·TLS·mTLS·인증서) → [nginx/README.md](nginx/README.md)
 - 기동·부팅 복원·문제 해결 → [pm2/README.md](pm2/README.md)
+- **잘못 넣었을 때 어디까지 되돌아가는가** → [docs/rollback.md](docs/rollback.md)
 - `/health` 응답 형식 → [docs/health-contract.md](docs/health-contract.md)
 - **모바일·브라우저 클라이언트를 만들려면** → [docs/client-guide.md](docs/client-guide.md)
 - 대시보드와 로그인 → [services/manager/README.md](services/manager/README.md)
