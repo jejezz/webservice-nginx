@@ -726,7 +726,7 @@ IoT 도 착신 푸시도 전부 여기를 지나고, 깨울 단말을 찾는 표
 | `.jcfg` 넷 · `janus.service` | `services/janus/install.sh` |
 | `path-routing.conf` | `nginx/generate_nginx_conf.py` (선언대로 만든 것과 견줌) |
 | 선언 ↔ 실행 중 ↔ `dump.pm2` | `pm2/ecosystem.config.js` (파일이 아니라 프로세스) |
-| `99-project.cnf` | `database/check-database.sh` (`database.ini` 로 만든 것과 견줌) |
+| `99-project.cnf` | `database/check-database.sh` (`database.ini` + `settings.ini` 로 만든 것과 견줌) |
 
 세 가지를 지켰습니다.
 

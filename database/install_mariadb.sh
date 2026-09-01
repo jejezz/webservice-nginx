@@ -84,8 +84,10 @@ install_mariadb() {
     echo "=== 설치 완료: $(server_version) ==="
     echo ""
     echo "다음 단계:"
-    echo "  1. database.ini 를 환경에 맞게 수정"
-    echo "  2. sudo ./setup_mariadb.sh     # 서버 설정 + DB/사용자 생성"
+    echo "  1. 이 장비의 값을 넣기 — 구축 마법사의 DB 단계 폼, 또는 database/settings.ini"
+    echo "     (bind_address · port · innodb_buffer_pool_size. 안 넣으면 기본값)"
+    echo "  2. 나머지 선언은 database.ini 에 있습니다 (스키마·계정)"
+    echo "  3. sudo ./setup_mariadb.sh     # 서버 설정 + DB/사용자 생성"
     echo ""
     echo "root 계정은 unix_socket 인증을 사용합니다. 'sudo mariadb' 로 접속하세요."
 }

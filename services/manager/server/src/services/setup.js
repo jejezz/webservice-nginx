@@ -132,6 +132,9 @@ const STEPS = [
       '인증만 실패합니다 — child_init 에서 붙기 때문에, 화면에는 아무 오류 없이 ' +
       '등록만 안 되는 모양이 됩니다.',
     requires: [],
+    // 장비마다 다른 [server] 값 — 열 주소·포트·버퍼 풀 (settings-schema.json).
+    // 나머지 선언(스키마·계정)은 database.ini 가 갖고 그것은 커밋한다.
+    settings: { dir: 'database' },
     command: { cwd: 'database', run: 'sudo ./setup_mariadb.sh', sudo: true },
     check: { cwd: 'database', file: './check-database.sh', args: ['--check', '--json'] },
   },

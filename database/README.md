@@ -3,11 +3,18 @@
 `database.ini` 하나로 MariaDB 서버 설정과 데이터베이스·사용자를 관리하는 도구입니다.
 `nginx.ini` + `setup_nginx.sh`와 같은 방식입니다.
 
+**장비마다 다른 세 값만 예외입니다** — `bind_address` · `port` ·
+`innodb_buffer_pool_size` 는 `settings.ini` 가 갖습니다 (아래 '[server]').
+
 ```
 database/
 ├── install_mariadb.sh     # 설치 / 업데이트 / 상태 / 제거
-├── setup_mariadb.sh       # database.ini 적용 (서버 설정 + DB/사용자)
-├── database.ini           # 설정 (사용자 편집)
+├── setup_mariadb.sh       # 선언 적용 (서버 설정 + DB/사용자)
+├── database.ini           # 어느 장비에서나 같은 선언 (커밋한다)
+├── settings-schema.json   # 장비마다 다른 [server] 값의 정의 (커밋한다)
+├── settings.ini           # 그 값 — 마법사 폼이 쓴다 (커밋하지 않는다)
+├── .applied-settings      # 실제로 반영한 값 (setup_mariadb.sh 가 쓴다)
+├── lib_settings.sh        # 위 셋을 읽는 공용 구현
 ├── mariadb.cnf.template   # 서버 설정 템플릿
 ├── secrets/               # 생성된 비밀번호 (600, 커밋 금지)
 ├── backups/               # 덤프와 이전 설정 파일
@@ -72,7 +79,8 @@ root 계정은 `unix_socket` 인증을 쓰므로 비밀번호 없이 `sudo maria
 
 ## 설정
 
-`database.ini`를 수정한 뒤 적용합니다.
+`database.ini`(어느 장비에서나 같은 것)와 `settings.ini`(이 장비의 값)를 수정한 뒤
+적용합니다.
 
 ```bash
 sudo ./setup_mariadb.sh --dry-run   # 무엇이 바뀌는지만 확인
@@ -87,7 +95,8 @@ sudo ./setup_mariadb.sh             # 실제 적용
 
 수행 순서:
 
-1. `[server]` 항목으로 `/etc/mysql/mariadb.conf.d/99-project.cnf` 생성
+1. `[server]` 항목과 `settings.ini` 의 장비 값으로
+   `/etc/mysql/mariadb.conf.d/99-project.cnf` 생성
 2. `[security]` 항목 적용
 3. `[database:*]` 생성 (이미 있으면 건너뜀)
 4. `[user:*]` 생성/갱신 및 권한 부여
@@ -99,14 +108,38 @@ sudo ./setup_mariadb.sh             # 실제 적용
 
 ```ini
 [server]
-bind_address = 127.0.0.1
-port = 3306
 character_set_server = utf8mb4
 collation_server = utf8mb4_unicode_ci
 max_connections = 151
-innodb_buffer_pool_size = 256M
 slow_query_log = 1
 long_query_time = 2
+```
+
+#### 장비마다 다른 값은 여기 없습니다
+
+`bind_address` · `port` · `innodb_buffer_pool_size` 는 이 파일에 적지 않습니다.
+**`database.ini` 는 커밋되는 파일**이기 때문입니다 — 장비에서 고치면 다음
+`git pull` 과 부딪히고, 커밋해 버리면 한 장비의 결정이 다른 단지로 딸려 갑니다.
+
+그래서 이 셋만 저장소의 설정 규약을 따릅니다
+([docs/settings-contract.md](../docs/settings-contract.md)). `site` · `kamailio` ·
+`janus` · `public_ca` 가 쓰는 것과 같은 방식입니다.
+
+| 파일 | 누가 쓰는가 | 무엇을 뜻하는가 |
+|---|---|---|
+| `settings-schema.json` | 사람 (커밋) | 무엇을 받을 것인가 · 기본값 |
+| `settings.ini` | 구축 마법사의 폼 · 편집기 | 이 장비가 정한 값 |
+| `.applied-settings` | `setup_mariadb.sh` (root) | 실제로 반영된 값 |
+
+값을 넣는 곳은 **구축 마법사의 DB 단계 폼**입니다. 폼을 쓰지 않는다면
+`settings.ini` 를 손으로 적어도 됩니다 (`키 = 값`, 절은 쓰지 않습니다).
+아무 데도 적지 않으면 `settings-schema.json` 의 기본값을 씁니다.
+
+```ini
+; database/settings.ini
+bind_address = 127.0.0.1
+port = 3306
+innodb_buffer_pool_size = 256M
 ```
 
 `bind_address`는 기본이 `127.0.0.1`(로컬 전용)입니다.
@@ -120,6 +153,12 @@ long_query_time = 2
 
 `innodb_buffer_pool_size`는 DB 전용 서버라면 물리 메모리의 50~70%가 일반적인 기준입니다.
 이 서버는 다른 서비스와 함께 쓰므로 기본값을 256M으로 낮게 잡았습니다.
+
+> **예전 장비에서 올라온 경우** — `database.ini` 의 `[server]` 에 이 셋이 아직
+> 적혀 있으면 그 값이 그대로 쓰이고, `sudo ./setup_mariadb.sh` 가 **한 번
+> `settings.ini` 로 옮겨 담습니다.** 열어 두기로 했던 3306 이 이사 중에 조용히
+> 닫히지 않게 하려는 것입니다. 옮긴 뒤에는 `database.ini` 에서 그 줄을 지우세요 —
+> 두 곳에 남아 있으면 점검이 알려 줍니다.
 
 ### [security]
 

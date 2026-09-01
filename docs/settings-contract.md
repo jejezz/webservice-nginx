@@ -32,6 +32,11 @@ services/<서비스>/
 `settings-schema.json` 이 규약대로면 됩니다. `nginx/public_ca/` 가 그렇습니다 —
 공인 인증서의 도메인은 서비스가 아니라 서버 전체의 값입니다.
 
+> **파일 하나를 통째로 옮길 필요는 없습니다.** `database/` 는 선언의 대부분을
+> 커밋되는 `database.ini` 에 그대로 두고, 그중 **장비마다 다른 세 값만**
+> `settings.ini` 로 뺐습니다. 가르는 기준은 "이 값이 다른 장비로 딸려 가도
+> 되는가" 입니다 — 스키마 선언은 딸려 가야 하고, `bind_address` 는 안 됩니다.
+
 ## 세 파일이 각각 다른 것을 뜻합니다
 
 | 파일 | 누가 쓰는가 | 무엇을 뜻하는가 |
@@ -172,6 +177,7 @@ chmod 644 "$APPLIED_FILE"
 | `services/janus` | `public_ip` · `rtp_port_range` | `install.sh` |
 | `services/kamailio` | `sip_domain` · `sip_listen_addr` · `sip_push_url` | `install.sh` |
 | `nginx/public_ca` | `domain` · `email` | `setup_letsencrypt.sh` · `cert-status.sh` · `renew-status.sh` |
+| `database` | `bind_address` · `port` · `innodb_buffer_pool_size` | `setup_mariadb.sh` · `check-database.sh` |
 
 `websocket-relay` 는 아직 없습니다 — 자기 `.env` 로 값을 받고 있고, 13단계
 어디에서도 파라미터를 묻지 않기 때문입니다. 필요해지면 같은 모양으로 붙입니다.

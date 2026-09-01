@@ -20,6 +20,9 @@ BACKUP_DIR="${SCRIPT_DIR}/backups"
 
 # shellcheck source=lib_mariadb.sh
 source "${SCRIPT_DIR}/lib_mariadb.sh"
+# 장비마다 다른 [server] 값 (settings.ini). 점검 스크립트도 같은 것을 읽는다.
+# shellcheck source=lib_settings.sh
+source "${SCRIPT_DIR}/lib_settings.sh"
 
 DRY_RUN=false
 ASSUME_YES=false
@@ -187,14 +190,57 @@ INI_DATA="$(parse_ini "$INI_FILE")"
 # ---------- 1. 서버 설정 파일 생성 ----------
 step "서버 설정"
 
-SERVER_OPTIONS=""
-while IFS='|' read -r section key value; do
-    [[ "$section" == "server" ]] || continue
-    # ini의 밑줄 표기를 그대로 쓴다. mysqld는 '_'와 '-'를 모두 인식한다.
-    SERVER_OPTIONS+="${key} = ${value}"$'\n'
-done <<< "$INI_DATA"
+# 장비마다 다른 값은 database.ini 가 아니라 settings.ini 가 갖는다.
+#
+# 옛 database.ini 에 그 키가 남아 있으면 **여기서 한 번 옮겨 담는다.** 조용히
+# 기본값으로 돌아가게 두면, 열어 두기로 정했던 3306 이 이 실행에서 닫히거나
+# 그 반대가 된다 — 사람이 아무것도 바꾸지 않았는데 그렇게 된다.
+if $DRY_RUN; then
+    [[ -n "$(db_settings_leftovers "$INI_FILE")" ]] && \
+        info "dry-run: database.ini 에 남은 [server] 값을 settings.ini 로 옮기지 않았습니다."
+else
+    while IFS= read -r moved; do
+        [[ -z "$moved" ]] && continue
+        info "database.ini 의 ${moved%%=*} 를 settings.ini 로 옮겼습니다 (값 ${moved#*=} 그대로)"
+        info "  → database.ini 의 [server] 에서 그 줄을 지워도 됩니다."
+    done < <(db_settings_seed_from_ini "$INI_FILE")
+fi
 
-if [[ -z "$SERVER_OPTIONS" ]]; then
+leftovers="$(db_settings_leftovers "$INI_FILE")"
+if [[ -n "$leftovers" ]]; then
+    while IFS= read -r pair; do
+        [[ -z "$pair" ]] && continue
+        key="${pair%%=*}"
+        [[ "$(db_settings_get "$key")" == "${pair#*=}" ]] && continue
+        echo "  ! database.ini 의 ${key} 는 쓰이지 않습니다 — 폼 값이 이깁니다:"
+        echo "      database.ini = ${pair#*=}   settings.ini = $(db_settings_get "$key")"
+        echo "    두 곳에 있으면 언젠가 어긋납니다. database.ini 에서 그 줄을 지우세요."
+    done <<< "$leftovers"
+fi
+
+# 형식 검사. 화면이 이미 같은 규칙으로 보지만, 파일을 손으로 고친 경우가 있다.
+if ! settings_problems="$(db_settings_validate)"; then
+    echo "Error: database/settings.ini 의 값이 형식에 맞지 않습니다. 적용하지 않았습니다."
+    while IFS= read -r problem; do
+        [[ -n "$problem" ]] && echo "    ${problem}"
+    done <<< "$settings_problems"
+    echo "  항목의 뜻은 ${SCRIPT_DIR}/settings-schema.json 에 있습니다."
+    exit 1
+fi
+
+if [[ -f "$DB_SETTINGS_FILE" ]]; then
+    info "장비 값: ${DB_SETTINGS_FILE}"
+else
+    info "장비 값: settings-schema.json 의 기본값 (settings.ini 가 아직 없습니다)"
+fi
+for key in "${DB_SETTINGS_KEYS[@]}"; do
+    info "  ${key} = $(db_settings_get "$key")"
+done
+
+# 설치하는 쪽과 견주는 쪽(check-database.sh)이 **같은 함수**로 만든다.
+SERVER_OPTIONS="$(db_server_options "$INI_FILE")"$'\n'
+
+if [[ -z "${SERVER_OPTIONS//[[:space:]]/}" ]]; then
     echo "Error: [server] 섹션이 비어 있습니다."
     exit 1
 fi
@@ -236,11 +282,14 @@ if $CNF_CHANGED && ! $DRY_RUN; then
             | sed -n '/^Variables (--variable-name=value)/,$p' | grep -oE '^[a-z0-9][a-z0-9-]+'
     } | tr '-' '_' | sort -u > "$known"
 
+    # database.ini 만이 아니라 **실제로 쓸 목록**을 본다. settings.ini 를 손으로
+    # 고쳐 엉뚱한 키를 넣었어도 여기서 걸린다.
     unknown=()
-    while IFS='|' read -r section key value; do
-        [[ "$section" == "server" ]] || continue
+    while IFS= read -r line; do
+        [[ -z "$line" ]] && continue
+        key="${line%% =*}"
         grep -qx "$(tr '-' '_' <<< "$key")" "$known" || unknown+=("$key")
-    done <<< "$INI_DATA"
+    done <<< "$SERVER_OPTIONS"
     rm -f "$known"
 
     if [[ ${#unknown[@]} -gt 0 ]]; then
@@ -502,10 +551,16 @@ if $DRY_RUN; then
     finish
 fi
 
+# 적용 기록(.applied-settings)은 **실제로 반영됐을 때만** 남긴다. 화면은 이것과
+# settings.ini 를 견주어 '저장은 했는데 아직 반영 안 됨' 을 알린다. 파일만 쓰고
+# 재시작하지 않은 상태에서 기록을 남기면, 도는 서버는 옛 값인데 화면은 초록이
+# 된다 — 이 파일 맨 위에 적어 둔 그 함정이다.
 if ! $CNF_CHANGED; then
     info "서버 설정 변경이 없어 재시작하지 않습니다."
+    db_settings_write_applied
 elif $NO_RESTART; then
     info "--no-restart: 설정 파일만 적용했습니다. 반영하려면 'sudo systemctl restart mariadb'."
+    info "  (재시작 전이므로 적용 기록은 남기지 않았습니다 — 점검이 '반영 대기' 로 알려 줍니다)"
 else
     echo "서버 설정이 바뀌었습니다. 반영하려면 MariaDB를 재시작해야 하며,"
     echo "재시작 동안 연결된 애플리케이션의 DB 접속이 끊깁니다."
@@ -516,6 +571,8 @@ else
     if confirm "지금 재시작할까요?"; then
         if systemctl restart mariadb && sleep 2 && systemctl is-active --quiet mariadb; then
             info "재시작 완료 — 서비스 정상"
+            db_settings_write_applied
+            info "적용 기록: ${DB_APPLIED_FILE}"
         else
             # 새 설정 때문에 서버가 죽었다. 이전 상태로 되돌리고 다시 살린다.
             echo ""
@@ -530,7 +587,8 @@ else
             fi
 
             if systemctl restart mariadb && sleep 2 && systemctl is-active --quiet mariadb; then
-                echo "이전 설정으로 복구했습니다. database.ini 의 값을 확인하세요."
+                echo "이전 설정으로 복구했습니다. 지금 도는 것은 옛 값입니다."
+                echo "  값을 확인하세요: database/settings.ini (장비 값) · database.ini (나머지)"
             else
                 echo "복구에도 실패했습니다. 직접 확인이 필요합니다:"
                 echo "  journalctl -u mariadb -n 50 --no-pager"

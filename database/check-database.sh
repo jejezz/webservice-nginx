@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #
-# database.ini 가 선언한 것이 실제 MariaDB 에 반영됐는지 **확인만** 한다.
+# 선언한 것이 실제 MariaDB 에 반영됐는지 **확인만** 한다.
+# (선언은 두 파일이다 — database.ini 와, 장비마다 다른 값을 받는 settings.ini)
 #
 #   ./check-database.sh          사람이 보는 출력
 #   ./check-database.sh --json   기계가 읽는 판정 (docs/check-contract.md)
@@ -25,6 +26,9 @@ OUTPUT_CNF="/etc/mysql/mariadb.conf.d/99-project.cnf"
 source "${PROJECT_ROOT}/lib/check-report.sh"
 # 설치본이 저장소와 같은지 보는 공용 비교.
 source "${PROJECT_ROOT}/lib/config-diff.sh"
+# 장비마다 다른 [server] 값. 적용 스크립트와 **같은 함수**로 읽고 만든다.
+# shellcheck source=lib_settings.sh
+source "${SCRIPT_DIR}/lib_settings.sh"
 
 check_init "database.schema"
 check_args "$@"
@@ -94,9 +98,9 @@ fi
 # setup_mariadb.sh 가 만드는 방식 그대로 여기서도 만들어 맞춰 본다.
 render_expected_cnf() {
     local options
-    options="$(sed -n '/^\[server\]/,/^\[/p' "$INI_FILE" \
-        | grep -E '^[A-Za-z0-9_]+[[:space:]]*=' \
-        | sed -E 's/^([A-Za-z0-9_]+)[[:space:]]*=[[:space:]]*(.*)$/\1 = \2/')"
+    # 적용 스크립트가 쓰는 그 함수다. 예전에는 여기서 [server] 를 따로 훑었고,
+    # 한쪽만 고치면 이 비교가 영원히 "다르다" 고 말한다.
+    options="$(db_server_options "$INI_FILE")"
     [[ -n "$options" ]] || return 1
 
     awk -v opts="$options" -v ts="(비교에서 뺀다)" -v src="$INI_FILE" \
@@ -120,12 +124,54 @@ else
     if render_expected_cnf > "$EXPECTED_CNF"; then
         # '생성 시각' 은 매번 달라지므로 양쪽에서 뺀다 (setup_mariadb.sh 도 그렇게 비교한다).
         report_config_diff "99-project.cnf" "sudo database/setup_mariadb.sh" \
-            -s "database.ini 로 만든 것과" \
+            -s "선언(database.ini · settings.ini)으로 만든 것과" \
             -x '^# 생성 시각' \
             "$OUTPUT_CNF" "$EXPECTED_CNF" || true
     else
-        skip "database.ini 의 [server] 를 읽지 못해 내용 비교를 건너뜁니다"
+        skip "[server] 선언을 읽지 못해 내용 비교를 건너뜁니다"
     fi
+fi
+
+# ---------- 장비마다 다른 [server] 값 ----------
+#
+# 이 셋만 database.ini 가 아니라 settings.ini 에 있다 (docs/settings-contract.md).
+# 여기서 보는 것은 값이 형식에 맞는가, 그리고 **저장한 것이 반영됐는가** 다.
+
+info ""
+info "장비 값 (database/settings.ini)"
+
+if settings_problems="$(db_settings_validate)"; then
+    for key in "${DB_SETTINGS_KEYS[@]}"; do
+        value="$(db_settings_get "$key")"
+        if [[ -n "$(db_settings_saved "$key")" ]]; then
+            ok "${key} = ${value}"
+        elif [[ -n "$(db_settings_leftover "$key")" ]]; then
+            # 이 규약을 붙이기 전의 장비다. 값은 그대로 쓰이고 있으니 고장은
+            # 아니지만, 두 곳에 있는 채로 두면 언젠가 어긋난다.
+            pend "${key} = ${value} — 아직 database.ini 에 있습니다 → sudo database/setup_mariadb.sh 가 settings.ini 로 옮깁니다"
+        else
+            ok "${key} = ${value} (기본값)"
+        fi
+    done
+else
+    while IFS= read -r problem; do
+        [[ -n "$problem" ]] && warn "${problem} — database/settings.ini"
+    done <<< "$settings_problems"
+fi
+
+# 저장한 값과 마지막으로 반영한 값이 다른가 = 사람이 다시 적용해야 하는가.
+#
+# 기록이 아예 없으면 비교할 대상이 없다. 그때는 "다르다" 가 아니라 "모른다"
+# 이므로 대기로 보고하지 않는다 (lib/settings.js 와 같은 규칙이다).
+if [[ -r "$DB_APPLIED_FILE" ]]; then
+    for key in "${DB_SETTINGS_KEYS[@]}"; do
+        saved_value="$(db_settings_get "$key")"
+        applied_value="$(db_settings_applied "$key")"
+        [[ "$saved_value" == "$applied_value" ]] && continue
+        pend "${key} 가 아직 반영되지 않았습니다: 반영본 '${applied_value}' → 저장한 값 '${saved_value}' (sudo database/setup_mariadb.sh)"
+    done
+else
+    info "  (반영 기록이 아직 없습니다 — 한 번 적용하면 이후로는 어긋남을 알 수 있습니다)"
 fi
 
 # ---------- 사용자 ----------
