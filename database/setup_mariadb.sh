@@ -25,6 +25,35 @@ DRY_RUN=false
 ASSUME_YES=false
 NO_RESTART=false
 
+# 스키마를 적용하지 못한 DB. 끝에 모아서 알린다.
+SKIPPED_SCHEMAS=()
+
+# 마무리 — 건너뛴 것이 있으면 알리고 0 이 아닌 값으로 끝낸다.
+#
+# ── 왜 중간에 멈추지 않는가 ──────────────────────────────────────────
+# 예전에는 스키마 디렉토리가 없으면 그 자리에서 exit 1 했다. 그런데 서버 설정
+# 파일은 이미 그 앞에서 쓰이고(99-project.cnf), 재시작은 이 뒤에 있다. 그래서
+# **파일은 새 값인데 도는 서버는 옛 값인** 상태가 만들어진다. 그다음 점검은
+# 파일과 database.ini 만 견주므로 "차이 없음" 이라고 초록으로 답한다.
+#
+# 실제로 그랬다. bind_address 를 0.0.0.0 에서 127.0.0.1 로 닫으려던 실행이
+# 다른 서비스의 스키마 하나 때문에 무산됐고, 3306 은 열린 채 점검은 통과했다.
+# DB 하나의 스키마가 없는 것과 서버를 닫는 것은 서로 기댈 이유가 없다.
+finish() {
+    if [[ ${#SKIPPED_SCHEMAS[@]} -gt 0 ]]; then
+        echo ""
+        echo "== 건너뛴 스키마 =="
+        local s
+        for s in "${SKIPPED_SCHEMAS[@]}"; do echo "  ${s}"; done
+        echo ""
+        echo "  DB 선언은 그대로 두고 스키마만 적용하지 않았습니다."
+        echo "  그 서비스의 소스가 다른 저장소에 있다면 정상입니다 (예: ws-bridge)."
+        echo "  아니라면 database.ini 의 schema_dir 경로를 확인하세요."
+        exit 1
+    fi
+    exit 0
+}
+
 for arg in "$@"; do
     case "$arg" in
         --dry-run)    DRY_RUN=true ;;
@@ -303,28 +332,42 @@ else
         schema_file="$(get_value "$section" schema_file "")"
 
         schema_files=()
+        schema_missing=()
+
         if [[ -n "$schema_dir" ]]; then
             schema_dir="$(resolve_rel "$schema_dir")"
             if [[ ! -d "$schema_dir" ]]; then
-                echo "Error: 스키마 디렉토리가 없습니다: ${schema_dir}"
-                exit 1
-            fi
-            while IFS= read -r f; do
-                [[ -n "$f" ]] && schema_files+=("$f")
-            done < <(find "$schema_dir" -maxdepth 1 -name '*.sql' -type f | sort)
+                # 서비스가 이 저장소에 없을 수 있다 — ws-bridge 처럼 자기 저장소에
+                # 사는 것들이다. 그것은 잘못이 아니라 사실이므로 여기서 멈추지 않고
+                # 이 DB 의 스키마만 건너뛴다. 오타로 경로가 틀린 경우도 같은 자리에
+                # 걸리는데, 그쪽은 finish() 의 보고와 0 이 아닌 종료로 드러난다.
+                schema_missing+=("스키마 디렉토리 없음: ${schema_dir}")
+            else
+                while IFS= read -r f; do
+                    [[ -n "$f" ]] && schema_files+=("$f")
+                done < <(find "$schema_dir" -maxdepth 1 -name '*.sql' -type f | sort)
 
-            if [[ ${#schema_files[@]} -eq 0 ]]; then
-                info "  스키마 파일 없음: ${schema_dir}"
+                if [[ ${#schema_files[@]} -eq 0 ]]; then
+                    info "  스키마 파일 없음: ${schema_dir}"
+                fi
             fi
         fi
 
         if [[ -n "$schema_file" ]]; then
             schema_file="$(resolve_rel "$schema_file")"
             if [[ ! -f "$schema_file" ]]; then
-                echo "Error: 스키마 파일이 없습니다: ${schema_file}"
-                exit 1
+                schema_missing+=("스키마 파일 없음: ${schema_file}")
+            else
+                schema_files+=("$schema_file")
             fi
-            schema_files+=("$schema_file")
+        fi
+
+        if [[ ${#schema_missing[@]} -gt 0 ]]; then
+            for m in "${schema_missing[@]}"; do
+                info "  건너뜀 — ${m}"
+                SKIPPED_SCHEMAS+=("${db}: ${m}")
+            done
+            continue
         fi
 
         for f in ${schema_files[@]+"${schema_files[@]}"}; do
@@ -456,7 +499,7 @@ step "적용"
 
 if $DRY_RUN; then
     echo "dry-run 이므로 아무것도 변경하지 않았습니다."
-    exit 0
+    finish
 fi
 
 if ! $CNF_CHANGED; then
@@ -503,3 +546,5 @@ echo ""
 echo "=== 완료 ==="
 [[ -d "$SECRETS_DIR" ]] && echo "생성된 비밀번호는 ${SECRETS_DIR}/ 에 있습니다. (권한 600)"
 echo "상태 확인: ./install_mariadb.sh status"
+
+finish
