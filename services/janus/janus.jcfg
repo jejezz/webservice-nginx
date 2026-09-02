@@ -1,0 +1,185 @@
+# Janus 코어 설정 — OWNED-BY-WEBSERVICES
+#
+# derived-from-sample: c2f25b0139c3bec3   (janus.jcfg.sample, Janus 1.4.1)
+#
+# 이 파일은 services/janus/janus.jcfg 의 사본입니다. **직접 고치지 마세요** —
+# install.sh --apply 가 덮어씁니다. 고칠 곳은 저장소 쪽 원본입니다.
+#
+# .jcfg(libconfig)에는 include 가 없어 오버라이드를 둘 수 없습니다. 그래서 이
+# 저장소가 파일을 소유합니다 (docs/plan.md 의 ② 절). 대신 배포본 원본은
+# 옆의 janus.jcfg.sample 로 그대로 남아 있고, install.sh 는 그 파일의 해시가
+# 위 derived-from-sample 과 달라지면 (= Janus 를 올려 업스트림 기본값이 바뀌면)
+# 점검에서 알려 줍니다.
+#
+# 배포본에서 손댄 것만 적었습니다. 적지 않은 항목은 Janus 기본값입니다.
+
+general: {
+	configs_folder = "/opt/janus/etc/janus"
+	plugins_folder = "/opt/janus/lib/janus/plugins"
+	transports_folder = "/opt/janus/lib/janus/transports"
+	events_folder = "/opt/janus/lib/janus/events"
+	# 이 빌드에는 loggers 가 없습니다(/opt/janus/lib/janus 에 events·plugins·
+	# transports 만 있습니다). 기동할 때마다 저널에
+	#     [WARN] Couldn't access logger plugins folder...
+	# 이 한 줄이 남는데, **정상입니다.** 경로를 지워도 Janus 가 같은 기본값을
+	# 쓰므로 경고는 그대로입니다. 로그는 stdout → journald 로 갑니다.
+	loggers_folder = "/opt/janus/lib/janus/loggers"
+
+	# /janus-api/info 에 그대로 나옵니다. 장비를 구분하려고 둡니다.
+	server_name = "webservices-janus"
+
+	debug_level = 6
+	# 로그는 journald 가 받습니다. 색상 이스케이프와 자체 타임스탬프는
+	# 저널에서 잡음이 되므로 끕니다 (journalctl 이 시각을 붙여 줍니다).
+	debug_colors = false
+	debug_timestamps = false
+
+	# Admin API 비밀번호. install.sh 가 secrets/admin-secret 의 값으로 채웁니다.
+	#
+	# 배포본 기본값은 "janusoverlord" 이고 공개돼 있습니다. Admin API 는 세션
+	# 조회부터 강제 종료까지 되므로 그대로 두면 안 됩니다 (docs/plan.md ④).
+	# Admin API 자체는 janus.transport.http.jcfg 에서 127.0.0.1 에만 엽니다.
+	admin_secret = "__ADMIN_SECRET__"
+
+	# 시그널링 API 를 부를 때 함께 보내야 하는 값. install.sh 가 채웁니다.
+	#
+	# /janus-api/ 는 nginx 를 통해 외부에서 닿습니다. 이 값이 없으면 아무나
+	# 세션을 만들고 Kamailio 에 REGISTER 를 시도할 수 있습니다. 브라우저까지
+	# 내려가는 값이라 완전한 방어는 아니고, 진짜 관문은 Kamailio 의 digest
+	# 인증입니다 (docs/plan.md ⑤).
+	#
+	# GET <base_path>/info 는 이 값 없이도 응답합니다 — 그래서 헬스로 쓸 수
+	# 있습니다 (nginx-conf/service.ini 의 health_path).
+	api_secret = "__API_SECRET__"
+
+	# 단말마다 다른 토큰으로 붙게 합니다. websocket-relay 가 Admin API 로
+	# 발급하고, 앱은 등록 응답으로 받습니다 (../../docs/identity.md 옆의
+	# client-migration.md, libs/janusToken.ts).
+	#
+	# 위의 api_secret 은 **단지에 하나**라 모든 폰에 같은 값이 들어갑니다.
+	# 한 대에서 새면 이 게이트웨이 전체가 열리고, 그 한 대만 막을 방법이
+	# 없습니다. 토큰은 단말마다 다르므로 그 한 대만 거둘 수 있습니다.
+	#
+	# ⚠️ 둘이 함께 켜져 있으면 Janus 는 **둘 중 하나만 맞아도** 통과시킵니다.
+	#    전환 기간에는 그 성질이 필요합니다 — 아직 토큰을 모르는 앱이 계속
+	#    붙어야 하니까요. **전환이 끝나면 api_secret 줄을 지우세요.**
+	#    남겨 두면 토큰을 발급한 의미가 없습니다.
+	token_auth = true
+
+	# 녹화·패킷캡처가 파일을 만들지 못하게 막을 폴더. 배포본 목록 그대로입니다.
+	# 주석 처리하면 **아무 폴더도 보호되지 않으므로** 지우지 마세요.
+	protected_folders = [
+		"/bin",
+		"/boot",
+		"/dev",
+		"/etc",
+		"/initrd",
+		"/lib",
+		"/lib32",
+		"/lib64",
+		"/proc",
+		"/sbin",
+		"/sys",
+		"/usr",
+		"/var",
+		"/opt/janus/bin",
+		"/opt/janus/etc",
+		"/opt/janus/include",
+		"/opt/janus/lib",
+		"/opt/janus/lib32",
+		"/opt/janus/lib64",
+		"/opt/janus/sbin"
+	]
+}
+
+certificates: {
+	# DTLS 인증서를 적지 않으면 Janus 가 자체 서명 인증서를 만들어 씁니다.
+	# WebRTC 의 DTLS 는 SDP 의 fingerprint 로 검증하므로 이것이 정상입니다 —
+	# nginx 의 서버 인증서(nginx/cert/)와는 아무 관계가 없습니다.
+}
+
+media: {
+	# 브라우저 ↔ Janus 구간(WebRTC)의 RTP/ICE 포트.
+	#
+	# ⚠️ SIP 쪽 포트와 **다른 범위**입니다. janus.plugin.sip.jcfg 의
+	#    rtp_port_range(30000-30200)와 겹치면 안 됩니다 (docs/plan.md ⑦).
+	#
+	# 배포본은 이 항목이 주석 처리돼 있어 제한이 없습니다. 그대로 두면 외부
+	# 브라우저를 받을 때(9단계) 공유기에 포워딩 규칙을 만들 수 없습니다.
+	# 통화 1건에 음성·영상 두 스트림이고 rtcp-mux 를 쓰면 스트림당 1포트라,
+	# 200 포트면 동시 50통 남짓입니다.
+	rtp_port_range = "20000-20200"
+}
+
+nat: {
+	# ICE 후보를 이 인터페이스에서만 모읍니다.
+	#
+	# 이 장비에는 통화와 무관한 인터페이스가 셋 더 있습니다.
+	#     virbr0          192.168.122.1   libvirt
+	#     docker0         172.17.0.1      docker
+	#     br-2a3c1cce67cc 172.18.0.1      docker compose
+	# 그대로 두면 저 주소까지 후보로 실어 보내고, 상대는 닿지 않는 곳에
+	# 연결을 시도하다 타임아웃을 기다립니다. **통화 성립이 눈에 띄게 느려지는**
+	# 형태로 나타나며 원인을 짚기 어렵습니다.
+	#
+	# ice_ignore_list 로 빼는 대신 enforce 로 쓸 것을 못박습니다. 나중에
+	# 인터페이스가 늘어나도 안전합니다.
+	ice_enforce_list = "enp2s0"
+
+	# 외부(인터넷) 브라우저를 받기 위한 것입니다 — 계획서 9단계.
+	#
+	# 이 서버는 NAT 안(192.168.0.252)이라, 이것이 없으면 사설 주소를 ICE 후보로
+	# 광고해 외부 단말과 **무음**이 됩니다.
+	#
+	# ⚠️ 자리표시자를 그대로 두면 안 됩니다. install.sh --apply 가 처리합니다.
+	#      public-ip 파일이 있으면  → 그 값으로 치환한다
+	#      없으면                   → 이 줄과 아래 keep_private_host 를 **지운다**
+	#    (LAN 전용 운영에서는 없는 편이 맞습니다)
+	nat_1_1_mapping = "__PUBLIC_IP__"
+
+	# ⚠️ 이것이 없으면 **LAN 통화가 깨집니다.**
+	#
+	# nat_1_1_mapping 은 host 후보의 사설 주소를 공인 주소로 **바꿔치기** 합니다.
+	# 외부 단말에게는 그래야 맞지만, 같은 LAN 안의 브라우저도 공인 주소를 받게 되어
+	# 공유기를 되짚어 나갔다 들어와야 합니다(헤어핀 NAT). 가정용 공유기는 그것을
+	# 못 하는 경우가 많고, 그러면 5~7단계에서 되던 LAN 통화가 무음이 됩니다.
+	#
+	# true 로 두면 사설 후보를 **지우지 않고 둘 다** 광고합니다. LAN 단말은 사설
+	# 후보로 곧장 붙고 외부 단말은 공인 후보로 붙습니다. 잃는 것은 후보 하나가
+	# 늘어나는 것뿐입니다.
+	keep_private_host = true
+
+	# STUN 은 쓰지 않습니다. nat_1_1_mapping 으로 공인 주소를 직접 알려 주는
+	# 편이 확실하고, LAN 시험 구간에서는 아예 필요가 없습니다.
+	#stun_server = "..."
+}
+
+plugins: {
+	# 쓰지 않는 플러그인은 올리지 않습니다. 올려 두면 "어느 쪽이 진짜 경로인지"
+	# 가 흐려지고, 쓰지 않는 API 가 밖으로 열려 있게 됩니다.
+	#
+	# 올리는 것 셋:
+	#   sip        이 게이트웨이의 본업 (인터폰 ↔ 모바일)
+	#   echotest   "브라우저 ↔ Janus 미디어 경로만" 을 SIP 없이 떼어 확인할 때
+	#   videoroom  WebRTC 클라이언트의 다자 통화 (2026-08-22 추가)
+	#
+	# ⚠️ videoroom 의 설정 파일(janus.plugin.videoroom.jcfg)은 **저장소가
+	#    소유하지 않습니다.** 방은 API 로만 만들기로 했으므로 배포본 파일을
+	#    그대로 둡니다. 나중에 고정 방을 설정에 박아 두게 되면 그때 OWNED_CFGS
+	#    에 넣으세요 — 그러지 않으면 그 파일은 "설치본이 저장소와 같은가" 점검
+	#    밖에 있게 되고, 손으로 만든 방이 어디에도 기록되지 않습니다.
+	disable = "libjanus_audiobridge.so,libjanus_nosip.so,libjanus_recordplay.so,libjanus_streaming.so,libjanus_textroom.so,libjanus_videocall.so"
+}
+
+transports: {
+	# WebSocket 트랜스포트를 여기서 끄지 않는 이유:
+	# janus.transport.websockets.jcfg 에서 ws = false 로 끕니다. 모듈 자체를
+	# disable 해 두면, 나중에 그 파일에서 ws = true 로 바꿔도 조용히 동작하지
+	# 않는 함정이 됩니다. 끄는 자리는 한 곳으로 둡니다.
+	#
+	# pfunix(유닉스 소켓)는 배포본 기본값이 이미 enabled = false 라 둘 필요가
+	# 없습니다.
+}
+
+events: {
+}

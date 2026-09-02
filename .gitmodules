@@ -1,0 +1,11 @@
+# git 은 **저장소 루트의 .gitmodules 만** 읽는다.
+#
+# 이 선언은 원래 services/kamailio/.gitmodules 에 있었는데, 가져오면서 중첩되자
+# git 이 무시해 "no submodule mapping found" 가 났다. 경로에 접두사를 붙여
+# 여기로 올린다.
+#
+# 아직 내려받지 않았다. 필요하면:
+#   git submodule update --init services/kamailio/example/android/android-pjsip-phone
+[submodule "services/kamailio/example/android/android-pjsip-phone"]
+	path = services/kamailio/example/android/android-pjsip-phone
+	url = https://github.com/jejezz/android-pjsip-phone.git

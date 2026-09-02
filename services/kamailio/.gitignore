@@ -1,0 +1,30 @@
+# Node 의존성 — server/ 와 web/ 두 곳에 있다
+node_modules/
+server/node_modules/
+web/node_modules/
+
+# 프런트 빌드 산출물. setup-dashboard.sh --build 가 만든다
+web/dist/
+
+# 편집기·OS
+.idea/
+*.iml
+.DS_Store
+Thumbs.db
+*.swp
+
+# 로그
+*.log
+logs/
+
+# 배포 설정. 비밀은 아니지만 장비마다 다르다 (SIP 도메인·수신 주소·푸시 주소).
+# 구축 마법사의 폼과 사람의 편집기가 쓰고, install.sh --apply 가 읽는다.
+# .applied-settings 는 그 결과 기록이다. 항목 정의(settings-schema.json)는 커밋한다.
+settings.ini
+.applied-settings
+
+# 이 서비스는 비밀을 담지 않는다.
+# DB 비밀번호는 database/secrets/ 에 있고 install.sh 가 읽어 /etc/kamailio/ 로만 넣는다.
+# 혹시라도 여기 생기면 커밋되지 않게 막아 둔다.
+secrets/
+*.pw

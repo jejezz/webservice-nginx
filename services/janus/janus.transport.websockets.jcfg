@@ -1,0 +1,55 @@
+# Janus WebSocket 트랜스포트 — OWNED-BY-WEBSERVICES
+#
+# derived-from-sample: ec2900b570ec72bd   (janus.transport.websockets.jcfg.sample, Janus 1.4.1)
+#
+# 이 파일은 services/janus/janus.transport.websockets.jcfg 의 사본입니다.
+# **직접 고치지 마세요** — install.sh --apply 가 덮어씁니다.
+#
+# --- 무엇을 위해 켰는가 ---
+#
+# WebRTC 클라이언트가 붙을 WebSocket 시그널링 주소가 필요해서 켰습니다.
+# 밖에서는 nginx 가 TLS 를 끊고 /janus-ws 로 넘깁니다.
+#
+#     브라우저/앱 ──wss://<서버>/janus-ws──▶ nginx ──ws://127.0.0.1:8188──▶ Janus
+#
+# --- 왜 예전에는 꺼 두었는가, 무엇이 바뀌었는가 ---
+#
+# 서비스의 헬스 URL 은 nginx-conf 의 host + ports[0] + health_path 로 만들어집니다.
+# 예전에는 라우트가 곧 그 포트라, WS 로 보내면 헬스도 WS 포트로 갔습니다.
+# **Janus 의 WS 트랜스포트는 평범한 HTTP GET 에 응답하지 않아** manager 대시보드에
+# 영원히 "중단" 으로 떴습니다. 그래서 REST 하나로 고정했습니다 (docs/plan.md ①).
+#
+# 이제 nginx-conf 의 [route:*] 가 자기 포트를 가질 수 있습니다 (`port = 8188`).
+# 헬스는 [service] 의 ports[0](8088, REST)로 그대로 가고, WS 는 그 옆문으로만
+# 나갑니다. plan.md 가 "정공법" 이라 적어 둔 health_port 확장과 같은 것을,
+# 헬스가 아니라 라우트 쪽에 붙여 푼 것입니다.
+#
+#   REST (8088)  /janus-api   janus.js · **헬스**(/janus-api/info)
+#   WS   (8188)  /janus-ws    WebRTC 클라이언트 시그널링
+#
+# --- 경계 ---
+#
+# ws_ip 로 **루프백에만** 답니다. TLS 는 nginx 가 끊으므로 wss 는 켜지 않습니다
+# (Janus 에 인증서를 두 벌 두지 않기 위해서입니다). Admin API 의 WS 도 그대로
+# 꺼 둡니다 — 관리 API 는 127.0.0.1:7088 하나면 충분합니다.
+
+general: {
+	ws = true
+	ws_port = 8188
+	# nginx 만 이 포트에 붙습니다. 밖에서 직접 닿는 길은 두지 않습니다.
+	ws_ip = "127.0.0.1"
+
+	# TLS 는 nginx 가 끊습니다.
+	wss = false
+}
+
+admin: {
+	admin_ws = false
+	admin_wss = false
+}
+
+cors: {
+}
+
+certificates: {
+}

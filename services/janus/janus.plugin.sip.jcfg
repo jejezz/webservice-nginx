@@ -1,0 +1,55 @@
+# Janus SIP 플러그인 — OWNED-BY-WEBSERVICES
+#
+# derived-from-sample: 6d0f34e2a6e28bc4   (janus.plugin.sip.jcfg.sample, Janus 1.4.1)
+#
+# 이 파일은 services/janus/janus.plugin.sip.jcfg 의 사본입니다.
+# **직접 고치지 마세요** — install.sh --apply 가 덮어씁니다.
+#
+# SIP 계정과 레지스트라는 이 플러그인이 소유하지 않습니다. 브라우저가 register
+# 요청에 username/secret/proxy 를 담아 보내고, 인증은 Kamailio 의 digest 가
+# 합니다. 계정은 services/kamailio/accounts.md 를 보세요.
+
+general: {
+	# ⚠️ **여기가 조용히 실패하는 자리입니다.**
+	#
+	# Janus 와 Kamailio 가 같은 장비에 있어 127.0.0.1:5060 으로 붙고 싶어집니다.
+	# 그러면 시그널링은 되는데 **소리가 안 납니다.** Janus 가 SIP 쪽 SDP 의
+	# c= 에 127.0.0.1 을 실어 보내고, 인터폰(192.168.0.x)은 그 주소로 RTP 를
+	# 보낼 수 없기 때문입니다.
+	#
+	# 그래서 LAN 주소로 못박습니다. Kamailio 도 192.168.0.252:5060 을 듣고
+	# 있으므로(udp/tcp 둘 다) 브라우저가 보내는 register 의 proxy 도
+	# "sip:192.168.0.252:5060" 이어야 합니다. (docs/plan.md ③)
+	#
+	# local_media_ip 와 sdp_ip 는 적지 않으면 이 값을 따라갑니다.
+	local_ip = "192.168.0.252"
+
+	# 등록을 유지하려고 OPTIONS 를 이 간격(초)으로 보냅니다. 배포본 기본값.
+	keepalive_interval = 120
+
+	# 이 서버는 NAT 안에 있지만, SIP 상대(Kamailio·인터폰)는 **같은 LAN** 에
+	# 있습니다. behind_nat 을 켜면 STUN 으로 알아낸 공인 주소를 Contact 에
+	# 실어 LAN 통신이 깨집니다. 외부 브라우저는 WebRTC 쪽 다리의 문제이고
+	# janus.jcfg 의 nat_1_1_mapping 이 담당합니다 — 이쪽이 아닙니다.
+	behind_nat = false
+
+	# 등록 만료. **짧게 둔다 (10분).**
+	#
+	# Janus 는 모바일을 대신해 Kamailio 에 등록한다. 앱이 사라져도 이 값이 남아
+	# 있는 동안 Kamailio 는 그 내선이 살아 있다고 보고 INVITE 를 그대로 보내며,
+	# **착신 푸시를 부르지 않는다.** 그러면 죽은 세션으로 흘러가 조용히 실패한다.
+	# 3600(1시간)은 그 창이 지나치게 넓었다.
+	register_ttl = 600
+
+	# SIP ↔ Janus 구간(평문 RTP)의 포트.
+	#
+	# ⚠️ WebRTC 쪽과 **다른 범위**입니다. janus.jcfg 의
+	#    media.rtp_port_range(20000-20200)와 겹치면 안 됩니다 (docs/plan.md ⑦).
+	#
+	# 배포본 기본값 20000-40000 은 WebRTC 쪽과 겹치고 너무 넓습니다.
+	# 이쪽은 LAN 안에서만 쓰이므로 공유기 포워딩이 필요 없습니다.
+	rtp_port_range = "30000-30200"
+
+	# SIP 트랜잭션 타임아웃(ms). 배포본 기본값.
+	sip_timer_t1x64 = 32000
+}

@@ -1,0 +1,331 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>5단계 — 브라우저 ↔ 브라우저 시험 통화</title>
+<body><pre id="out"></pre></body>
+<script src="/adapter.js"></script>
+<script src="/janus.js"></script>
+<script>
+/*
+ * 계획서 5단계(브라우저 ↔ 브라우저 시험 통화)를 사람 없이 한 번에 돌린다.
+ * 진입점은 ../verify-call.sh 다. 이 파일을 직접 열어서는 동작하지 않는다
+ * (설정을 serve.js 의 /config 에서 받는다).
+ *
+ *   A(9999999901) 등록 → B(9999999903) 등록 → A 가 B 에게 발신 → B 자동 수락
+ *   → 미디어가 실제로 흐르는지 getStats 로 확인 → 끊기 → 세션 정리 확인
+ *
+ * 로직은 web/src/pages/TestCall.jsx 를 그대로 따른다. 특히 두 가지:
+ *   - handleRemoteJsep 은 jsep.type === 'answer' 일 때만 (offer 는 createAnswer 로)
+ *   - hangup 이벤트에서 handle.hangup() 으로 PeerConnection 을 반드시 정리
+ */
+const T0 = Date.now();
+const out = document.getElementById('out');
+const events = [];
+
+function say(who, level, msg) {
+  const t = Date.now() - T0;
+  events.push({ t, who, level, msg });
+  out.textContent += `[${t}ms] ${who} ${level}: ${msg}\n`;
+  fetch('/log', { method: 'POST', body: JSON.stringify({ t, who, level, msg }) }).catch(() => {});
+}
+
+function finish(verdict) {
+  verdict.events = events;
+  fetch('/result', { method: 'POST', body: JSON.stringify(verdict, null, 2) }).catch(() => {});
+}
+
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** 한 쪽(브라우저 한 대에 해당). 세션 + sip 플러그인 핸들 하나씩. */
+class Peer {
+  constructor(name, account, cfg) {
+    this.name = name;
+    this.account = account;
+    this.cfg = cfg;
+    this.state = { reg: 'idle', call: 'idle' };
+    this.remoteTracks = [];
+    this.waiters = {};
+    this.hangupCode = null;
+    this.pluginError = null;
+  }
+
+  /** 특정 이벤트가 올 때까지 기다린다. */
+  once(event, timeoutMs) {
+    return new Promise((resolve, reject) => {
+      this.waiters[event] = resolve;
+      setTimeout(() => reject(new Error(`${this.name}: '${event}' 를 ${timeoutMs}ms 안에 못 받음 (reg=${this.state.reg} call=${this.state.call})`)), timeoutMs);
+    });
+  }
+
+  fire(event, payload) {
+    const w = this.waiters[event];
+    if (w) { delete this.waiters[event]; w(payload); }
+  }
+
+  connect() {
+    return new Promise((resolve, reject) => {
+      // 끝 슬래시가 있으면 janus.js 가 // 를 만든다 (TestCall.jsx 주석).
+      const server = new URL('/janus-api', window.location.href).toString().replace(/\/+$/, '');
+      this.janus = new Janus({
+        server,
+        apisecret: this.cfg.apiSecret || undefined,
+        success: () => {
+          say(this.name, 'ok', `세션 생성됨 (id ${this.janus.getSessionId()})`);
+          this.janus.attach({
+            plugin: 'janus.plugin.sip',
+            success: (h) => {
+              this.handle = h;
+              say(this.name, 'ok', `janus.plugin.sip 붙음 (handle ${h.getId()})`);
+              resolve();
+            },
+            error: (e) => reject(new Error(`${this.name} attach 실패: ${e}`)),
+            onmessage: (msg, jsep) => this.onMessage(msg, jsep),
+            onremotetrack: (track, mid, on) => {
+              if (!on) return;
+              this.remoteTracks.push(track.kind);
+              say(this.name, 'ok', `상대 ${track.kind} 트랙 도착 (mid ${mid})`);
+            },
+            iceState: (s) => say(this.name, 'info', `ICE ${s}`),
+            webrtcState: (on) => say(this.name, 'info', `WebRTC PeerConnection ${on ? 'up' : 'down'}`),
+            oncleanup: () => say(this.name, 'info', 'oncleanup — WebRTC 자원 정리됨'),
+          });
+        },
+        error: (e) => reject(new Error(`${this.name} 세션 실패: ${e}`)),
+      });
+    });
+  }
+
+  onMessage(msg, jsep) {
+    if (msg?.error) {
+      this.pluginError = `${msg.error_code ?? ''} ${msg.error}`.trim();
+      say(this.name, 'error', `plugin error: ${this.pluginError}`);
+      this.fire('plugin_error', this.pluginError);
+      return;
+    }
+
+    // answer 일 때만. offer 는 incomingcall 과 함께 오고 createAnswer 로 가야 한다.
+    if (jsep && this.handle) {
+      say(this.name, 'info', `SDP ${jsep.type} 수신`);
+      if (jsep.type === 'answer') this.handle.handleRemoteJsep({ jsep });
+    }
+
+    const r = msg?.result;
+    if (!r?.event) return;
+    const ev = r.event;
+    say(this.name, 'info', `event: ${ev}${r.code ? ` (code ${r.code})` : ''}`);
+
+    switch (ev) {
+      case 'registered':
+        this.state.reg = 'registered';
+        this.fire('registered', r);
+        break;
+      case 'registration_failed':
+        this.state.reg = 'failed';
+        say(this.name, 'error', `등록 실패: ${r.code} ${r.reason}`);
+        this.fire('plugin_error', `${r.code} ${r.reason}`);
+        break;
+      case 'calling':
+        this.state.call = 'calling';
+        break;
+      case 'ringing':
+        this.state.call = 'ringing';
+        break;
+      case 'incomingcall':
+        this.state.call = 'incoming';
+        this.incomingJsep = jsep;
+        say(this.name, 'ok', `착신: ${r.username}`);
+        this.fire('incomingcall', r);
+        break;
+      case 'accepted':
+        this.state.call = 'incall';
+        this.fire('accepted', r);
+        break;
+      case 'hangup':
+        this.hangupCode = `${r.code ?? ''} ${r.reason ?? ''}`.trim();
+        this.state.call = 'idle';
+        say(this.name, 'info', `hangup: ${this.hangupCode}`);
+        // 이것이 1차 시도에서 빠져 재발신이 막혔던 자리다.
+        this.handle?.hangup();
+        this.fire('hangup', r);
+        break;
+    }
+  }
+
+  register() {
+    say(this.name, 'info', `register: sip:${this.account.user}@${this.cfg.sipDomain} → ${this.cfg.sipProxy}`);
+    this.handle.send({
+      message: {
+        request: 'register',
+        username: `sip:${this.account.user}@${this.cfg.sipDomain}`,
+        authuser: this.account.user,
+        display_name: this.account.user,
+        secret: this.account.secret,
+        proxy: this.cfg.sipProxy,
+        /*
+         * ⚠️ proxy 만으로는 부족하다.
+         *
+         * proxy 는 REGISTER 를 보낼 곳이고, INVITE 의 목적지는 요청 URI 의
+         * 도메인으로 정해진다. 그런데 pluto.org 는 **실재하는 공인 도메인**이라
+         * (13.248.169.48 등) sofia-sip 이 DNS 로 풀어 바깥으로 INVITE 를 보낸다.
+         * Kamailio 는 그것을 아예 보지 못한다 — 로그도 응답도 없다.
+         *
+         * outbound_proxy 가 NUTAG_PROXY 로 들어가 모든 요청을 여기로 보낸다
+         * (janus_sip.c:4290).
+         */
+        outbound_proxy: this.cfg.sipProxy,
+      },
+    });
+  }
+
+  call(peerUser) {
+    const uri = `sip:${peerUser}@${this.cfg.sipDomain}`;
+    say(this.name, 'info', `발신: ${uri}`);
+    return new Promise((resolve, reject) => {
+      this.handle.createOffer({
+        tracks: [{ type: 'audio', capture: true, recv: true }],
+        success: (jsep) => { this.handle.send({ message: { request: 'call', uri }, jsep }); resolve(); },
+        error: (e) => reject(new Error(`${this.name} createOffer 실패: ${e.message || e}`)),
+      });
+    });
+  }
+
+  accept() {
+    say(this.name, 'info', '수락');
+    return new Promise((resolve, reject) => {
+      this.handle.createAnswer({
+        jsep: this.incomingJsep,
+        tracks: [{ type: 'audio', capture: true, recv: true }],
+        success: (jsep) => { this.handle.send({ message: { request: 'accept' }, jsep }); resolve(); },
+        error: (e) => reject(new Error(`${this.name} createAnswer 실패: ${e.message || e}`)),
+      });
+    });
+  }
+
+  hangup() {
+    say(this.name, 'info', '끊기');
+    this.handle?.send({ message: { request: 'hangup' } });
+    this.handle?.hangup();
+  }
+
+  /** 미디어가 실제로 흘렀는지. 협상만 되고 소리가 안 나는 경우를 잡는다. */
+  async stats() {
+    const pc = this.handle?.webrtcStuff?.pc;
+    if (!pc) return { error: 'PeerConnection 이 없음' };
+    const s = { ice: pc.iceConnectionState, dtls: pc.connectionState };
+    const report = await pc.getStats();
+    /*
+     * 코덱은 **종류별로** 담는다. 예전에는 codec 항목을 만나는 대로 s.codec 에
+     * 덮어썼더니, 영상이 함께 있는 통화에서 음성 코덱이 video/H264 로 가려져
+     * "PCMU 로 붙었는가" 판정이 거짓으로 실패했다.
+     */
+    const codecById = {};
+    report.forEach((r) => { if (r.type === 'codec' && r.mimeType) codecById[r.id] = r.mimeType; });
+    report.forEach((r) => {
+      if (r.type === 'inbound-rtp' && r.kind === 'audio') {
+        s.inPackets = r.packetsReceived; s.inBytes = r.bytesReceived; s.inLost = r.packetsLost;
+        if (r.codecId && codecById[r.codecId]) s.codec = codecById[r.codecId];
+      }
+      if (r.type === 'outbound-rtp' && r.kind === 'audio') {
+        s.outPackets = r.packetsSent; s.outBytes = r.bytesSent;
+      }
+      if (r.type === 'inbound-rtp' && r.kind === 'video') {
+        s.videoInPackets = r.packetsReceived; s.videoInBytes = r.bytesReceived;
+        if (r.codecId && codecById[r.codecId]) s.videoCodec = codecById[r.codecId];
+      }
+      if (r.type === 'outbound-rtp' && r.kind === 'video') {
+        s.videoOutPackets = r.packetsSent; s.videoOutBytes = r.bytesSent;
+      }
+      if (r.type === 'candidate-pair' && r.state === 'succeeded' && r.nominated) {
+        s.pair = `${r.localCandidateId}→${r.remoteCandidateId}`;
+      }
+    });
+    // 음성 코덱을 못 찾았을 때만 아무거나 채운다 (진단에 도움이 되도록).
+    if (!s.codec) s.codec = Object.values(codecById)[0] || null;
+    return s;
+  }
+}
+
+async function main() {
+  const cfg = await (await fetch('/config')).json();
+  const verdict = { ok: false, steps: {}, note: '' };
+
+  try {
+    await new Promise((r) => Janus.init({ debug: false, callback: r }));
+    say('--', 'info', `janus.js 준비됨. proxy=${cfg.sipProxy} domain=${cfg.sipDomain}`);
+
+    const A = new Peer(`A(${cfg.accounts.a.user})`, cfg.accounts.a, cfg);
+    const B = new Peer(`B(${cfg.accounts.b.user})`, cfg.accounts.b, cfg);
+
+    // ── 5-1 등록 ───────────────────────────────────────────────────────
+    await Promise.all([A.connect(), B.connect()]);
+    A.register(); B.register();
+    await Promise.all([
+      Promise.race([A.once('registered', 15000), A.once('plugin_error', 15000).then((e) => { throw new Error('A 등록 실패: ' + e); })]),
+      Promise.race([B.once('registered', 15000), B.once('plugin_error', 15000).then((e) => { throw new Error('B 등록 실패: ' + e); })]),
+    ]);
+    verdict.steps['5-1 등록'] = 'ok — A·B 둘 다 registered';
+    say('--', 'ok', '5-1 통과: 둘 다 등록됨');
+
+    // ── 5-2 발신·수락 ──────────────────────────────────────────────────
+    const incoming = B.once('incomingcall', 20000);
+    const accepted = A.once('accepted', 25000);
+    await A.call(cfg.accounts.b.user);
+    await incoming;
+    await B.accept();
+    await accepted;
+    verdict.steps['5-2 발신·수락'] = 'ok — A 가 accepted 를 받음';
+    say('--', 'ok', '5-2 통과: 통화 연결됨');
+
+    // ── 5-3 미디어 ─────────────────────────────────────────────────────
+    say('--', 'info', '미디어 6초 관찰…');
+    await wait(6000);
+    const sa = await A.stats(); const sb = await B.stats();
+    verdict.statsA = sa; verdict.statsB = sb;
+    say('A(9999999901)', 'info', JSON.stringify(sa));
+    say('B(9999999903)', 'info', JSON.stringify(sb));
+
+    const flowed = (sa.inPackets > 0) && (sb.inPackets > 0);
+    verdict.steps['5-3 미디어'] = flowed
+      ? `ok — 양방향 수신 (A ${sa.inPackets}pkt / B ${sb.inPackets}pkt), codec ${sa.codec ?? '?'}`
+      : `실패 — A ${sa.inPackets ?? 0}pkt / B ${sb.inPackets ?? 0}pkt. 협상은 됐는데 RTP 가 안 옴`;
+    say('--', flowed ? 'ok' : 'error', verdict.steps['5-3 미디어']);
+
+    // ── 5-4 끊기·재발신 ────────────────────────────────────────────────
+    const hungA = A.once('hangup', 10000);
+    const hungB = B.once('hangup', 10000);
+    A.hangup();
+    await Promise.all([hungA, hungB]);
+    await wait(1500);
+    verdict.steps['5-4 끊기'] = `ok — 양쪽 hangup (A: ${A.hangupCode})`;
+    say('--', 'ok', '5-4 통과: 양쪽 끊김');
+
+    // 1차 시도에서 막혔던 자리 — 끊은 뒤 다시 걸리는가.
+    say('--', 'info', '재발신 시험 (1차 시도에서 막혔던 자리)');
+    const incoming2 = B.once('incomingcall', 20000);
+    const accepted2 = A.once('accepted', 25000);
+    await A.call(cfg.accounts.b.user);
+    await incoming2;
+    await B.accept();
+    await accepted2;
+    await wait(3000);
+    const sa2 = await A.stats();
+    verdict.statsA2 = sa2;
+    verdict.steps['5-4 재발신'] = `ok — 두 번째 통화도 연결, A 수신 ${sa2.inPackets ?? 0}pkt`;
+    say('--', 'ok', verdict.steps['5-4 재발신']);
+
+    const hungA2 = A.once('hangup', 10000);
+    A.hangup();
+    await hungA2;
+    await wait(1000);
+
+    verdict.ok = flowed;
+    verdict.note = flowed ? '5단계 통과' : '연결은 되나 미디어가 흐르지 않음';
+  } catch (e) {
+    verdict.error = String(e.message || e);
+    say('--', 'error', `중단: ${verdict.error}`);
+  }
+
+  finish(verdict);
+}
+
+main();
+</script>

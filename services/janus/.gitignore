@@ -1,0 +1,38 @@
+# Node 의존성 — server/ 와 web/ 두 곳에 있다
+node_modules/
+server/node_modules/
+web/node_modules/
+
+# 프런트 빌드 산출물. setup-dashboard.sh --build 가 만든다
+web/dist/
+
+# janus.js 는 커밋하지 않는다.
+# setup-dashboard.sh --build 가 /opt/janus/share/janus/javascript/janus.js 에서
+# 복사한다. 커밋해 두면 Janus 를 올릴 때 라이브러리와 서버 버전이 어긋날 수
+# 있고, 그 어긋남은 조용히 실패한다. (docs/plan.md 의 "janus.js 는 커밋하지 않는다")
+web/public/janus.js
+
+# 배포 설정 (9단계). 비밀은 아니지만 장비마다 다르고 회선 따라 바뀐다.
+# 대시보드의 '설정' 화면과 check-public-ip.sh --write 가 쓰고,
+# install.sh --apply 가 읽는다. .applied-settings 는 그 결과 기록이다.
+settings.ini
+.applied-settings
+
+# Janus Admin API 비밀번호. install.sh 가 만들고 janus.jcfg 로 넣는다.
+secrets/
+*.pw
+
+# 편집기·OS
+.idea/
+*.iml
+.DS_Store
+Thumbs.db
+*.swp
+
+# 로그
+*.log
+logs/
+
+# verify-call.sh 가 남기는 마지막 실행 기록 (결과 · 로그)
+test-harness/last-run/
+test-harness/last-run-bridge/

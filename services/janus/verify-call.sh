@@ -1,0 +1,277 @@
+#!/usr/bin/env bash
+#
+# 계획서 5단계 — 브라우저 ↔ 브라우저 시험 통화를 사람 없이 돌린다. sudo 가 필요 없다.
+#
+#   ./verify-call.sh                     점검만 (아무 전화도 걸지 않는다)
+#   ./verify-call.sh --run               9999999901 → 9999999903 으로 실제 통화
+#   ./verify-call.sh --run --from 9999999901 --to 9999999903
+#
+# 무엇을 확인하는가 — 협상이 됐는지가 아니라 **소리가 흘렀는지**까지 본다.
+#
+#   5-1  둘 다 REGISTER 되는가
+#   5-2  발신 → 착신 → 수락이 이어지는가
+#   5-3  RTP 가 양방향으로 실제로 오는가 (getStats 의 inbound-rtp.packetsReceived)
+#   5-4  끊긴 뒤 다시 걸리는가
+#
+# "연결됨인데 소리가 안 난다" 가 이 게이트웨이에서 가장 자주 만나는 실패 모양이라
+# (docs/plan.md ③), 사람 귀 대신 패킷 수로 판정한다.
+#
+# 탭 둘을 손으로 여는 대신 헤드리스 크롬 하나에서 janus.js 세션 둘을 띄운다.
+# 마이크는 --use-fake-device-for-media-stream 이 만드는 440Hz 톤을 쓴다.
+# 대시보드의 /janus/dashboard/test-call 을 쓰지 않는 이유는 그 페이지가 manager
+# 로그인 세션을 요구하기 때문이다 — 자동화하려면 사람의 비밀번호를 다뤄야 한다.
+#
+# ⚠️ 이 시험은 양쪽이 다 크롬이라 **opus** 로 붙는다. ⑥의 PCMU/PCMA 브리징은
+#    여기서 검증되지 않는다 — 그것은 6단계(소프트폰)의 몫이다.
+#
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+HARNESS_DIR="${SCRIPT_DIR}/test-harness"
+SECRETS_DIR="${SCRIPT_DIR}/secrets"
+OUTDIR="${HARNESS_DIR}/last-run"
+
+JANUS_JS_SRC="${JANUS_JS_PATH:-/opt/janus/share/janus/javascript/janus.js}"
+ADAPTER_JS="${SCRIPT_DIR}/web/node_modules/webrtc-adapter/out/adapter.js"
+JANUS_HTTP_PORT="${JANUS_HTTP_PORT:-8088}"
+HARNESS_PORT="${HARNESS_PORT:-28199}"
+
+# SIP 쪽 기본값은 server/src/config.js 와 같게 둔다. 다르면 등록부터 실패한다.
+SIP_DOMAIN="${SIP_DOMAIN:-pluto.org}"
+SIP_PROXY="${SIP_PROXY:-sip:192.168.0.252:5060}"
+
+# 점검 출력은 공용 규약을 따른다 (docs/check-contract.md).
+source "${SCRIPT_DIR}/../../lib/check-report.sh"
+
+# --json 은 아래 인자 파싱보다 **먼저** 걸러낸다.
+check_init "janus.verify.call"
+check_args "$@"
+set -- "${CHECK_REST[@]:-}"
+
+MODE="check"
+# 시험용 세대다 — 9999동 9999호(`99999999`)에 순번 01~04.
+# 실재하는 세대의 번호로 걸면 그 집 폰이 울린다 (docs/identity.md).
+FROM_USER="9999999901"
+TO_USER="9999999903"
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --run)   MODE="run"; shift ;;
+        --check) MODE="check"; shift ;;
+        --from)  FROM_USER="${2:?--from 에 사용자명이 필요합니다}"; shift 2 ;;
+        --to)    TO_USER="${2:?--to 에 사용자명이 필요합니다}"; shift 2 ;;
+        -h|--help)
+            sed -n '2,25p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+            exit 0 ;;
+        "") shift ;;             # check_args 가 비운 자리
+        *) echo "Unknown option: $1"; echo "Usage: $0 [--check|--run] [--from USER] [--to USER]"; exit 1 ;;
+    esac
+done
+
+die()  { echo "오류: $*" >&2; exit 1; }
+PROBLEMS=0
+
+# warn 은 공용 규약의 판정에 더해 이 스크립트의 카운터도 올린다.
+warn() { _check_add problem "$*"; [[ $CHECK_JSON -eq 1 ]] || echo "  [!!]   $*"; PROBLEMS=$((PROBLEMS + 1)); }
+
+pw_file() { echo "${SECRETS_DIR}/sip-$1.pw"; }
+
+# curl 은 연결 실패에도 종료 코드만 0 이 아니고 %{http_code} 로 "000" 을 찍는다.
+probe_http() {
+    local out
+    out="$(curl -s -m 3 -o /dev/null -w '%{http_code}' "$1" 2>/dev/null)" || true
+    echo "${out:-000}"
+}
+
+find_chrome() {
+    local c
+    for c in google-chrome chromium chromium-browser; do
+        if command -v "$c" >/dev/null 2>&1; then echo "$c"; return 0; fi
+    done
+    return 1
+}
+
+# ── 점검 ────────────────────────────────────────────────────────────────
+info "도구"
+command -v node >/dev/null && ok "node $(node --version)" || warn "node 가 없습니다"
+if CHROME="$(find_chrome)"; then
+    ok "브라우저 ${CHROME}"
+else
+    CHROME=""
+    warn "크롬이 없습니다 — google-chrome / chromium 중 하나가 필요합니다"
+fi
+
+info
+info "자원"
+[[ -f "$JANUS_JS_SRC" ]] && ok "janus.js ${JANUS_JS_SRC}" \
+    || warn "janus.js 를 찾지 못했습니다: ${JANUS_JS_SRC}"
+[[ -f "$ADAPTER_JS" ]] && ok "webrtc-adapter" \
+    || warn "webrtc-adapter 가 없습니다 — ./setup-dashboard.sh --build 를 먼저 도세요"
+
+info
+info "Janus"
+INFO_CODE="$(probe_http "http://127.0.0.1:${JANUS_HTTP_PORT}/janus-api/info")"
+[[ "$INFO_CODE" == "200" ]] && ok "시그널링 API 200 (127.0.0.1:${JANUS_HTTP_PORT})" \
+    || warn "시그널링 API 가 ${INFO_CODE} 입니다 — systemctl status janus"
+[[ -f "${SECRETS_DIR}/api-secret" ]] && ok "api-secret" \
+    || warn "secrets/api-secret 이 없습니다 — sudo ./install.sh --apply"
+
+info
+info "SIP 계정 (${FROM_USER} → ${TO_USER})"
+for u in "$FROM_USER" "$TO_USER"; do
+    f="$(pw_file "$u")"
+    if [[ -f "$f" ]]; then
+        ok "${u}: secrets/sip-${u}.pw"
+    else
+        warn "${u}: secrets/sip-${u}.pw 가 없습니다"
+        echo "         시험용 세대의 계정은 만들어 주는 스크립트가 있습니다 (sudo 불필요):"
+        echo "           ./ensure-test-accounts.sh"
+        echo "         실재하는 세대의 계정은 여전히 사람이 만듭니다 — ../kamailio/accounts.md"
+    fi
+done
+
+info
+info "포트"
+if ss -ltn 2>/dev/null | grep -q "127.0.0.1:${HARNESS_PORT}\b"; then
+    warn "${HARNESS_PORT} 이 이미 쓰이고 있습니다 — HARNESS_PORT 로 바꾸세요"
+else
+    ok "${HARNESS_PORT} 비어 있음 (하니스가 잠깐 쓴다)"
+fi
+
+# ── 마지막으로 걸어 본 결과 ────────────────────────────────────────────
+#
+# 이 점검은 준비 상태만 봅니다. 실제 통화는 사람이 --run 으로 돌립니다
+# (90초쯤 걸리므로 마법사가 대신 돌리지 않습니다 — docs/setup-wizard.md).
+#
+# 그러면 "정말 걸어 봤는가" 는 무엇으로 아는가. **--run 이 남긴 결과 파일을
+# 읽습니다.** 사람의 확인 기록보다 낫습니다 — 주장이 아니라 증거이고, 언제
+# 돌렸는지도 함께 남습니다. .applied-settings 를 읽는 것과 같은 자세입니다.
+info
+info "마지막으로 걸어 본 결과"
+RESULT_JSON="${OUTDIR}/result.json"
+if [[ ! -f "$RESULT_JSON" ]]; then
+    pend "아직 걸어 본 적이 없습니다 → ./verify-call.sh --run"
+elif ! grep -q '"ok"[[:space:]]*:[[:space:]]*true' "$RESULT_JSON"; then
+    warn "마지막 시험 통화가 실패했습니다 ($(date -r "$RESULT_JSON" '+%m-%d %H:%M')) — ${OUTDIR}/ 를 보세요"
+else
+    ok "통과 ($(date -r "$RESULT_JSON" '+%m-%d %H:%M'))"
+
+    # 그 뒤로 설정이 바뀌었으면 그 결과는 지금 설정의 것이 아니다.
+    #
+    # 설치본 자체가 아니라 **시각을 볼 수 있는 것**을 견준다. Janus 설정은
+    # /opt/janus/etc/janus/ 아래에 있고 권한이 좁아 사용자가 stat 하지 못할 수
+    # 있어서, install.sh --apply 가 남기는 .applied-settings 를 대신 본다.
+    for cfg in "${SCRIPT_DIR}/.applied-settings" /etc/kamailio/kamailio-local.cfg; do
+        if [[ -e "$cfg" && "$cfg" -nt "$RESULT_JSON" ]]; then
+            case "$cfg" in
+                *.applied-settings) what="Janus 설정" ;;
+                *)                  what="${cfg##*/}" ;;
+            esac
+            pend "그 뒤에 바뀐 것이 있습니다: ${what} — 지금 설정으로 다시 걸어 보세요 (./verify-call.sh --run)"
+        fi
+    done
+fi
+
+info
+if [[ "$MODE" == "check" ]]; then
+    check_finish            # --json 이면 여기서 끝난다
+    if [[ $PROBLEMS -gt 0 ]]; then
+        echo "점검: [!!] ${PROBLEMS}개. 위를 먼저 해결하세요."
+        exit 1
+    fi
+    echo "점검: 문제 없음. 실제로 걸어 보려면 --run 을 붙이세요."
+    exit 0
+fi
+
+[[ $PROBLEMS -gt 0 ]] && die "점검에서 [!!] ${PROBLEMS}개가 나왔습니다. --run 하지 않습니다."
+
+# ── 실행 ────────────────────────────────────────────────────────────────
+# 비밀번호가 argv 나 ps 에 남지 않도록 파일로만 옮긴다 (accounts.md 의 규약).
+RUNDIR="$(mktemp -d)"
+HARNESS_PID=""
+CHROME_PID=""
+
+cleanup() {
+    [[ -n "$CHROME_PID" ]] && kill "$CHROME_PID" 2>/dev/null || true
+    [[ -n "$HARNESS_PID" ]] && kill "$HARNESS_PID" 2>/dev/null || true
+    rm -rf "$RUNDIR"
+}
+trap cleanup EXIT
+
+umask 077
+node -e '
+const fs = require("fs"), path = require("path");
+const [rundir, secrets, domain, proxy, from, to] = process.argv.slice(1);
+const read = (f) => fs.readFileSync(f, "utf8").trim();
+fs.writeFileSync(path.join(rundir, "accounts.json"), JSON.stringify({
+  apiSecret: read(path.join(secrets, "api-secret")),
+  sipDomain: domain,
+  sipProxy: proxy,
+  accounts: {
+    a: { user: from, secret: read(path.join(secrets, `sip-${from}.pw`)) },
+    b: { user: to,   secret: read(path.join(secrets, `sip-${to}.pw`)) },
+  },
+}));
+' "$RUNDIR" "$SECRETS_DIR" "$SIP_DOMAIN" "$SIP_PROXY" "$FROM_USER" "$TO_USER"
+
+mkdir -p "$OUTDIR"
+rm -f "${OUTDIR}/result.json"
+
+echo "하니스를 띄웁니다 (127.0.0.1:${HARNESS_PORT})"
+HARNESS_PORT="$HARNESS_PORT" HARNESS_RUNDIR="$RUNDIR" HARNESS_OUTDIR="$OUTDIR" \
+JANUS_HTTP_PORT="$JANUS_HTTP_PORT" JANUS_JS_PATH="$JANUS_JS_SRC" \
+    node "${HARNESS_DIR}/serve.js" > "${OUTDIR}/harness.log" 2>&1 &
+HARNESS_PID=$!
+
+for _ in $(seq 1 20); do
+    [[ "$(probe_http "http://127.0.0.1:${HARNESS_PORT}/")" == "200" ]] && break
+    sleep 0.5
+done
+[[ "$(probe_http "http://127.0.0.1:${HARNESS_PORT}/")" == "200" ]] \
+    || { cat "${OUTDIR}/harness.log"; die "하니스가 뜨지 않았습니다"; }
+
+echo "헤드리스 크롬으로 ${FROM_USER} → ${TO_USER} 통화를 겁니다…"
+# 프로필은 매번 새로 만든다 — 남은 권한 상태가 결과를 바꾸지 않게.
+CHROME_PROFILE="${RUNDIR}/chrome-profile"
+"$CHROME" \
+    --headless=new \
+    --disable-gpu \
+    --no-first-run \
+    --user-data-dir="$CHROME_PROFILE" \
+    --use-fake-device-for-media-stream \
+    --use-fake-ui-for-media-stream \
+    --autoplay-policy=no-user-gesture-required \
+    "http://127.0.0.1:${HARNESS_PORT}/" > "${OUTDIR}/chrome.log" 2>&1 &
+CHROME_PID=$!
+
+# 판정은 하니스의 종료 코드가 들고 온다 (0 통과 · 1 실패 · 2 무응답).
+set +e
+wait "$HARNESS_PID"
+VERDICT=$?
+set -e
+HARNESS_PID=""
+
+kill "$CHROME_PID" 2>/dev/null || true
+CHROME_PID=""
+
+echo
+if [[ -f "${OUTDIR}/result.json" ]]; then
+    node -e '
+    const d = require(process.argv[1]);
+    for (const [k, v] of Object.entries(d.steps || {})) console.log(`  ${k}  →  ${v}`);
+    if (d.error) console.log(`  중단: ${d.error}`);
+    ' "${OUTDIR}/result.json"
+fi
+echo
+echo "  자세한 내용: test-harness/last-run/{result.json,browser.log,harness.log}"
+echo
+
+case "$VERDICT" in
+    0) echo "5단계: 통과" ;;
+    2) echo "5단계: 판정 불가 — 브라우저가 결과를 보내지 않았습니다 (last-run/browser.log)" ;;
+    *) echo "5단계: 실패" ;;
+esac
+
+# Janus 세션은 클라이언트가 사라진 뒤 session_timeout(기본 60초)이 지나야
+# 회수된다. 끊자마자 Admin API 를 보면 남아 있는 것처럼 보이는데 누수가 아니다.
+exit "$VERDICT"
