@@ -1,0 +1,59 @@
+# 이 파일은 generate_nginx_conf.py 가 만든다. 직접 고치지 말 것.
+# 라우트를 바꾸려면 각 서비스의 nginx-conf/*.ini 를,
+# 서버 수준 값을 바꾸려면 nginx/nginx-stack.conf 를 고친다.
+#
+# 스키마: docs/nginx-conf.md
+
+# WebSocket 업그레이드 전달용. 업그레이드 요청이 아니면 'close' 가 되어
+# 같은 location 의 일반 HTTP 요청(예: /ws-bridge/dashboard)에는 영향이 없다.
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+__REDIRECT_MAP__
+__UPSTREAMS__
+
+server {
+    listen __LISTEN_PORT__;
+    server_name __SERVER_NAME__;
+__ACME_CHALLENGE__
+    # Redirect HTTP to HTTPS.
+    #
+    # location 안에 둔다. server 레벨의 return 은 location 을 고르기 전 단계
+    # (server rewrite)에서 실행되어 무조건 먼저 이긴다 — 그러면 위의 ACME
+    # 예외가 아무리 구체적이어도 닿지 않는다.
+    location / {
+        return 301 https://__HTTPS_REDIRECT_HOST__$request_uri;
+    }
+}
+
+server {
+    listen __SSL_PORT__ ssl http2;
+    server_name __SERVER_NAME__;
+__MAX_BODY__
+    ssl_certificate     __SSL_CERTIFICATE__;
+    ssl_certificate_key __SSL_CERTIFICATE_KEY__;
+
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+    ssl_prefer_server_ciphers on;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 10m;
+
+    # 리다이렉트를 상대 경로(/manager)로 내보낸다.
+    # 절대 URL을 만들면 nginx가 클라이언트가 보낸 포트를 자기 리스닝 포트(443)로 바꿔버려서,
+    # 공유기에서 외부 28443 -> 내부 443 으로 포워딩한 경우 목적지가 443으로 바뀌어 접속이 끊긴다.
+    # 상대 경로는 브라우저가 현재 주소를 기준으로 해석하므로 scheme/host/port가 그대로 유지된다.
+    absolute_redirect off;
+
+    # HTTPS 포트에 평문 HTTP로 들어온 경우 (예: 주소창에 host:28443 입력 → 브라우저가 http:// 를 붙임).
+    # 497은 nginx가 이 상황에만 쓰는 내부 코드로, 기본 동작인 400 대신 HTTPS로 넘겨준다.
+    #
+    # $server_port(443)가 아니라 $http_host를 쓰는 이유: 공유기에서 외부 28443 -> 내부 443 으로
+    # 포워딩하면 클라이언트가 아는 포트는 28443이다. $http_host는 클라이언트가 보낸 host:port를
+    # 그대로 담고 있어 포워딩 환경에서도 올바른 주소로 되돌아간다.
+    error_page 497 https://$http_host$request_uri;
+__SSL_CLIENT_VERIFY__
+__DEFAULT_ROUTE__
+__LOCATIONS__
+}

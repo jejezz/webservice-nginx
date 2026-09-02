@@ -2,20 +2,57 @@
 # 이 저장소가 담는 범위
 #
 #   docs/            서비스 사이의 규약
-#   nginx/           리버스 프록시 설정과 스크립트
+#   lib/             여러 스크립트가 공유하는 셸·Node 조각
+#   site/            여러 서비스가 함께 쓰는 값 (호스트·단지 ID·SIP 도메인)
+#   nginx/           리버스 프록시 설정과 스크립트, 공인 인증서(public_ca/)
+#   database/        MariaDB 설치·설정
 #   pm2/             프로세스 오케스트레이션
 #   services/manager 관리 대시보드
+#   services/kamailio · services/janus   통화 시스템
 #
 # 나머지 서비스(face-recognition-server, apartment-mgmt-server,
 # websocket-relay, web-cassini)는 각자 자기 git 저장소를 가집니다.
 # 여기서 같이 추적하면 같은 파일이 두 저장소에 들어갑니다.
+# 그 서비스들은 선언 둘(nginx-conf/ · pm2-conf/)만 맞추면 붙는
+# **plug-in** 입니다 — 이 저장소는 그 코드를 알 필요가 없습니다.
 # ─────────────────────────────────────────────────────────────
 services/*
 !services/manager/
+!services/kamailio/
+!services/janus/
 
 # services/ 바로 아래의 공유 세션 시크릿. 위 규칙에 이미 걸리지만
 # 실수로 예외를 추가할 때를 대비해 한 번 더 막습니다.
 services/.session-secret
+
+
+# ── 옮겨 온 층의 비밀 · 장비별 값 ─────────────────────────────
+# 사이트 값 — 장비마다 다르다 (site/settings-schema.json 이 정의)
+site/settings.ini
+site/.applied-settings
+
+# DB 비밀번호와 덤프
+database/secrets/
+database/backups/
+
+# nginx/cert/ 는 통째로 뺀다. 서버·CA·클라이언트 개인키가 모두 여기 있다.
+# CA 를 다시 만들면 이미 배포한 클라이언트 인증서가 전부 무효가 되므로,
+# "다시 생성하면 되는 것" 이 아니라 **따로 백업해야 하는 자산**이다.
+nginx/cert/
+
+# 서비스가 장비마다 갖는 값 (settings-contract.md 의 세 파일 규약)
+services/*/settings.ini
+services/*/.applied-settings
+services/*/settings.json
+services/*/secrets/
+
+# Firebase 서비스 계정 키. 이 키는 FCM 발송 자격이라 커밋되면 누구나
+# 이 단지 단말에 푸시를 보낼 수 있다.
+**/*firebase-adminsdk*.json
+
+# 패킷 캡처. 실제 SIP/SDP 신호가 들어 있어 내선 번호와 단말 주소가 노출된다.
+*.pcap
+*.pcapng
 
 
 # ── 자격 증명 · 인증서 ────────────────────────────────────────
