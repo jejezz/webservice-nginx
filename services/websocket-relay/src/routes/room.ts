@@ -214,8 +214,7 @@ async function handlePostInvite(req: Request, res: Response) {
             android: {
                 priority: "high",
                 notification: {
-                    channelId: "callfusion_2_rtc",
-                    sound: "doorbell.wav"
+                    channelId: config.firebase.channelId
                 }
             }
         };   

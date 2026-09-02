@@ -88,8 +88,10 @@ nano .env
   MariaDB 의 다른 스키마라 풀을 더 만들지 않고 스키마를 붙여 쓴다
 
 ### Firebase Push Notifications
-- `FCM_CHANNEL_ID` - Firebase notification channel ID
-- `FCM_SOUND_FILE` - Notification sound file name
+- `FCM_CHANNEL_ID` - 초인종 호출·등록 알림에 쓰는 안드로이드 채널 id
+  (기본 `callfusion_2_rtc_notice`, 기기 기본 알림음)
+- `FCM_CALL_CHANNEL_ID` - sip-incoming 착신에 쓰는 안드로이드 채널 id
+  (기본 `callfusion_2_rtc_call`, 기기 기본 벨소리)
 - `FCM_PRIORITY` - Message priority (high/normal)
 - `FCM_TTL` - Message time to live in seconds
 

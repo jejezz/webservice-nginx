@@ -1469,8 +1469,7 @@ async function findAndSendNotificationAsync(address: string, msg: any): Promise<
                 android: {
                     priority: "high",
                     notification: {
-                        channelId: config.firebase.channelId,
-                        sound: config.firebase.sound
+                        channelId: config.firebase.channelId
                     }
                 }
             };

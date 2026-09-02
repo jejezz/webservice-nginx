@@ -214,8 +214,10 @@ router.post('/', loopbackOnly, async (req: Request, res: Response) => {
         android: {
             priority: 'high',
             notification: {
-                channelId: 'callfusion_2_rtc',
-                sound: 'doorbell.wav',
+                // 기기 기본 벨소리로 울려야 한다 — 그 채널이 callfusion_2_rtc_call.
+                // 안드로이드 8+ 는 android.notification.sound 를 무시하고 채널이
+                // 정하므로, 소리는 채널 쪽 설정을 따른다.
+                channelId: config.firebase.callChannelId,
             },
         },
     };

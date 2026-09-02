@@ -154,9 +154,16 @@ export const config = {
      */
     firebase: {
         serviceAccountPath: fromRoot(process.env.FIREBASE_SERVICE_ACCOUNT_PATH || 'secrets/firebase-admin.json'),
-        /** 앱이 만들어 둔 알림 채널. 소리와 중요도가 여기에 묶여 있다. */
-        channelId: process.env.FCM_CHANNEL_ID || 'callfusion_2_rtc',
-        sound: process.env.FCM_SOUND_FILE || 'doorbell.wav',
+        /**
+         * 앱이 만들어 둔 알림 채널. 소리와 중요도가 여기에 묶여 있다 — 채널은 한 번
+         * 만들어지면 얼어붙어서, 소리를 바꾸려면 새 id 로 채널을 새로 만들어야 한다.
+         *
+         * `channelId` 는 초인종 호출·등록 알림(기기 기본 알림음)에, `callChannelId`
+         * 는 sip-incoming 착신(기기 기본 벨소리)에 쓴다. `callfusion_2_rtc` 는 앱이
+         * 전환 기간 동안만 남겨 둔 옛 채널이다 — 새 payload 는 지목하지 않는다.
+         */
+        channelId: process.env.FCM_CHANNEL_ID || 'callfusion_2_rtc_notice',
+        callChannelId: process.env.FCM_CALL_CHANNEL_ID || 'callfusion_2_rtc_call',
     },
 
     ws: {
