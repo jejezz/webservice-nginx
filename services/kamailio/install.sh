@@ -510,7 +510,11 @@ write_rtpengine_cfg() {
 
     install -d -o root -g root -m 755 "$(dirname "$RTPENGINE_CFG")"
     backup "$RTPENGINE_CFG"
-    sed -e "s|__MEDIA_ADDR__!__PUBLIC_IP__|${iface}|" \
+    # 자리표시자를 따로따로 치환한다. interface 줄 하나만 갈아 끼우면 원본이
+    # 조금만 바뀌어도 조용히 안 먹는다.
+    sed -e "s|__MEDIA_ADDR__|${SIP_LISTEN_ADDR}|g" \
+        -e "s|^\(interface = [^!]*\)!__PUBLIC_IP__|\1${MEDIA_PUBLIC_IP:+!${MEDIA_PUBLIC_IP}}|" \
+        -e "s|__PUBLIC_IP__|${MEDIA_PUBLIC_IP}|g" \
         -e "s|^port-min = .*|port-min = ${MEDIA_PORT_RANGE%-*}|" \
         -e "s|^port-max = .*|port-max = ${MEDIA_PORT_RANGE#*-}|" \
         "$RTPENGINE_TEMPLATE" > "$RTPENGINE_CFG"
@@ -519,7 +523,10 @@ write_rtpengine_cfg() {
     if grep -nE '__[A-Z_]+__' "$RTPENGINE_CFG" >/dev/null; then
         grep -nE '__[A-Z_]+__' "$RTPENGINE_CFG" | sed 's/^/    /'
         rm -f "$RTPENGINE_CFG"
-        die "rtpengine 설정에 치환되지 않은 자리가 남았습니다 (위 목록)."
+        # 여기까지 왔으면 kamailio 설정은 이미 쓰인 뒤다. 그대로 죽으면 새
+        # 설정이 깔린 채 재시작도 롤백도 없는 어중간한 상태가 된다.
+        restore_backups
+        die "rtpengine 설정에 치환되지 않은 자리가 남았습니다 (위 목록). 설치를 되돌렸습니다."
     fi
     info "  설치: ${RTPENGINE_CFG} (interface=${iface}, ports=${MEDIA_PORT_RANGE})"
 
