@@ -739,21 +739,29 @@ Kamailio 는 이 프로젝트가 만든 프로그램이 아니라 배포판 패�
 
 이 디렉토리의 작업 범위 밖이지만 함께 살펴본 것들입니다.
 
-**S-1. MariaDB 의 노출 범위** — ~~`bind_address = 0.0.0.0`, `[user:jyahn] host = %`~~
-**기본값을 조였습니다** — 지금은 `bind_address = 127.0.0.1` 이고 `jyahn` 도
-`host = 127.0.0.1` 입니다 ([database/README.md](../../database/README.md)).
-이 계정이 SIP 계정 해시까지 다루므로 그 편이 맞습니다.
+**S-1. MariaDB 의 노출 범위** — **이 장비는 지금 열려 있습니다** (2026-09-02 확인).
+`database/settings.ini` 가 `bind_address = 0.0.0.0` 이고 3306 이 실제로 그렇게
+듣고 있습니다. 이 문서가 한동안 "127.0.0.1 로 조였다" 고 적고 있었는데
+사실이 아니었습니다 — `bind_address` 는 커밋되는 `database.ini` 가 아니라
+장비마다 다른 `settings.ini` 에 있어서, 한 장비에서 조인 것이 다른 장비로
+따라가지 않습니다.
 
-⚠️ **이미 만들어 둔 장비에서는 값을 바꾸는 것만으로 좁혀지지 않습니다.**
+계정이 닿을 수 있는 자리는 [database/README.md](../../database/README.md) 의
+**계정 정책**이 정합니다 — root 는 소켓(`localhost`)뿐, schema owner 는
+`localhost, 127.0.0.1, 10.10.0.%` 입니다.
+
+⚠️ **범위를 좁히는 것은 값을 바꾸는 것만으로 되지 않습니다.**
 `setup_mariadb.sh` 는 추가·갱신만 하므로 옛 `jyahn@%` 가 그대로 남습니다.
 
 ```bash
-sudo mariadb -e "SELECT user, host FROM mysql.user WHERE user = 'jyahn';"
+sudo mariadb -e "SELECT user, host FROM mysql.user ORDER BY user, host;"
 sudo mariadb -e "DROP USER 'jyahn'@'%';"
 ```
 
-`jyahn` 의 비밀번호가 8자 영단어+숫자 조합이라 약한 것은 그대로입니다.
-원거리에서 닿아야 하면 3306 을 여는 대신 SSH 터널을 씁니다.
+`jyahn` 의 비밀번호가 8자 영단어+숫자 조합이라 약한 것은 그대로입니다. 이
+계정이 SIP 계정의 평문 비밀번호까지 다루므로(S-4), 3306 을 밖에 열어 둔 채로는
+그 약한 비밀번호가 곧 노출 범위입니다. 원거리에서 닿아야 하면 포트를 여는
+대신 SSH 터널을 씁니다.
 
 **S-2. 버전 통일** — ~~5.5.4 와 5.7.7 두 벌~~ **해소됐습니다** (2026-09-02 확인).
 지금은 배포판 5.7.4 한 벌뿐이고 소스빌드는 남아 있지 않습니다. 다시 소스빌드를

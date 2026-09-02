@@ -131,9 +131,15 @@ require_root() {
 # 자격 증명이 틀려도 -c 는 통과하고, 재시작한 뒤에야 죽는다. 그래서 미리 직접 확인한다.
 #
 # 비밀번호가 ps 에 노출되지 않도록 -p 대신 MYSQL_PWD 로 넘긴다.
+#
+# --no-defaults 가 필요하다. 옵션 파일에 [client] password 나 protocol=tcp 가
+# 있으면 그쪽이 이긴다 — MYSQL_PWD 는 우선순위가 가장 낮다. sudo 로 돌 때 HOME 이
+# /root 가 되므로 **root 로 실행할 때만 실패하는** 자리가 된다. 화면에는
+# "비밀번호가 반영되지 않았습니다" 로만 보여서 멀쩡한 DB 를 의심하게 만든다.
+# database/lib_mariadb.sh 가 root 쪽에서 같은 이유로 이미 이렇게 붙는다.
 verify_db_login() {
     local password="$1"
-    MYSQL_PWD="$password" mariadb -h "$DB_HOST" -u "$DB_USER" -D "$DB_NAME" \
+    MYSQL_PWD="$password" mariadb --no-defaults -h "$DB_HOST" -u "$DB_USER" -D "$DB_NAME" \
         -N -B -e 'SELECT 1;' >/dev/null 2>&1
 }
 

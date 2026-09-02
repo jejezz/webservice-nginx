@@ -207,18 +207,60 @@ services/ws-bridge/schema/001-initial.sql
 
 ```ini
 [user:appuser]
-host = localhost
+host = localhost, 127.0.0.1, 10.10.0.%
 databases = appdb
 privileges = ALL
 ```
 
 | 항목 | 설명 |
 |------|------|
-| `host` | 접속 허용 호스트 (`localhost`, `%`, `192.168.0.%`) |
+| `host` | 접속 허용 호스트. **쉼표로 여럿** 적을 수 있습니다 (아래 정책) |
 | `databases` | 권한을 줄 DB 목록, 쉼표 구분. `*`는 전체 |
 | `privileges` | `ALL` 또는 `SELECT,INSERT,UPDATE,DELETE` |
 | `password_env` | 비밀번호가 든 환경 변수 이름 |
 | `password_file` | 비밀번호가 든 파일 경로 |
+
+### 계정 정책
+
+MariaDB 는 **`user@host` 가 키**입니다. `appuser@localhost` 와
+`appuser@127.0.0.1` 은 이름만 같은 **별개 계정**이고, 하나만 만들어 두면 다른
+쪽으로 붙는 순간 거부됩니다. 그런데 그 거부는 "그런 계정 없음" 이 아니라
+**"비밀번호가 틀렸다"** 로 보입니다. 그래서 멀쩡한 DB 를 두고 비밀번호를
+다시 만드는 헛수고를 하게 됩니다 — 실제로 겪었습니다.
+
+`localhost` 는 호스트 이름이 아니라 **유닉스 소켓**을 뜻합니다. `127.0.0.1` 은
+TCP 입니다. 둘은 다른 자리입니다.
+
+| 계정 | 자리 | 권한 |
+|---|---|---|
+| **root** | `localhost` 뿐 — `unix_socket` 인증 | 전체 |
+| **schema owner** (`kamailio`, `jyahn` …) | `localhost, 127.0.0.1, 10.10.0.%` | 자기 스키마에 `ALL` |
+
+**root 는 소켓으로만 씁니다.** `unix_socket` 인증은 TCP 에서 쓸 수 없으므로
+root 를 `127.0.0.1` 에 두려면 비밀번호를 만들어야 하는데, 3306 이 열려 있는
+장비에서는 그 비밀번호가 곧 네트워크에서 시도 가능한 전권 계정이 됩니다.
+그래서 두지 않습니다. 관리 작업은 `sudo` 로 소켓 접속만 씁니다 —
+`lib_mariadb.sh` 가 `--no-defaults --protocol=socket -u root` 로 붙는 이유입니다.
+`[security]` 의 `disallow_remote_root = true` 가 그 밖의 root 를 지웁니다.
+
+**schema owner 는 세 자리 모두에 둡니다.** 데몬은 소켓으로 붙고, 점검
+스크립트와 도구는 TCP 로 붙고, 다른 장비에서 붙어야 할 때도 있습니다. 셋 중
+하나라도 빠지면 위의 "비밀번호가 틀렸다" 가 재현됩니다.
+
+> ⚠️ **옵션 파일이 자격 증명을 가로챕니다.** `~/.my.cnf` 의 `[client]` 에
+> `password` 나 `protocol = tcp` 가 있으면 그쪽이 이깁니다 — `MYSQL_PWD` 는
+> 우선순위가 가장 낮습니다. `sudo` 로 돌면 `HOME` 이 `/root` 가 되므로
+> **root 로 실행할 때만 실패하는** 자리가 생깁니다. 자격 증명을 확인하는
+> 코드는 `--no-defaults` 를 붙이세요.
+
+> ⚠️ **범위를 좁히는 것은 값을 바꾸는 것만으로 되지 않습니다.**
+> `setup_mariadb.sh` 는 추가·갱신만 하고 지우지 않습니다. 옛 계정이 그대로
+> 남으므로 직접 확인하고 지워야 합니다.
+>
+> ```bash
+> sudo mariadb -e "SELECT user, host FROM mysql.user ORDER BY user, host;"
+> sudo mariadb -e "DROP USER 'jyahn'@'%';"
+> ```
 
 ## 서비스별 스키마
 
