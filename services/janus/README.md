@@ -211,6 +211,28 @@ sudo ./install.sh --apply -y      # 확인 없이 진행
 `--apply` 는 `secrets/admin-secret` · `secrets/api-secret` 도 없으면 만듭니다.
 Kamailio 는 이 스크립트가 건드리지 않습니다 — 연동 대상으로 상태만 확인합니다.
 
+### 통화에 쓸 인터페이스를 여기서 고릅니다
+
+SIP 쪽 SDP 에 실릴 주소(`local_ip`)와 ICE 후보를 모을 인터페이스
+(`ice_enforce_list`)는 **장비마다 다릅니다.** 저장소에 박아 두지 않고 `--apply` 가
+감지합니다. 도커·libvirt·터널처럼 통화에 못 쓰는 것은 후보에서 뺍니다.
+
+```
+통화에 쓸 인터페이스를 고르세요 (SIP SDP 주소 · ICE 후보):
+  1) enp131s0 10.10.0.224   ← 기본 경로. 권장
+  2) enp2s0 192.168.0.252
+번호 [기본: 권장]
+```
+
+고른 값은 `settings.ini` 의 `sip_local_ip` · `lan_iface` 에 적히고, 다음부터는
+묻지 않습니다. 후보가 하나뿐이면 묻지 않고 그것을 씁니다. `-y` 로 돌리면 사람이
+없는 자리이므로 **기본 경로 쪽**을 골라 진행합니다.
+
+⚠️ 이 값이 틀리면 **Janus 는 뜨고 시그널링도 되는데 소리만 나지 않습니다.**
+루프백이나 다른 장비의 주소를 SDP 에 실으면 상대가 그리로 RTP 를 보낼 수 없기
+때문입니다 ([plan.md](docs/plan.md) ③ 절). 바꾸려면 `settings.ini` 의 그 값을
+고치고 `--apply` 를 다시 돌립니다.
+
 ## 4. 대시보드 빌드
 
 `node_modules/` 와 `web/dist/` 는 커밋하지 않으므로, 이 저장소를 처음 받은 곳에서는
@@ -304,6 +326,8 @@ rtp_port_range = 20000-20200       ; 공유기에서 UDP 로 포워딩할 범위
 |---|---|---|
 | `public_ip` | LAN 전용 | `janus.jcfg` 의 `nat_1_1_mapping` 을 켜거나 지웁니다 |
 | `rtp_port_range` | `20000-20200` | `janus.jcfg` 의 `media.rtp_port_range`. SIP 미디어(30000-30200) · rtpproxy(10200-19999) 와 겹치면 안 됩니다 |
+| `sip_local_ip` | 감지 (3 단계에서 고른 값) | `janus.plugin.sip.jcfg` 의 `local_ip` — SIP SDP 의 `c=` 주소 |
+| `lan_iface` | 감지 (3 단계에서 고른 값) | `janus.jcfg` 의 `ice_enforce_list` |
 
 형식이 맞지 않으면 `--apply` 가 **아무것도 바꾸지 않고 멈춥니다.** 손으로 고쳐도
 대시보드로 고쳐도 같은 관문을 지납니다.
@@ -600,7 +624,7 @@ cd ../../pm2 && ./restart.sh --restart
 | 어느 쪽이 | 무엇을 의심하는가 |
 |---|---|
 | ① 은 되고 ② 가 안 되면 | **코덱**입니다 — 상대가 G.711 만 하는데 PCMU 로 내려앉지 못했습니다. Janus 는 트랜스코딩하지 않습니다 ([plan.md](docs/plan.md) ⑥ 절) |
-| 둘 다 안 되면 | **미디어 포트** 또는 **SDP 에 실린 주소**입니다 ([plan.md](docs/plan.md) ③ ⑦ 절) |
+| 둘 다 안 되면 | **미디어 포트** 또는 **SDP 에 실린 주소**입니다. `./install.sh` 의 "통화에 쓸 인터페이스" 가 이 장비의 LAN 주소인지 먼저 보세요 ([plan.md](docs/plan.md) ③ ⑦ 절) |
 | 밖에서만 안 되면 | [T-5](#t-5-밖에서-걸면-소리가-나지-않는다--공인-ip) |
 
 ## T-5. 밖에서 걸면 소리가 나지 않는다 — 공인 IP

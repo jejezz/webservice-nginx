@@ -76,6 +76,84 @@ settings_get() {
     v="${v//[[:space:]]/}"
     echo "${v:-$fallback}"
 }
+
+# 통화에 쓸 수 있는 인터페이스만 고른다. 가상 브리지·컨테이너·터널은 뺀다 —
+# ICE 후보로 실어 보내면 상대가 닿지 않는 곳에 붙으려다 기다린다 (janus.jcfg).
+lan_candidates() {
+    local ifc cidr
+    while read -r ifc cidr; do
+        case "$ifc" in
+            lo|docker*|virbr*|veth*|br-*|tun*|tap*|wg*|vmnet*|zt*) continue ;;
+        esac
+        echo "${ifc} ${cidr%%/*}"
+    done < <(ip -4 -o addr show scope global 2>/dev/null | awk '{print $2, $4}')
+}
+
+# 기본 경로가 나가는 인터페이스. 여럿일 때 무엇을 권할지 정하는 기준이다.
+default_route_iface() { ip -4 route show default 2>/dev/null | awk '{print $5; exit}'; }
+
+# SIP_LOCAL_IP · LAN_IFACE 를 정한다.
+#   $1 = "ask" 면 후보가 여럿일 때 물어본다. 그 밖에는 절대 묻지 않는다
+#        (점검은 아무것도 바꾸지 않고 --yes 는 사람이 없는 자리다).
+resolve_lan() {
+    local may_ask="${1:-}" cands n pick def_ifc line
+    SIP_LOCAL_IP="$(settings_get sip_local_ip "")"
+    LAN_IFACE="$(settings_get lan_iface "")"
+
+    cands="$(lan_candidates)"
+    n="$(printf '%s\n' "$cands" | grep -c . || true)"
+
+    # settings.ini 에 박혀 있으면 그대로 쓴다. 다만 이 장비에 실재하는지는 본다 —
+    # 없는 주소로 설치하면 Janus 는 뜨고 소리만 안 난다.
+    if [[ -n "$SIP_LOCAL_IP" && -n "$LAN_IFACE" ]]; then
+        printf '%s\n' "$cands" | grep -qx "${LAN_IFACE} ${SIP_LOCAL_IP}" && return 0
+        warn "settings.ini 의 sip_local_ip/lan_iface 가 이 장비에 없습니다: ${LAN_IFACE} ${SIP_LOCAL_IP}"
+        SIP_LOCAL_IP=""; LAN_IFACE=""
+    fi
+
+    (( n > 0 )) || return 1
+
+    def_ifc="$(default_route_iface)"
+    # 하나뿐이면 물어볼 것이 없다.
+    if (( n == 1 )); then
+        read -r LAN_IFACE SIP_LOCAL_IP <<<"$cands"
+        return 0
+    fi
+
+    # 여럿이다. 기본 경로가 나가는 것을 권한다.
+    pick="$(printf '%s\n' "$cands" | awk -v d="$def_ifc" '$1==d{print; exit}')"
+    [[ -n "$pick" ]] || pick="$(printf '%s\n' "$cands" | head -1)"
+
+    if [[ "$may_ask" == "ask" && -t 0 ]]; then
+        echo
+        echo "통화에 쓸 인터페이스를 고르세요 (SIP SDP 주소 · ICE 후보):"
+        local i=0 sel
+        while read -r line; do
+            i=$((i + 1))
+            [[ "$line" == "$pick" ]] \
+                && echo "  ${i}) ${line}   ← 기본 경로. 권장" \
+                || echo "  ${i}) ${line}"
+        done <<<"$cands"
+        read -r -p "번호 [기본: 권장] " sel || sel=""
+        if [[ "$sel" =~ ^[0-9]+$ ]] && (( sel >= 1 && sel <= n )); then
+            pick="$(printf '%s\n' "$cands" | sed -n "${sel}p")"
+        fi
+    fi
+    read -r LAN_IFACE SIP_LOCAL_IP <<<"$pick"
+    return 0
+}
+
+# 고른 값을 settings.ini 에 남긴다. 다음 실행부터 묻지 않고, 대시보드도 읽는다.
+settings_put() {
+    local key="$1" val="$2"
+    if [[ -f "$SETTINGS_FILE" ]] && grep -q "^[[:space:]]*${key}[[:space:]]*=" "$SETTINGS_FILE"; then
+        sed -i "s|^[[:space:]]*${key}[[:space:]]*=.*|${key} = ${val}|" "$SETTINGS_FILE"
+    else
+        [[ -f "$SETTINGS_FILE" ]] || echo "; install.sh 가 만들었습니다. 항목의 뜻은 settings-schema.json 에 있습니다." > "$SETTINGS_FILE"
+        echo "${key} = ${val}" >> "$SETTINGS_FILE"
+    fi
+    chown "$SUDO_UID:$SUDO_GID" "$SETTINGS_FILE" 2>/dev/null || true
+}
 # ═════════════════════════════════════════════════════════════════════
 
 SERVICE_TEMPLATE="${SCRIPT_DIR}/janus.service"
@@ -88,10 +166,17 @@ API_PORT=8088
 ADMIN_PORT=7088
 WS_PORT=8188
 DASHBOARD_PORT=28087
-# SIP 쪽 SDP 에 실릴 주소. 루프백을 쓰면 시그널링은 되고 소리만 안 난다 (계획서 ③).
-SIP_LOCAL_IP="192.168.0.252"
-# ICE 후보를 여기서만 모은다. docker0/virbr0 까지 실어 보내면 통화 성립이 느려진다.
-LAN_IFACE="enp2s0"
+# SIP 쪽 SDP 에 실릴 주소와 ICE 후보를 모을 인터페이스.
+#
+# 예전에는 이 둘을 여기에 박아 두었다(192.168.0.252 · enp2s0). 처음 세운 장비의
+# 값이라 다른 장비에서는 틀렸고, 틀린 채로도 Janus 는 떠서 **시그널링은 되고
+# 소리만 안 나는** 모양이 됐다 (계획서 ③).
+#
+# 그래서 감지한다. 통화에 못 쓰는 인터페이스(도커·libvirt·터널)는 빼고,
+# 남은 것이 여럿이면 사람에게 고르게 한다. 고른 값은 settings.ini 에 적어 다음
+# 실행부터는 묻지 않는다.
+SIP_LOCAL_IP=""
+LAN_IFACE=""
 
 # 점검 출력은 공용 규약을 따른다 (docs/check-contract.md).
 # ok · warn · info 는 예전과 같고, 예전의 no() 는 skip/pend 로 나뉜다.
@@ -339,6 +424,8 @@ report() {
                 -n 's%^\([[:space:]]*admin_secret = \).*%\1«%' \
                 -n 's%^\([[:space:]]*api_secret = \).*%\1«%' \
                 -n 's%^\([[:space:]]*rtp_port_range = \).*%\1«%' \
+                -n 's%^\([[:space:]]*local_ip = \).*%\1«%' \
+                -n 's%^\([[:space:]]*ice_enforce_list = \).*%\1«%' \
                 -x 'nat_1_1_mapping' \
                 -x 'keep_private_host' \
                 "$target" "$tmpl" \
@@ -568,17 +655,24 @@ report() {
     fi
 
     info ""
-    info "ICE 후보를 모을 인터페이스"
+    info "통화에 쓸 인터페이스 (SIP SDP 주소 · ICE 후보)"
     # 이 장비에는 통화와 무관한 인터페이스가 여럿이다. 그대로 두면 Janus 가
     # 저 주소까지 후보로 실어 보내고, 상대는 닿지 않는 곳에 붙으려다 기다린다.
+    if resolve_lan; then
+        if [[ -n "$(settings_get lan_iface '')" ]]; then
+            ok "${LAN_IFACE} ${SIP_LOCAL_IP}  ← settings.ini 에 정해 둔 값"
+        else
+            ok "${LAN_IFACE} ${SIP_LOCAL_IP}  ← 감지한 값 (--apply 가 물어보고 settings.ini 에 적습니다)"
+        fi
+    else
+        warn "쓸 수 있는 인터페이스를 찾지 못했습니다 — 이 장비에 LAN 주소가 있습니까?"
+        problems=$((problems + 1))
+    fi
     local iface addr
     while read -r iface addr; do
         [[ "$iface" == "lo" ]] && continue
-        if [[ "$iface" == "$LAN_IFACE" ]]; then
-            ok "${iface} ${addr}  ← ice_enforce_list 로 이것만 쓴다"
-        else
-            skip "${iface} ${addr}  (ICE 후보에서 빠져야 한다)"
-        fi
+        [[ "$iface" == "$LAN_IFACE" ]] && continue
+        skip "${iface} ${addr}  (ICE 후보에서 빠진다)"
     done < <(ip -o -4 addr show 2>/dev/null | awk '{print $2, $4}')
 
     info ""
@@ -625,12 +719,15 @@ report() {
     fi
     if [[ -r "$APPLIED_FILE" ]]; then
         local key saved applied fallback
-        for key in public_ip rtp_port_range; do
+        for key in public_ip rtp_port_range sip_local_ip lan_iface; do
             # 키가 없으면 --apply 가 쓴 것과 같은 기본값으로 친다. 빈 값으로
             # 비교하면 settings.ini 가 없는 장비에서 언제나 어긋나 보인다.
             case "$key" in
                 public_ip)      fallback="$DEFAULT_PUBLIC_IP" ;;
                 rtp_port_range) fallback="$DEFAULT_RTP_RANGE" ;;
+                # 이 둘은 settings.ini 에 없으면 감지한 값이 곧 설치될 값이다.
+                sip_local_ip)   fallback="$SIP_LOCAL_IP" ;;
+                lan_iface)      fallback="$LAN_IFACE" ;;
                 *)              fallback="" ;;
             esac
             saved="$(settings_get "$key" "$fallback")"
@@ -793,6 +890,23 @@ apply() {
     fi
     info "     대시보드가 떠 있으면 /janus/dashboard/settings 가 같은 파일을 씁니다."
 
+    # --- 통화에 쓸 인터페이스 ---
+    #
+    # 박아 두지 않고 감지한다. 후보가 여럿이면 물어보고, 고른 값은 settings.ini
+    # 에 적어 다음부터 묻지 않는다. --yes 는 사람이 없는 자리라 묻지 않고
+    # 기본 경로 쪽을 쓴다.
+    local ask="ask"
+    if $ASSUME_YES; then ask=""; fi
+    resolve_lan "$ask" || die "통화에 쓸 LAN 인터페이스를 찾지 못했습니다 (ip -4 addr 로 확인하세요)"
+    info ""
+    info "  통화에 쓸 인터페이스: ${LAN_IFACE} ${SIP_LOCAL_IP}"
+    info "    SIP SDP 의 c= 주소와 ice_enforce_list 가 이 값으로 설치됩니다 (plan.md ③)"
+    if [[ "$(settings_get lan_iface '')" != "$LAN_IFACE" || "$(settings_get sip_local_ip '')" != "$SIP_LOCAL_IP" ]]; then
+        settings_put lan_iface "$LAN_IFACE"
+        settings_put sip_local_ip "$SIP_LOCAL_IP"
+        info "    settings.ini 에 적었습니다 — 바꾸려면 그 값을 고치고 다시 --apply 하세요"
+    fi
+
     # --- 설정 ---
     local target mode owner
     for cfg in "${OWNED_CFGS[@]}"; do
@@ -823,6 +937,15 @@ apply() {
             # 자리표시자를 두지 않은 이유는 janus.jcfg 가 그 자체로 온전한
             # 설정으로 남아 있게 하기 위해서다 (그대로 복사해도 동작한다).
             sed -i "s|^\([[:space:]]*rtp_port_range[[:space:]]*=[[:space:]]*\)\"[0-9]\{1,\}-[0-9]\{1,\}\"|\1\"${rtp_range}\"|" "$target"
+
+            # ICE 후보를 모을 인터페이스 — 같은 이유로 값을 덮어쓴다.
+            sed -i "s|^\([[:space:]]*ice_enforce_list[[:space:]]*=[[:space:]]*\)\".*\"|\1\"${LAN_IFACE}\"|" "$target"
+        fi
+
+        if [[ "$cfg" == "janus.plugin.sip.jcfg" ]]; then
+            # SIP 쪽 SDP 에 실릴 주소. 이것이 이 장비의 LAN 주소가 아니면
+            # 시그널링은 되고 소리만 안 난다 (계획서 ③).
+            sed -i "s|^\([[:space:]]*local_ip[[:space:]]*=[[:space:]]*\)\".*\"|\1\"${SIP_LOCAL_IP}\"|" "$target"
         fi
         info "  설치: ${target} (${mode})"
     done
@@ -836,6 +959,8 @@ apply() {
         echo "; install.sh --apply 가 마지막으로 설치한 값. 손으로 고치지 마세요."
         echo "public_ip = ${public_ip}"
         echo "rtp_port_range = ${rtp_range}"
+        echo "sip_local_ip = ${SIP_LOCAL_IP}"
+        echo "lan_iface = ${LAN_IFACE}"
     } > "$APPLIED_FILE"
     chmod 644 "$APPLIED_FILE"
     info "  적용 기록: ${APPLIED_FILE}"
