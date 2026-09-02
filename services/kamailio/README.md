@@ -385,7 +385,9 @@ sg kamailio -c "cd <프로젝트>/pm2 && pm2 start ecosystem.config.js && pm2 sa
 
 ```bash
 ./setup-dashboard.sh                                      # 전체 점검
-grep ^Groups: /proc/$(pm2 pid kamailio-dashboard)/status  # 143 이 있어야 한다
+getent group kamailio | cut -d: -f3                       # 이 장비의 gid
+grep ^Groups: /proc/$(pm2 pid kamailio-dashboard)/status  # 그 gid 가 있어야 한다
+grep ^Groups: /proc/$(pgrep -f "God Daemon" | head -1)/status   # pm2 데몬 자신도
 ```
 
 닿지 않으면 대시보드 화면과 pm2 로그에 원인과 위 해결 방법이 그대로 표시됩니다.
@@ -538,6 +540,7 @@ sudo mariadb -e "DROP DATABASE kamailio;"
 | 대시보드가 "Kamailio 에 닿지 않습니다" | [T-6](#t-6-대시보드가-kamailio-에-닿지-않습니다) |
 | Janus 등록 실패 | [T-7](#t-7-janus-등록-실패) |
 | 마법사가 "점검 출력을 읽지 못했습니다" | [T-8](#t-8-마법사가-점검-출력을-읽지-못했습니다) |
+| pm2 에서 `errored` — `MODULE_NOT_FOUND` | [T-9](#t-9-pm2-에서-errored--module_not_found) |
 
 ## T-1. 기동하지 않음 — 먼저 볼 것
 
@@ -609,7 +612,7 @@ realm 은 단말이 보낸 `From` 도메인이 그대로 쓰이고 DNS 조회는
 
 ```bash
 ./setup-dashboard.sh
-grep ^Groups: /proc/$(pm2 pid kamailio-dashboard)/status   # 143 이 있어야 한다
+grep ^Groups: /proc/$(pm2 pid kamailio-dashboard)/status   # getent group kamailio 의 gid 가 있어야 한다
 ```
 
 ## T-7. Janus 등록 실패
@@ -657,6 +660,30 @@ bash -x ./bootstrap.sh --check --json 2>&1 | tail   # 어디서 멈췄는지
 > 찍어 보는 `curl` 이 7(연결 실패)로 끝나고, `set -e` 아래의 그 대입문 하나가
 > 점검을 통째로 끝냈습니다. 사람이 보는 모드에서는 거기까지 찍힌 줄이 남아
 > 티가 나지 않아 오래 몰랐습니다. 지금은 `|| true` 로 막혀 있습니다.
+
+## T-9. pm2 에서 `errored` — `MODULE_NOT_FOUND`
+
+```
+Error: Cannot find module 'express'
+  at Object.<anonymous> (…/services/kamailio/server/src/index.js:14:17)
+```
+
+의존성을 넣기 전에 pm2 에 등록한 것입니다. 설치 순서가
+[6 대시보드 빌드](#6-대시보드-빌드) → [7 pm2 등록](#7-pm2-등록) 인 이유입니다.
+
+**pm2 는 몇 번 다시 띄워 보다 포기합니다.** `pm2 list` 의 `↺` 가 한계에 닿아
+있으면 그 뒤로는 시도조차 하지 않으므로, 빌드를 마친 뒤 **직접 다시 띄워야**
+합니다. 로그의 시각이 지금보다 한참 전이면 그 상태입니다.
+
+```bash
+./setup-dashboard.sh --build        # 6 단계를 먼저
+pm2 restart kamailio-dashboard      # 그 뒤에 다시 띄운다
+pm2 list                            # status 가 online 인지
+```
+
+> 다만 `pm2 restart` 는 **그룹을 고치지 못합니다.** 이것으로 `online` 이 되고도
+> 화면이 "Kamailio 에 닿지 않습니다" 를 띄우면 [T-6](#t-6-대시보드가-kamailio-에-닿지-않습니다)
+> 입니다 — 그때는 `pm2 kill` 로 데몬부터 다시 띄워야 합니다.
 
 ---
 
