@@ -155,24 +155,36 @@ configure 끝의 요약에서 **SIP plugin 과 REST(HTTP) transport 가 yes** �
 
 ### configure 가 멈추면 — 빠진 라이브러리를 말해 줍니다
 
-```
-configure: error: libusrsctp not found. See README.md for installation
-instructions or use --disable-data-channels
-```
+configure 는 **플래그가 요구하는 것**부터 봅니다. 그래서 여기서 멈추는 것은 거의
+언제나 1 단계에서 빠뜨린 패키지입니다. 넣고 `./configure` 부터 다시 하면 됩니다
+(`autogen.sh` 는 다시 돌리지 않아도 됩니다).
 
-1 단계에서 빠뜨린 것입니다. 필요한 패키지를 넣고 `./configure` 부터 다시 합니다.
+| 멈추는 자리 | 무엇을 넣나 | 어느 플래그 때문에 |
+|---|---|---|
+| `libusrsctp not found` | `libusrsctp-dev` | `--enable-data-channels` |
+| `libavutil` · `libavcodec` · `libavformat` 를 포함한 묶음 | `libavcodec-dev libavformat-dev libavutil-dev` | `--enable-post-processing` |
 
 ```bash
-sudo apt-get install -y libusrsctp-dev     # Ubuntu 24.04 noble/universe 에 있습니다
+sudo ./bootstrap.sh --install      # 위의 것들을 포함해 한 번에
 ```
 
-`--disable-data-channels` 로 넘어가지 **마세요.** 위의 플래그는 먼저 세운 장비에서
-실제로 쓴 것이고, 플래그가 갈리면 "같은 저장소인데 이 장비에서만 안 된다" 가
-생깁니다. 빌드된 것이 선언과 같은지는 `install.sh` 가 보지 않습니다 — 이 자리는
-사람이 지켜야 합니다.
+**꺼서 넘어가지 마세요** (`--disable-data-channels` · `--disable-post-processing`).
+위의 플래그는 먼저 세운 장비에서 실제로 쓴 것이고, 플래그가 갈리면 "같은 저장소인데
+이 장비에서만 안 된다" 가 생깁니다. 빌드된 것이 선언과 같은지는 `install.sh` 가
+보지 않습니다 — 이 자리는 사람이 지켜야 합니다.
 
-다른 라이브러리에서 멈춰도 같습니다. `./bootstrap.sh` 가 무엇이 빠졌는지
-`sudo ./bootstrap.sh --install` 로 채울 수 있는지 알려 줍니다.
+**여러 개를 한 줄에 몰아서 말합니다.** configure 는 묶음 단위로 검사하므로 그중
+어느 것이 없는지는 알려 주지 않습니다. 하나씩 물어보면 보입니다.
+
+```bash
+for p in glib-2.0 jansson libssl libcrypto libavutil libavcodec libavformat ogg zlib \
+         nice libsrtp2 libconfig libcurl libmicrohttpd sofia-sip-ua opus usrsctp; do
+    printf '%-14s %s\n' "$p" "$(pkg-config --modversion $p 2>/dev/null || echo '── 없음')"
+done
+```
+
+> ICE 라이브러리의 pkg-config 이름은 `libnice` 가 아니라 **`nice`** 입니다.
+> `libnice` 로 물어보면 멀쩡히 설치돼 있어도 없다고 나옵니다.
 
 apt 에도 `janus` 패키지(0.11.8)가 있지만 **쓰지 않습니다** — [두 벌 설치를 만들지
 않는다](#apt-패키지를-쓰지-않는-이유) 를 보세요.
