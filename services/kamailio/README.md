@@ -352,6 +352,30 @@ NAT 뒤로 판정**합니다. 그래서 사실상 모든 통화의 RTP 가 릴�
 비교합니다. 나중에 모바일이 Janus 를 거치지 않고 SIP 로 직접 붙게 되면 그때는
 릴레이 범위도 포워딩 대상이 됩니다 (`media_public_ip` 를 그때 채웁니다).
 
+### 기동 로그에서 무시해도 되는 것
+
+24.04 패키지는 커널 포워딩(`xt_RTPENGINE`)을 붙이려 하는데, DKMS 모듈이 이
+커널에 빌드돼 있지 않으면 이렇게 남깁니다. **동작에는 지장이 없습니다** —
+userspace 로 중계하고 CPU 만 더 씁니다.
+
+```
+modprobe: FATAL: Module xt_RTPENGINE not found in directory /lib/modules/...
+iptables v1.8.10 (nf_tables): unknown option "--id"
+ERR: [core] FAILED TO CREATE KERNEL TABLE 0, KERNEL FORWARDING DISABLED
+INFO: [core] Startup complete, version 11.5.1.18
+```
+
+조용히 하고 싶으면 `/etc/default/rtpengine-daemon` 의 `MANAGE_IPTABLES=no`
+입니다. 커널 포워딩을 실제로 켜려면 `rtpengine-kernel-dkms` 가 이 커널에서
+빌드돼야 합니다.
+
+> ⚠️ **설정 파일의 주석은 `#` 입니다.** 이 저장소의 다른 `.ini` 처럼 `;` 를 쓰면
+> rtpengine 이 GLib key-file 파서로 읽다가 `Bad command line: Key file contains
+> line ... which is not a key-value pair` 로 **기동에서 죽습니다.**
+
+패키지는 `rtpengine-recording-daemon` 도 함께 켭니다. 이 배치에서는 녹음을 쓰지
+않으므로 꺼 두어도 됩니다 (`sudo systemctl disable --now rtpengine-recording-daemon`).
+
 ### 확인
 
 ```bash

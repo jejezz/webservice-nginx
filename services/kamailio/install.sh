@@ -530,14 +530,33 @@ write_rtpengine_cfg() {
     fi
     info "  설치: ${RTPENGINE_CFG} (interface=${iface}, ports=${MEDIA_PORT_RANGE})"
 
+    # 데몬을 건드리기 전에 파싱부터 시켜 본다. rtpengine 은 설정이 틀리면
+    # 기동에서 죽는데, 그때는 이미 돌던 데몬도 멈춘 뒤다.
+    if command -v rtpengine >/dev/null 2>&1; then
+        local parse
+        if ! parse="$(rtpengine --config-file="$RTPENGINE_CFG" --version 2>&1)"; then
+            printf '%s\n' "$parse" | sed 's/^/    /'
+            restore_backups
+            die "rtpengine 이 설정을 읽지 못했습니다 (위 오류). 설치를 되돌렸습니다."
+        fi
+    fi
+
     local unit; unit="$(relay_unit)"
     if [[ -n "$unit" ]]; then
         systemctl enable "$unit" >/dev/null 2>&1 || true
         systemctl restart "$unit" || true
         sleep 1
-        systemctl is-active --quiet "$unit" \
-            && ok "${unit} 구동 중" \
-            || warn "${unit} 이 뜨지 않았습니다 — journalctl -u ${unit} -n 30"
+        if systemctl is-active --quiet "$unit"; then
+            ok "${unit} 구동 중"
+            # 커널 모듈이 없으면 userspace 로 중계한다. 동작에는 지장이 없고
+            # CPU 만 더 쓴다 — 로그에 FAILED TO CREATE KERNEL TABLE 로 남는다.
+            journalctl -u "$unit" -n 20 --no-pager 2>/dev/null | grep -q "KERNEL FORWARDING DISABLED" \
+                && info "  커널 모듈(xt_RTPENGINE) 없이 userspace 로 중계합니다 — 동작은 정상입니다"
+        else
+            warn "${unit} 이 뜨지 않았습니다 — journalctl -u ${unit} -n 30"
+            warn "  설정을 되돌립니다 (설치 전 상태)."
+            restore_backups
+        fi
     else
         warn "미디어 릴레이 데몬이 설치되어 있지 않습니다 — sudo ./bootstrap.sh --install"
     fi
