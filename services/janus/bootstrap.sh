@@ -52,6 +52,10 @@ BUILD_DEPS=(
     "libconfig-dev|.jcfg 설정 파일 파싱"
     "libcurl4-openssl-dev|Janus 본체가 쓰는 HTTP 클라이언트"
     "libmicrohttpd-dev|HTTP 트랜스포트 (libjanus_http.so) — /janus-api 가 여기로 온다"
+    # ⚠️ 이것은 없어도 configure 가 실패하지 않는다. 요약에 "WebSockets
+    #    transport: no" 라고 적고 그냥 넘어가서, 기동 뒤 8188 이 안 열리는
+    #    것으로만 드러난다. install.sh 가 모듈 존재로도 잡는다.
+    "libwebsockets-dev|WebSocket 트랜스포트 (libjanus_websockets.so) — /janus-ws 가 여기로 온다"
     "libsofia-sip-ua-dev|SIP 플러그인 (libjanus_sip.so) — 이 게이트웨이의 핵심"
     "libopus-dev|Opus 코덱"
     "libogg-dev|녹음 (--enable-post-processing) — ogg 컨테이너"
@@ -189,8 +193,10 @@ print_order() {
         make && sudo make install && sudo make configs
 
     이 서버는 v1.4.0-5-gae0078e1 을 위 플래그로 빌드했습니다. configure 끝의
-    요약에서 **SIP plugin 과 REST(HTTP) transport 가 yes** 인지 꼭 보세요 —
-    아니면 libsofia-sip-ua-dev · libmicrohttpd-dev 가 빠진 것입니다.
+    요약에서 **SIP plugin · REST(HTTP) transport · WebSockets transport 가 셋 다
+    yes** 인지 꼭 보세요 — 아니면 libsofia-sip-ua-dev · libmicrohttpd-dev ·
+    libwebsockets-dev 가 빠진 것입니다. 특히 WebSockets 는 없어도 configure 가
+    멈추지 않고 no 로만 적고 지나갑니다.
 
  3. 설정과 systemd 유닛
         sudo ./install.sh --apply        # 실패하면 자동 롤백

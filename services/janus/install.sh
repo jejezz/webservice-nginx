@@ -270,13 +270,20 @@ report() {
         problems=$((problems + 1))
     fi
 
+    # WebSocket 트랜스포트가 여기 끼어 있는 이유 — 이것이 빠져도 configure 는
+    # 실패하지 않는다. libwebsockets-dev 가 없으면 요약에 "WebSockets transport:
+    # no" 라고만 적고 그냥 넘어간다. 그러면 설치는 다 끝난 것처럼 보이다가
+    # 기동 뒤 8188 이 안 열리는 것으로만 드러난다. 빌드에서 잡는 편이 낫다.
     local missing_mod=0 mod
-    for mod in "lib/janus/plugins/libjanus_sip.so" "lib/janus/transports/libjanus_http.so"; do
+    for mod in "lib/janus/plugins/libjanus_sip.so" \
+               "lib/janus/transports/libjanus_http.so" \
+               "lib/janus/transports/libjanus_websockets.so"; do
         [[ -e "${JANUS_PREFIX}/${mod}" ]] || { warn "모듈 없음: ${JANUS_PREFIX}/${mod}"; missing_mod=1; }
     done
     if [[ $missing_mod -eq 0 ]]; then
-        ok "필요한 모듈 있음 (SIP 플러그인 · HTTP 트랜스포트)"
+        ok "필요한 모듈 있음 (SIP 플러그인 · HTTP · WebSocket 트랜스포트)"
     else
+        warn "  빌드에 빠진 것입니다 — sudo ./bootstrap.sh --install 뒤 소스에서 다시 빌드하세요"
         problems=$((problems + 1))
     fi
 
@@ -450,6 +457,8 @@ report() {
     # /janus-ws 로 넘긴다 (nginx-conf/service.ini 의 [route:ws]).
     if [[ -z "$ws_addr" ]]; then
         pend "WebSocket 트랜스포트(${WS_PORT})가 열려 있지 않습니다 — WebRTC 클라이언트가 붙을 곳이 없습니다"
+        [[ -e "${JANUS_PREFIX}/lib/janus/transports/libjanus_websockets.so" ]] \
+            || pend "  모듈이 아예 없습니다 — libwebsockets 없이 빌드된 것입니다 (위의 '모듈 없음' 참고)"
         pending=$((pending + 1))
     elif [[ "$ws_addr" == 127.0.0.1:* ]]; then
         ok "WebSocket 수신 중: ${ws_addr} (루프백 전용 — 밖에서는 nginx 의 /janus-ws 로)"
@@ -755,6 +764,18 @@ apply() {
     (( rlo >= 1024 && rhi <= 65535 )) || die "settings.ini 의 rtp_port_range 는 1024~65535 안이어야 합니다: ${rtp_range}"
     info "  WebRTC 미디어 포트: ${rtp_range}"
 
+    # 값을 보여 주면서 바꾸는 법을 말하지 않으면, 읽는 사람은 그것이 고칠 수 있는
+    # 값인지조차 알 수 없다. 대시보드가 아직 안 떠 있는 자리라서 더 그렇다.
+    if [[ -r "$SETTINGS_FILE" ]]; then
+        info "  ↳ 바꾸려면 ${SETTINGS_FILE} 를 고치고 이 명령을 다시 돌리세요."
+    else
+        info "  ↳ 이 둘은 settings.ini 에서 옵니다. 지금은 그 파일이 없어 기본값입니다."
+        info "     바꾸려면 ${SETTINGS_FILE} 를 만들고 (커밋되지 않습니다) 이 명령을 다시 돌리세요:"
+        info "         public_ip      = 125.242.8.15      ; 비우거나 빼면 LAN 전용"
+        info "         rtp_port_range = 20000-20200       ; 공유기에서 UDP 포워딩할 범위"
+    fi
+    info "     대시보드가 떠 있으면 /janus/dashboard/settings 가 같은 파일을 씁니다."
+
     # --- 설정 ---
     local target mode owner
     for cfg in "${OWNED_CFGS[@]}"; do
@@ -851,9 +872,15 @@ apply() {
     [[ "$admin_addr" == 127.0.0.1:* ]] \
         && ok "Admin API: ${admin_addr} (루프백 전용)" \
         || warn "Admin API 가 예상과 다릅니다: ${admin_addr:-열려 있지 않음}"
-    [[ "$ws_addr" == 127.0.0.1:* ]] \
-        && ok "WebSocket: ${ws_addr} (루프백 전용)" \
-        || warn "WebSocket 이 예상과 다릅니다: ${ws_addr:-열려 있지 않음}"
+    if [[ "$ws_addr" == 127.0.0.1:* ]]; then
+        ok "WebSocket: ${ws_addr} (루프백 전용)"
+    else
+        warn "WebSocket 이 예상과 다릅니다: ${ws_addr:-열려 있지 않음}"
+        [[ -e "${JANUS_PREFIX}/lib/janus/transports/libjanus_websockets.so" ]] \
+            || warn "  libjanus_websockets.so 가 없습니다 — libwebsockets 없이 빌드됐습니다."
+        [[ -e "${JANUS_PREFIX}/lib/janus/transports/libjanus_websockets.so" ]] \
+            || warn "  sudo ./bootstrap.sh --install 뒤 소스에서 다시 빌드하고 --apply 를 다시 하세요."
+    fi
 
     echo
     #echo "다음 단계 — 계획서 3단계 (대시보드 서비스와 라우트 개방):"

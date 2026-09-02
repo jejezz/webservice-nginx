@@ -150,8 +150,13 @@ sh autogen.sh
 make && sudo make install && sudo make configs
 ```
 
-configure 끝의 요약에서 **SIP plugin 과 REST(HTTP) transport 가 yes** 인지 꼭
-보세요 — 아니면 `libsofia-sip-ua-dev` · `libmicrohttpd-dev` 가 빠진 것입니다.
+configure 끝의 요약에서 **`SIP plugin` · `REST (HTTP) transport` ·
+`WebSockets transport` 가 셋 다 yes** 인지 꼭 보세요.
+
+⚠️ **셋 중 WebSocket 만 성질이 다릅니다.** 앞의 둘이 없으면 configure 가 멈추지만,
+`libwebsockets-dev` 가 없으면 요약에 `no` 라고만 적고 **그냥 지나갑니다.** 빌드도
+설치도 다 끝난 것처럼 보이다가, 기동한 뒤 8188 이 안 열리는 것으로만 드러납니다
+([T-10](#t-10-websocket-이-예상과-다릅니다-열려-있지-않음)).
 
 ### configure 가 멈추면 — 빠진 라이브러리를 말해 줍니다
 
@@ -163,6 +168,7 @@ configure 는 **플래그가 요구하는 것**부터 봅니다. 그래서 여�
 |---|---|---|
 | `libusrsctp not found` | `libusrsctp-dev` | `--enable-data-channels` |
 | `libavutil` · `libavcodec` · `libavformat` 를 포함한 묶음 | `libavcodec-dev libavformat-dev libavutil-dev` | `--enable-post-processing` |
+| *(멈추지 않습니다 — 요약에 `WebSockets transport: no`)* | `libwebsockets-dev` | WS 트랜스포트 (`/janus-ws`) |
 
 ```bash
 sudo ./bootstrap.sh --install      # 위의 것들을 포함해 한 번에
@@ -272,11 +278,28 @@ websocket-relay 가 승인·등록 때 만들고([docs/identity.md](../../docs/i
 LAN 안에서만 쓸 것이면 건너뜁니다. 공인 IP 가 비어 있으면 `nat_1_1_mapping` 없이
 LAN 전용으로 설치됩니다 ([plan.md](docs/plan.md) 9 단계).
 
-**8-1.** 대시보드의 **설정** 화면(`/janus/dashboard/settings`)에서 공인 IP 와 미디어
-포트 범위를 넣고 저장합니다. 값은 `settings.ini` 에 저장되고 커밋되지 않습니다.
+**8-1.** 값 둘을 정합니다. `settings.ini` 에 들어가고 커밋되지 않습니다.
 
-**8-2.** 화면이 알려 주는 명령을 **사람이** 실행합니다. 대시보드는 sudo 를 부르지
-않습니다 — 명령을 보여 줄 뿐입니다.
+대시보드가 떠 있으면 **설정** 화면(`/janus/dashboard/settings`)에서 넣고 저장합니다.
+아직 안 떴으면 — 설치 순서상 8 단계가 먼저인 경우가 흔합니다 — **파일을 손으로
+만들면 됩니다.** 대시보드도 결국 이 파일을 씁니다.
+
+```ini
+; services/janus/settings.ini   (없으면 만드세요. 절[section] 없이 키 = 값 뿐입니다)
+public_ip      = 125.242.8.15      ; 비우거나 줄을 빼면 LAN 전용
+rtp_port_range = 20000-20200       ; 공유기에서 UDP 로 포워딩할 범위
+```
+
+| 키 | 없으면 | 무엇이 바뀌나 |
+|---|---|---|
+| `public_ip` | LAN 전용 | `janus.jcfg` 의 `nat_1_1_mapping` 을 켜거나 지웁니다 |
+| `rtp_port_range` | `20000-20200` | `janus.jcfg` 의 `media.rtp_port_range`. SIP 미디어(30000-30200) · rtpproxy(10200-19999) 와 겹치면 안 됩니다 |
+
+형식이 맞지 않으면 `--apply` 가 **아무것도 바꾸지 않고 멈춥니다.** 손으로 고쳐도
+대시보드로 고쳐도 같은 관문을 지납니다.
+
+**8-2.** 반영은 **사람이** 합니다. 어느 쪽으로 고쳤든 같습니다 — 대시보드는 sudo 를
+부르지 않고 이 명령을 보여 줄 뿐입니다.
 
 ```bash
 sudo ./install.sh --apply
@@ -515,6 +538,7 @@ Kamailio 의 SIP 계정은 건드리지 않습니다 — 그쪽이 소유합니�
 | `verify-*.sh` 가 계정 비밀번호를 못 찾는다 | [T-8](#t-8-verify-sh-가-계정-비밀번호를-못-찾는다) |
 | 선언한 플러그인이 올라오지 않았다 | [T-9](#t-9-선언한-플러그인이-올라오지-않았다) |
 | 소스 빌드의 `configure` 가 멈춘다 | [설치 2 단계](#configure-가-멈추면--빠진-라이브러리를-말해-줍니다) |
+| `WebSocket 이 예상과 다릅니다: 열려 있지 않음` | [T-10](#t-10-websocket-이-예상과-다릅니다-열려-있지-않음) |
 
 ## T-1. 기동하지 않음 — 먼저 볼 것
 
@@ -640,6 +664,34 @@ journalctl -u kamailio -f | grep REGISTER
 
 `janus.jcfg` 는 고쳤는데 설치하지 않았거나, 그 `.so` 가 빌드되지 않은 것입니다.
 후자면 2 단계의 configure 요약을 다시 보세요.
+
+## T-10. `WebSocket 이 예상과 다릅니다: 열려 있지 않음`
+
+`install.sh --apply` 끝에 나옵니다. 설정 문제가 아니라 **빌드 문제**인 경우가
+대부분입니다 — `libwebsockets-dev` 없이 빌드하면 WS 트랜스포트 모듈 자체가 만들어
+지지 않고, configure 는 그것을 오류로 치지 않습니다 (2 단계).
+
+```bash
+ls /opt/janus/lib/janus/transports/          # libjanus_websockets.so 가 있나
+```
+
+없으면 패키지를 넣고 **소스에서 다시 빌드**해야 합니다. 설정을 고쳐서 될 일이
+아닙니다.
+
+```bash
+sudo ./bootstrap.sh --install                # libwebsockets-dev 포함
+cd ~/Public/RetroLink/janus-gateway
+./configure --prefix=/opt/janus --enable-post-processing --enable-data-channels
+make && sudo make install
+sudo ./install.sh --apply                    # 다시 적용
+```
+
+모듈은 있는데 8188 이 안 열린다면 그때가 설정입니다 —
+`janus.transport.websockets.jcfg` 의 `ws = true` 와 `ws_port` 를 보세요.
+
+`ws_addr` 이 `127.0.0.1` 이 아닌 주소로 열려 있다는 경고라면 반대의 문제입니다.
+밖에서 TLS 없이 시그널링이 오가게 되므로 `ws_ip` 를 루프백으로 좁혀야 합니다 —
+밖에서는 nginx 의 `/janus-ws` 가 TLS 를 끊고 넘깁니다.
 
 ---
 
