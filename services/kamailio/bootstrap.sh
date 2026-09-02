@@ -113,6 +113,19 @@ missing_packages() {
         IFS='|' read -r pkg mod _ <<<"$line"
         have_module "$mod" || echo "$pkg"
     done
+    # 미디어 릴레이 데몬. kamailio 모듈이 아니라 별도 패키지이고, 이름이
+    # 배포판마다 달라서 FEATURES 에 못 박을 수 없다.
+    relay_installed || relay_package
+}
+
+# 이 장비에 릴레이가 이미 있는가.
+relay_installed() {
+    command -v rtpengine >/dev/null 2>&1 || command -v rtpproxy >/dev/null 2>&1
+}
+
+# 설치 이유를 사람이 볼 때 쓰는 설명.
+relay_why() {
+    echo "Kamailio 가 NAT 로 판정한 통화의 미디어 중계 (LAN 등록 전부가 그렇습니다)"
 }
 
 # ── 점검 ────────────────────────────────────────────────────────────────────
@@ -134,6 +147,16 @@ report() {
     for b in "${BUILTIN[@]}"; do
         have_module "$b" || warn "$b 가 없습니다 — 배포판 kamailio 에 들어 있어야 합니다"
     done
+    # 미디어 릴레이 데몬 — 이름이 배포판마다 다르다 (22.04 rtpproxy · 24.04 rtpengine).
+    if command -v rtpengine >/dev/null 2>&1; then
+        ok "$(printf '%-30s' rtpengine)$(relay_why)"
+    elif command -v rtpproxy >/dev/null 2>&1; then
+        ok "$(printf '%-30s' rtpproxy)$(relay_why)"
+    else
+        warn "$(printf '%-30s' "$(relay_package)")$(relay_why)"
+        warn "  이 판에 있는 것: $(relay_package_label)"
+        problems=$((problems + 1))
+    fi
 
     info ""
     info "2. 그룹 (대시보드가 RPC FIFO 를 읽는 데 필요)"

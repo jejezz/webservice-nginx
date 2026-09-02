@@ -16,7 +16,7 @@ SIP 로 붙는 Kamailio 서버에 관한 것을 모아 둔 디렉토리입니다
 설치 순서 (자세한 것은 아래 표)
 
   0 사전 조건 → 1 패키지·그룹 → 2 데이터베이스 → 3 장비 값(settings.ini)
-    → 4 Kamailio 설정 설치 → 5 SIP over WebSocket(선택)
+    → 4 Kamailio 설정 · 미디어 릴레이 → 5 SIP over WebSocket(선택)
     → 6 대시보드 빌드 → 7 pm2 등록 → 8 SIP 계정 → 9 마지막 점검
 ```
 
@@ -49,7 +49,7 @@ services/kamailio/
 ├── kamailio.cfg            배포판 설정의 포크 — 착신 푸시 훅 (install.sh 가 설치)
 ├── kamailio-local.cfg      /etc/kamailio/ 오버라이드 — digest 인증 (install.sh)
 ├── kamailio-websocket.cfg  /etc/kamailio/ 오버라이드 — WS 전송 (setup-websocket.sh)
-├── rtpengine.conf          미디어 릴레이 데몬 설정 원본 (아직 도입 전)
+├── rtpengine.conf          ④ 미디어 릴레이 설정 원본 (install.sh 가 설치)
 │
 │   ── 규약 선언 ──
 ├── nginx-conf/
@@ -86,7 +86,7 @@ services/kamailio/
 | **1** | 패키지 · kamailio 그룹 | `sudo ./bootstrap.sh --install` | **다시 로그인** |
 | **2** | 데이터베이스 | `cd database && sudo ./setup_mariadb.sh` | `kamailio.version` |
 | **3** | 이 장비의 값 | `/manager/setup` 의 폼, 또는 `--init` 로 뼈대 | `./install.sh` |
-| **4** | Kamailio 설정 설치 | `sudo ./install.sh --apply` | `systemctl status kamailio` |
+| **4** | Kamailio 설정 · 미디어 릴레이 | `sudo ./install.sh --apply` | `systemctl status kamailio` |
 | **5** | SIP over WebSocket *(선택)* | `sudo ./setup-websocket.sh --enable` | `./setup-websocket.sh` |
 | **6** | 대시보드 빌드 | `./setup-dashboard.sh --build` | `./setup-dashboard.sh` |
 | **7** | pm2 등록 | `pm2/restart.sh --restart` | 스크립트가 스스로 |
@@ -296,6 +296,70 @@ sudo systemctl status kamailio
 sudo /usr/sbin/kamctl ul show
 ```
 
+## 4-4. 미디어 릴레이 — Ubuntu 판에 따라 데몬이 다릅니다
+
+`--apply` 가 함께 설치합니다. 따로 할 일은 패키지를 넣는 것뿐이고, 그것도
+`bootstrap.sh --install` 이 이 판에 맞는 것을 골라 넣습니다.
+
+### 왜 필요한가
+
+이 배치에서는 LAN 단말의 Contact 가 사설 주소라 Kamailio 가 **모든 LAN 등록을
+NAT 뒤로 판정**합니다. 그래서 사실상 모든 통화의 RTP 가 릴레이를 지납니다
+([janus/docs/plan.md](../janus/docs/plan.md) ③ 절의 정정). 릴레이가 없으면
+신호는 붙는데 소리가 한쪽만 들리거나 아예 나지 않습니다.
+
+### 판에 따라 이름이 다릅니다
+
+| | 미디어 릴레이 | 비고 |
+|---|---|---|
+| **Ubuntu 22.04** | `rtpproxy` | 24.04 저장소에서 **빠졌습니다** |
+| **Ubuntu 24.04** | `rtpengine-daemon` | `noble/universe`. 11.5.1.18 (2026-09-02 확인) |
+
+**이것이 22.04 와 24.04 의 설치를 가르는 자리입니다.** 22.04 에서 쓰던 순서를
+24.04 에 그대로 들고 오면 `rtpproxy` 를 찾다가 막힙니다. 반대로 22.04 에는
+`rtpengine` 패키지가 없어 sipwise 저장소나 소스 빌드가 필요합니다.
+
+`kamailio.cfg` 는 둘 다 다룰 수 있습니다 — `#!ifdef WITH_RTPENGINE` 분기가
+`rtpengine_manage()` 와 `rtpproxy_manage()` 를 가릅니다. 어느 쪽을 쓸지는
+`kamailio-local.cfg` 의 define 이 정합니다.
+
+```
+#!define WITH_NAT           # 이것이 없으면 릴레이 호출 자체가 빠집니다
+#!define WITH_RTPENGINE     # 있으면 rtpengine, 지우면 rtpproxy
+```
+
+> ⚠️ 이 define 과 실제로 깔린 데몬이 어긋나면 **Kamailio 는 정상적으로 기동하고**
+> 통화 때만 미디어가 붙지 않습니다. `./install.sh` 의 "미디어 릴레이" 절이 둘을
+> 맞춰 봅니다.
+
+### 포트 범위 — Janus 의 두 범위와 겹치면 안 됩니다
+
+셋 다 같은 장비에서 UDP 포트를 바인딩하는 **다른 프로세스**입니다.
+
+```
+브라우저 ──WebRTC──▶ Janus ──평문 RTP──▶ rtpengine ──▶ 인터폰
+             20000-20200  │  30000-30200      10200-19999
+             janus.jcfg   └ janus.plugin.sip.jcfg    rtpengine.conf
+```
+
+| 범위 | 어디서 정하나 | 공유기 포워딩 |
+|---|---|---|
+| `20000-20200` WebRTC | `services/janus/settings.ini` 의 `rtp_port_range` | **필요** — 인터넷에서 오는 것은 이 다리뿐입니다 |
+| `30000-30200` Janus SIP 쪽 | `janus.plugin.sip.jcfg` | 불필요 (LAN) |
+| `10200-19999` 릴레이 | 이 서비스의 `settings.ini` 의 `media_port_range` | 불필요 (LAN) |
+
+`--apply` 는 겹치면 **아무것도 바꾸지 않고 멈춥니다** — Janus 쪽 값을 읽어
+비교합니다. 나중에 모바일이 Janus 를 거치지 않고 SIP 로 직접 붙게 되면 그때는
+릴레이 범위도 포워딩 대상이 됩니다 (`media_public_ip` 를 그때 채웁니다).
+
+### 확인
+
+```bash
+./install.sh                                  # "미디어 릴레이" 절
+systemctl status rtpengine-daemon             # 24.04
+journalctl -u kamailio -f | grep -i rtpengine # 통화 때 호출되는지
+```
+
 ## 5. SIP over WebSocket *(선택 — 지금은 쓰지 않습니다)*
 
 **5-1.** 단말이 SIP 를 직접 말하는 길(`wss://…/sip/`)입니다. **⛔ 지금은 꺼 두었습니다** —
@@ -399,7 +463,7 @@ grep ^Groups: /proc/$(pm2 pid kamailio-dashboard)/status  # getent group kamaili
 > 스크립트 인자로 받으면 셸 히스토리와 `ps` 에 남습니다.
 
 **8-1.** 계정을 만듭니다. **절대경로**를 쓰세요
-([두 벌 설치](#두-벌-설치--도구는-반드시-절대경로로) 참고).
+([두 벌 설치](#두-벌-설치--도구는-절대경로로) 참고).
 
 ```bash
 sudo /usr/sbin/kamctl add 1001 '내선1001비밀번호'
@@ -452,8 +516,8 @@ sudo /usr/sbin/kamctl ul show       # 현재 접속 중인 단말
 
 | | 왜 밖인가 |
 |---|---|
-| 공유기 포워딩 `30000-30500/udp` | 미디어(rtpengine) 도입 시. 장비 설정 |
-| rtpengine 데몬 | 배포판 저장소에 없음 — sipwise 저장소 또는 소스 빌드 (`rtpengine.conf` 참고) |
+| 공유기 포워딩 | Janus 의 WebRTC 범위만 (`services/janus/settings.ini`). 릴레이 범위는 LAN 전용이라 대상이 아닙니다 |
+| rtpengine (22.04 에서) | 그 판에는 패키지가 없습니다 — sipwise 저장소나 소스 빌드. **24.04 에는 `rtpengine-daemon` 이 있습니다** ([4-4](#4-4-미디어-릴레이--ubuntu-판에-따라-데몬이-다릅니다)) |
 | 단말 앱의 `sipUser` | `/register` 에 함께 보내야 착신 푸시가 간다 |
 
 ---
@@ -574,7 +638,7 @@ sudo systemctl start kamailio
 ## T-3. `invalid version for table subscriber`
 
 `version` 테이블의 값이 데몬이 기대하는 것과 다릅니다.
-5.7 도구로 스키마를 만들었을 때 생깁니다 ([두 벌 설치](#두-벌-설치--도구는-반드시-절대경로로)).
+5.7 도구로 스키마를 만들었을 때 생깁니다 ([두 벌 설치](#두-벌-설치--도구는-절대경로로)).
 `schema/001-auth.sql` 을 다시 적용하세요 (O-3).
 
 ## T-4. 올바른 비밀번호인데 401 이 반복됨

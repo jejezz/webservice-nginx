@@ -86,6 +86,45 @@ SIP_LISTEN_ADDR="$(settings_get sip_listen_addr '')"
 # 있으므로 그쪽에 맡긴다. 루프백 전용이라 같은 호스트에서만 부를 수 있다.
 SIP_PUSH_URL="$(settings_get sip_push_url 'http://127.0.0.1:28099/sip-push')"
 
+# ── 미디어 릴레이 ───────────────────────────────────────────────────────
+#
+# Kamailio 가 NAT 로 판정한 통화의 RTP 를 중계하는 데몬. 이 배치에서는 LAN
+# 단말의 Contact 가 사설 주소라 **모든 LAN 등록이 NAT 로 판정**되므로, 사실상
+# 모든 통화가 여기를 지난다 (services/janus/docs/plan.md ③ 정정).
+#
+# ⚠️ 데몬 이름이 배포판마다 다르다.
+#
+#     Ubuntu 22.04   rtpproxy          — 24.04 저장소에서 빠졌다
+#     Ubuntu 24.04   rtpengine-daemon  — noble/universe
+#
+# kamailio.cfg 는 둘 다 다룰 수 있다 (#!ifdef WITH_RTPENGINE). 어느 쪽을 쓸지는
+# 이 장비에 무엇이 있는지로 갈리고, kamailio-local.cfg 의 define 이 그것을
+# 따라가야 한다. 갈라지는 자리가 하나뿐이도록 여기서 정한다.
+RTPENGINE_TEMPLATE="${SCRIPT_DIR}/rtpengine.conf"
+RTPENGINE_CFG="/etc/rtpengine/rtpengine.conf"
+
+# 미디어 포트 범위. Janus 의 두 범위(20000-20200 WebRTC · 30000-30200 SIP)와
+# 겹치면 안 된다 — 셋 다 같은 장비에서 UDP 포트를 바인딩한다.
+MEDIA_PORT_RANGE="$(settings_get media_port_range '10200-19999')"
+# 밖에서 들어오는 미디어를 이 릴레이가 받아야 할 때만 쓴다. 지금 배치에서는
+# 브라우저가 Janus 로 붙으므로 비워 둔다 (LAN 전용).
+MEDIA_PUBLIC_IP="$(settings_get media_public_ip '')"
+
+# 이 장비에 실제로 있는 릴레이. 없으면 빈 문자열.
+relay_kind() {
+    [[ -x /usr/bin/rtpengine || -x /usr/sbin/rtpengine ]] && { echo rtpengine; return; }
+    [[ -x /usr/bin/rtpproxy  || -x /usr/sbin/rtpproxy  ]] && { echo rtpproxy;  return; }
+    echo ""
+}
+# 데몬 유닛 이름도 패키지마다 다르다.
+relay_unit() {
+    local u
+    for u in rtpengine-daemon rtpengine ngcp-rtpengine-daemon; do
+        systemctl list-unit-files "${u}.service" &>/dev/null && { echo "$u"; return; }
+    done
+    echo ""
+}
+
 # shellcheck source=../../database/lib_mariadb.sh
 source "${PROJECT_ROOT}/database/lib_mariadb.sh"
 
@@ -189,6 +228,29 @@ validate_settings() {
     [[ "$SIP_PUSH_URL" =~ ^https?://.+ ]] \
         || SETTINGS_PROBLEMS+=("sip_push_url 이 http(s) 주소가 아닙니다: ${SIP_PUSH_URL}")
 
+    if [[ ! "$MEDIA_PORT_RANGE" =~ ^[0-9]{4,5}-[0-9]{4,5}$ ]]; then
+        SETTINGS_PROBLEMS+=("media_port_range 형식이 맞지 않습니다 (예: 10200-19999): ${MEDIA_PORT_RANGE}")
+    else
+        local mlo="${MEDIA_PORT_RANGE%-*}" mhi="${MEDIA_PORT_RANGE#*-}"
+        (( mlo < mhi )) || SETTINGS_PROBLEMS+=("media_port_range 는 시작이 끝보다 작아야 합니다: ${MEDIA_PORT_RANGE}")
+        # Janus 의 두 범위와 겹치면 한쪽이 바인딩에 실패하거나 통화가 조용히
+        # 깨진다. 그 값은 services/janus 가 소유하므로 여기서 읽어 본다.
+        local jc jlo jhi label
+        for label in "WebRTC:janus.jcfg" "SIP:janus.plugin.sip.jcfg"; do
+            jc="${PROJECT_ROOT}/services/janus/${label#*:}"
+            [[ -r "$jc" ]] || continue
+            jlo="$(sed -n 's/^[[:space:]]*rtp_port_range[[:space:]]*=[[:space:]]*"\([0-9]\{1,\}\)-\([0-9]\{1,\}\)".*/\1/p' "$jc" | head -1)"
+            jhi="$(sed -n 's/^[[:space:]]*rtp_port_range[[:space:]]*=[[:space:]]*"\([0-9]\{1,\}\)-\([0-9]\{1,\}\)".*/\2/p' "$jc" | head -1)"
+            [[ -n "$jlo" && -n "$jhi" ]] || continue
+            (( mlo <= jhi && jlo <= mhi )) \
+                && SETTINGS_PROBLEMS+=("media_port_range(${MEDIA_PORT_RANGE}) 가 Janus ${label%%:*}(${jlo}-${jhi}) 와 겹칩니다")
+        done
+    fi
+
+    if [[ -n "$MEDIA_PUBLIC_IP" && ! "$MEDIA_PUBLIC_IP" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]]; then
+        SETTINGS_PROBLEMS+=("media_public_ip 가 IPv4 로 보이지 않습니다: ${MEDIA_PUBLIC_IP}")
+    fi
+
     [[ ${#SETTINGS_PROBLEMS[@]} -eq 0 && ${#SETTINGS_PENDING[@]} -eq 0 ]]
 }
 
@@ -203,13 +265,14 @@ report_settings_pending() {
     }
 
     local key saved applied
-    for key in sip_domain sip_listen_addr sip_push_url; do
+    for key in sip_domain sip_listen_addr sip_push_url media_port_range media_public_ip; do
         # **원본 파일이 아니라 실제로 쓰이는 값**과 비교한다. sip_domain 처럼
         # 사이트에서 오는 값은 이 서비스의 settings.ini 가 비어 있는 것이
         # 정상이라, 파일만 보면 "안 채웠다" 로 잘못 읽는다.
         case "$key" in
-            sip_domain) saved="$SIP_DOMAIN" ;;
-            *)          saved="$(settings_get "$key" '')" ;;
+            sip_domain)       saved="$SIP_DOMAIN" ;;
+            media_port_range) saved="$MEDIA_PORT_RANGE" ;;
+            *)                saved="$(settings_get "$key" '')" ;;
         esac
         applied="$(sed -n "s/^[[:space:]]*${key}[[:space:]]*=[[:space:]]*\(.*\)$/\1/p" "$APPLIED_FILE" | tail -1)"
         applied="${applied//[[:space:]]/}"
@@ -316,6 +379,48 @@ report() {
         || problems=$((problems + 1))
 
     info ""
+    info "미디어 릴레이"
+    # kamailio-local.cfg 의 define 과 실제로 깔린 데몬이 어긋나면, Kamailio 는
+    # 기동하지만 통화 때 미디어가 붙지 않는다. 그 어긋남을 여기서 잡는다.
+    local kind unit ustate declared
+    kind="$(relay_kind)"
+    unit="$(relay_unit)"
+    declared=rtpproxy
+    grep -q '^[[:space:]]*#!define[[:space:]][[:space:]]*WITH_RTPENGINE' "$TEMPLATE" 2>/dev/null && declared=rtpengine
+    if [[ -z "$kind" ]]; then
+        warn "릴레이 데몬이 없습니다 — 통화 때 미디어가 붙지 않습니다"
+        warn "  sudo ./bootstrap.sh --install  (이 판에 있는 것을 골라 설치합니다)"
+        problems=$((problems + 1))
+    elif [[ "$kind" != "$declared" ]]; then
+        warn "설정은 ${declared} 를 쓰는데 이 장비에 깔린 것은 ${kind} 입니다"
+        warn "  kamailio-local.cfg 의 WITH_RTPENGINE — 있으면 rtpengine, 없으면 rtpproxy"
+        problems=$((problems + 1))
+    else
+        ok "${kind} — 설정과 같습니다 (kamailio.cfg 의 WITH_RTPENGINE 분기)"
+        if [[ -n "$unit" ]]; then
+            ustate="$(systemctl is-active "$unit" 2>/dev/null || echo inactive)"
+            if [[ "$ustate" == active ]]; then
+                ok "${unit} 구동 중"
+            else
+                warn "${unit} 이 떠 있지 않습니다 (${ustate}) — 통화 때 미디어가 붙지 않습니다"
+                problems=$((problems + 1))
+            fi
+        fi
+        if [[ "$kind" == rtpengine ]]; then
+            if [[ -r "$RTPENGINE_CFG" ]]; then
+                report_config_diff "rtpengine.conf" "sudo $0 --apply" \
+                    -n 's%^interface = .*%interface = «%' \
+                    -n 's%^port-min = .*%port-min = «%' \
+                    -n 's%^port-max = .*%port-max = «%' \
+                    "$RTPENGINE_CFG" "$RTPENGINE_TEMPLATE" || problems=$((problems + 1))
+                info "  포트 ${MEDIA_PORT_RANGE} — LAN 안에서만 씁니다 (공유기 포워딩 대상이 아닙니다)"
+            else
+                pend "${RTPENGINE_CFG} 가 없습니다 — sudo $0 --apply 가 설치합니다"
+            fi
+        fi
+    fi
+
+    info ""
     info "배포 설정 (settings.ini)"
     validate_settings || true
 
@@ -391,6 +496,44 @@ write_main_cfg() {
     backup "$MAIN_CFG"
     install -o root -g root -m 644 "$MAIN_TEMPLATE" "$MAIN_CFG"
     info "  설치: ${MAIN_CFG} (배포판 설정의 포크)"
+}
+
+# rtpengine 설정을 설치한다. 자리표시자를 이 장비의 값으로 채운다.
+#
+# interface 는 "바인딩주소!광고주소" 다. 광고 주소가 없으면(LAN 전용) 왼쪽만
+# 남긴다 — 자리표시자를 그대로 두면 rtpengine 이 그 문자열을 주소로 알아듣고
+# 기동에 실패한다.
+write_rtpengine_cfg() {
+    [[ -f "$RTPENGINE_TEMPLATE" ]] || die "rtpengine 설정 원본이 없습니다: ${RTPENGINE_TEMPLATE}"
+    local iface="${SIP_LISTEN_ADDR}"
+    [[ -n "$MEDIA_PUBLIC_IP" ]] && iface="${SIP_LISTEN_ADDR}!${MEDIA_PUBLIC_IP}"
+
+    install -d -o root -g root -m 755 "$(dirname "$RTPENGINE_CFG")"
+    backup "$RTPENGINE_CFG"
+    sed -e "s|__MEDIA_ADDR__!__PUBLIC_IP__|${iface}|" \
+        -e "s|^port-min = .*|port-min = ${MEDIA_PORT_RANGE%-*}|" \
+        -e "s|^port-max = .*|port-max = ${MEDIA_PORT_RANGE#*-}|" \
+        "$RTPENGINE_TEMPLATE" > "$RTPENGINE_CFG"
+    chmod 644 "$RTPENGINE_CFG"
+
+    if grep -nE '__[A-Z_]+__' "$RTPENGINE_CFG" >/dev/null; then
+        grep -nE '__[A-Z_]+__' "$RTPENGINE_CFG" | sed 's/^/    /'
+        rm -f "$RTPENGINE_CFG"
+        die "rtpengine 설정에 치환되지 않은 자리가 남았습니다 (위 목록)."
+    fi
+    info "  설치: ${RTPENGINE_CFG} (interface=${iface}, ports=${MEDIA_PORT_RANGE})"
+
+    local unit; unit="$(relay_unit)"
+    if [[ -n "$unit" ]]; then
+        systemctl enable "$unit" >/dev/null 2>&1 || true
+        systemctl restart "$unit" || true
+        sleep 1
+        systemctl is-active --quiet "$unit" \
+            && ok "${unit} 구동 중" \
+            || warn "${unit} 이 뜨지 않았습니다 — journalctl -u ${unit} -n 30"
+    else
+        warn "미디어 릴레이 데몬이 설치되어 있지 않습니다 — sudo ./bootstrap.sh --install"
+    fi
 }
 
 write_kamctlrc() {
@@ -516,6 +659,9 @@ apply() {
     echo "  ${LOCAL_CFG}   (WITH_MYSQL / WITH_AUTH / DBURL / alias=${SIP_DOMAIN})"
     echo "                                 listen: ${SIP_LISTEN_ADDR}:5060 (udp+tcp), 127.0.0.1:5060"
     echo "  ${KAMCTLRC}    (kamctl 용 접속 정보, SIP_DOMAIN=${SIP_DOMAIN})"
+    if [[ "$(relay_kind)" == "rtpengine" ]]; then
+        echo "  ${RTPENGINE_CFG}     (미디어 릴레이, ports=${MEDIA_PORT_RANGE})"
+    fi
     echo
     echo "적용하면 이후 REGISTER 는 인증을 요구합니다."
     echo "subscriber 테이블에 계정이 없으면 아무도 등록할 수 없습니다. (현재 $(mdb_query "SELECT COUNT(*) FROM ${DB_NAME}.subscriber;")개)"
@@ -525,6 +671,9 @@ apply() {
     write_main_cfg
     write_local_cfg "$password"
     write_kamctlrc "$password"
+    # 미디어 릴레이는 이 장비에 있는 것을 쓴다. rtpengine 이면 설정도 우리가
+    # 소유한다. rtpproxy(22.04)는 배포판 기본 설정을 그대로 둔다.
+    [[ "$(relay_kind)" == "rtpengine" ]] && write_rtpengine_cfg
 
     # 문법 검사를 통과하지 못하면 되돌린다. 깨진 설정으로 재시작하면 서비스가 죽는다.
     local bin; bin="$(running_binary)"; bin="${bin:-/usr/sbin/kamailio}"
@@ -571,6 +720,8 @@ apply() {
             echo "sip_domain = ${SIP_DOMAIN}"
             echo "sip_listen_addr = ${SIP_LISTEN_ADDR}"
             echo "sip_push_url = ${SIP_PUSH_URL}"
+            echo "media_port_range = ${MEDIA_PORT_RANGE}"
+            echo "media_public_ip = ${MEDIA_PUBLIC_IP}"
         } > "$APPLIED_FILE"
         chmod 644 "$APPLIED_FILE"
         info "  적용 기록: ${APPLIED_FILE}"
@@ -630,6 +781,19 @@ remove() {
     backup "$LOCAL_CFG"
     rm -f "$LOCAL_CFG"
     info "  제거: ${LOCAL_CFG}"
+
+    # 미디어 릴레이는 이 저장소가 설정만 소유한다. 데몬은 멈추되 패키지는
+    # 그대로 둔다 — 지우는 것은 bootstrap 의 일도 아니고 사람의 판단이다.
+    if [[ -f "$RTPENGINE_CFG" ]]; then
+        backup "$RTPENGINE_CFG"
+        rm -f "$RTPENGINE_CFG"
+        info "  제거: ${RTPENGINE_CFG}"
+        local unit; unit="$(relay_unit)"
+        if [[ -n "$unit" ]]; then
+            systemctl disable --now "$unit" >/dev/null 2>&1 || true
+            info "  중지: ${unit} (패키지는 남깁니다)"
+        fi
+    fi
 
     systemctl restart kamailio
     sleep 1
