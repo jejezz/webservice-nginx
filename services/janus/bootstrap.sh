@@ -48,6 +48,7 @@ BUILD_DEPS=(
     "libnice-dev|ICE — WebRTC 후보 수집과 연결"
     "libsrtp2-dev|SRTP — WebRTC 미디어 암·복호"
     "libssl-dev|DTLS · TLS"
+    "libusrsctp-dev|데이터 채널 (--enable-data-channels) — 없으면 configure 가 여기서 멈춘다"
     "libconfig-dev|.jcfg 설정 파일 파싱"
     "libcurl4-openssl-dev|Janus 본체가 쓰는 HTTP 클라이언트"
     "libmicrohttpd-dev|HTTP 트랜스포트 (libjanus_http.so) — /janus-api 가 여기로 온다"
