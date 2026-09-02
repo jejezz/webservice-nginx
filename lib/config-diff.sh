@@ -95,7 +95,18 @@ config_diff() {
     # 타고 나간다. 저장소 원본은 커밋된 파일이므로 자리표시자만 들어 있다.
     #
     # 설치본에만 있는 줄은 개수만 말한다.
-    CONFIG_DIFF_SAMPLE="$(grep '^<' <<<"$delta" | head -4)"
+    #
+    # 어느 쪽 줄인지 **말해 준다.** diff 의 < 만 찍어 놓고 그 밑에 "설치본에만
+    # 있는 줄 N개" 를 붙이면, 읽는 사람은 위의 < 줄도 설치본 것으로 읽는다.
+    # 실제로 그렇게 읽혔다.
+    local sample
+    sample="$(grep '^<' <<<"$delta" | head -4)"
+    local missing_here
+    missing_here="$(grep -c '^<' <<<"$delta" || true)"
+    if [[ -n "$sample" ]]; then
+        CONFIG_DIFF_SAMPLE="  (저장소에는 있고 설치본에는 없는 줄 ${missing_here}개 — 앞 4개)"
+        CONFIG_DIFF_SAMPLE+=$'\n'"$sample"
+    fi
     local extra
     extra="$(grep -c '^>' <<<"$delta" || true)"
     [[ "${extra:-0}" -gt 0 ]] && CONFIG_DIFF_SAMPLE+="${CONFIG_DIFF_SAMPLE:+$'\n'}  (설치본에만 있는 줄 ${extra}개 — 비밀이 섞일 수 있어 내용은 찍지 않는다)"

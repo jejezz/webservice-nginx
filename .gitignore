@@ -1,110 +1,117 @@
-# Node 의존성 — 서비스마다 여러 곳에 있다
-node_modules/
-
-# 프런트 빌드 산출물
-web/dist/
-services/*/web/dist/
-services/manager/server/public/
-
-# 비밀 — 저장소에 넣지 않는다
+# ─────────────────────────────────────────────────────────────
+# 이 저장소가 담는 범위
 #
-# ⚠️ nginx/cert/ 는 통째로 뺀다. 서버·CA·클라이언트 개인키가 모두 여기 있다.
-#    CA 는 다시 만들면 이미 배포한 클라이언트 인증서가 전부 무효가 되므로,
-#    "다시 생성하면 되는 것" 이 아니라 **따로 백업해야 하는 자산**이다.
-#    (generate_certs.sh 는 저장소에 있으므로 새 환경에서는 새로 만들 수 있다)
+#   docs/            서비스 사이의 규약
+#   lib/             여러 스크립트가 공유하는 셸·Node 조각
+#   site/            여러 서비스가 함께 쓰는 값 (호스트·단지 ID·SIP 도메인)
+#   nginx/           리버스 프록시 설정과 스크립트, 공인 인증서(public_ca/)
+#   database/        MariaDB 설치·설정
+#   pm2/             프로세스 오케스트레이션
+#   services/manager 관리 대시보드
+#   services/kamailio · services/janus   통화 시스템
+#
+# 나머지 서비스(face-recognition-server, apartment-mgmt-server,
+# websocket-relay, web-cassini)는 각자 자기 git 저장소를 가집니다.
+# 여기서 같이 추적하면 같은 파일이 두 저장소에 들어갑니다.
+# 그 서비스들은 선언 둘(nginx-conf/ · pm2-conf/)만 맞추면 붙는
+# **plug-in** 입니다 — 이 저장소는 그 코드를 알 필요가 없습니다.
+# ─────────────────────────────────────────────────────────────
+services/*
+!services/manager/
+!services/kamailio/
+!services/janus/
+
+# services/ 바로 아래의 공유 세션 시크릿. 위 규칙에 이미 걸리지만
+# 실수로 예외를 추가할 때를 대비해 한 번 더 막습니다.
+services/.session-secret
+
+
+# ── 옮겨 온 층의 비밀 · 장비별 값 ─────────────────────────────
+# 사이트 값 — 장비마다 다르다 (site/settings-schema.json 이 정의)
+site/settings.ini
+site/.applied-settings
+
+# DB 비밀번호와 덤프
+database/secrets/
+database/backups/
+
+# nginx/cert/ 는 통째로 뺀다. 서버·CA·클라이언트 개인키가 모두 여기 있다.
+# CA 를 다시 만들면 이미 배포한 클라이언트 인증서가 전부 무효가 되므로,
+# "다시 생성하면 되는 것" 이 아니라 **따로 백업해야 하는 자산**이다.
 nginx/cert/
 
-# nginx/certs/ 는 이 저장소가 쓰지 않는 이름이다. 그래도 남긴다.
-#
-# 합쳐 온 다른 저장소가 이 이름을 썼다. 거기서 온 스크립트나 문서, 손에 익은
-# 경로를 따라 여기에 키가 놓일 수 있는데, 한 글자 차이라 눈으로는 안 걸린다.
-# **쓰지 않는 이름 한 줄이 남는 대가는 없고, 빠뜨렸을 때 새는 것은 CA 개인키다.**
+# 서비스가 장비마다 갖는 값 (settings-contract.md 의 세 파일 규약)
+services/*/settings.ini
+services/*/.applied-settings
+services/*/settings.json
+services/*/secrets/
+
+# Firebase 서비스 계정 키. 이 키는 FCM 발송 자격이라 커밋되면 누구나
+# 이 단지 단말에 푸시를 보낼 수 있다.
+**/*firebase-adminsdk*.json
+
+# 패킷 캡처. 실제 SIP/SDP 신호가 들어 있어 내선 번호와 단말 주소가 노출된다.
+*.pcap
+*.pcapng
+
+
+# ── 자격 증명 · 인증서 ────────────────────────────────────────
+# nginx/certs 에는 CA 개인키(ca_key.pem)와 서버 개인키(key.pem)가 있습니다.
+# 공개 인증서까지 한 디렉토리에 섞여 있어 통째로 제외합니다.
+# 필요하면 nginx/generate_all_certificates.sh 로 다시 만듭니다.
 nginx/certs/
 
-database/secrets/
-services/*/secrets/
-services/*/.env
+# 관리자 비밀번호 해시가 들어 있습니다. config.example.json 만 커밋합니다.
+services/manager/config.json
+# DB 비밀번호 파일.
+services/manager/secrets/
 
-# 위 규약을 벗어난 자리에 놓인 것까지 잡는 그물.
-#
-# 경로로만 막으면 "그 경로에 두지 않은 것" 이 그대로 새어 나간다 — 디버깅하다
-# 홈에서 복사해 온 키, 예제 디렉토리에 딸려 들어온 키, 새로 만든 서비스가 아직
-# secrets/ 규약을 따르지 않는 경우가 전부 그렇다.
-#
-# .crt 와 .cer 은 넣지 않는다. 공개 인증서라 커밋해야 하는 자리가 실제로 있다
-# (예: 단말에 배포하는 CA). 개인키가 든 형식만 막는다.
+# 어느 디렉토리든 이런 것은 커밋하지 않습니다.
+.env
+.env.*
+!.env.example
 *.pem
 *.key
 *.p12
 *.pfx
 *.srl
-*.pw
 secrets/
 
-# .env 는 어느 깊이에 있든 막고, 예제만 통과시킨다.
-.env
-.env.*
-!.env.example
-services/manager/config.json
-# 관리용 비밀 방 번호. src/ 아래에 만들어진다 (index.ts 의 __dirname 기준).
-# services/websocket-relay/.gitignore 도 같은 것을 잡지만, 여기에도 둬서
-# 서비스 쪽 파일이 사라져도 새 나가지 않게 한다.
-services/websocket-relay/src/.secret-room-id
 
-# Firebase 서비스 계정 키. 위 services/*/secrets/ 규약을 벗어난 자리에 놓인
-# 것까지 잡는다 — 예제 디렉토리에 실제 키가 한 벌 들어와 있었다.
-# 이 키는 FCM 발송 자격이라 커밋되면 누구나 이 단지 단말에 푸시를 보낼 수 있다.
-**/*firebase-adminsdk*.json
+# ── 빌드 산출물 · 의존성 ──────────────────────────────────────
+node_modules/
+dist/
+# manager 프론트엔드 빌드 결과. web/ 에서 npm run build 로 만듭니다.
+services/manager/server/public/
 
-# Python 바이트코드. 생성기를 돌리면 옆에 생긴다.
-__pycache__/
-*.pyc
 
-# 런타임 산출물
-logs/
-services/*/logs/
-pm2/logs/
+# ── 로그 · 런타임 ────────────────────────────────────────────
 *.log
+logs/
 *.pid
-database/backups/
+data/
+*.sqlite
+*.db
 
-# 대시보드에서 바꾼 런타임 설정
-services/*/settings.json
 
-# 별도 관리 — 이 저장소가 추적하지 않는다
-/services/stock-analyzer/
-/services/ws-bridge/
-
-# 이관 중 남은 백업
-/.migration-backup/
-
-# 패킷 캡처. 디버깅하다 남는 것들인데, 실제 SIP/SDP 신호가 그대로 들어 있어
-# 내선 번호와 단말 주소가 노출된다. 필요하면 저장소 밖에 둔다.
-*.pcap
-*.pcapng
-
-# Claude Code
-#
-# settings.local.json 은 개인 설정이다 (.local 규약 — 공유할 설정은
-# .claude/settings.json 에 두고 그건 커밋한다).
-# worktrees/ 는 작업용으로 만들어진 저장소 사본이라 통째로 중복이다.
-#
-# **/ 를 붙인다. 슬래시가 든 패턴은 이 파일이 있는 디렉토리(= 저장소 루트)에만
-# 걸려서, services/<서비스>/.claude/worktrees/ 는 그냥 통과한다. 실제로 그렇게
-# 만들어진 워크트리가 커밋에 딸려 들어간 적이 있다.
-**/.claude/settings.local.json
-**/.claude/worktrees/
-
-# 작업 중 메모. 저장소에 남길 것은 docs/ 에 둔다.
-claude-session-memery.md
-
-# 편집기·OS
+# ── 도구 · 편집기 ────────────────────────────────────────────
+# Claude Code 의 장비별 설정과 작업 트리(저장소 전체 사본).
+.claude/settings.local.json
+.claude/worktrees/
 .idea/
-*.iml
+.vscode/
+*.swp
 .DS_Store
 Thumbs.db
-*.swp
 
-# 사이트 값 — 장비마다 다르다 (site/settings-schema.json 이 정의)
-site/settings.ini
-site/.applied-settings
+# macOS 가 만드는 사이드카. Mac 을 거친 복사(exFAT USB · SMB 공유 · Mac 에서
+# 만든 zip)에서 파일마다 하나씩 딸려 온다. 확장 속성과 리소스 포크를 담을 수
+# 없는 파일시스템이라 옆에 따로 쓰는 것이고, 리눅스에서는 쓸모가 없다.
+#
+# 같은 복사가 권한도 644 → 755 로 뒤집어 놓는다. 그쪽은 .gitignore 로 막을 수
+# 없으니 git diff --summary 의 'mode change' 를 보고 되돌려야 한다.
+#
+# **애초에 파일 복사 말고 git 으로 옮기는 편이 낫다.**
+._*
+__MACOSX/
+

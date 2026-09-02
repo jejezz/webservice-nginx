@@ -495,8 +495,11 @@ else
         user="${section#user:}"
         validate_identifier "$user" "사용자 이름"
 
-        host="$(get_value "$section" host localhost)"
-        validate_host "$host"
+        # host 는 **목록**이다. MariaDB 는 user@host 가 키라, 한 사람이라도 붙는
+        # 자리마다 계정이 따로 있어야 한다. localhost(유닉스 소켓)로만 만들어
+        # 두면 같은 장비에서도 TCP 로 붙는 순간 127.0.0.1 로 매칭돼 거부된다 —
+        # 겉으로는 "비밀번호가 틀렸다" 로만 보인다. 정책은 database/README.md.
+        hosts="$(get_value "$section" host localhost)"
 
         privileges="$(get_value "$section" privileges ALL)"
         if [[ ! "$privileges" =~ ^[A-Za-z_,\ ]+$ ]]; then
@@ -506,37 +509,44 @@ else
 
         password="$(resolve_password "$user" "$section")"
         esc_user="$(sql_escape "$user")"
-        esc_host="$(sql_escape "$host")"
         esc_pw="$(sql_escape "$password")"
-
-        exists="$(query "SELECT COUNT(*) FROM mysql.user WHERE user='${esc_user}' AND host='${esc_host}';")"
-        if [[ "${exists:-0}" -gt 0 ]]; then
-            run_sql "ALTER USER '${esc_user}'@'${esc_host}' IDENTIFIED BY '${esc_pw}';"
-            info "갱신: ${user}@${host} (비밀번호 반영)"
-        else
-            run_sql "CREATE USER '${esc_user}'@'${esc_host}' IDENTIFIED BY '${esc_pw}';"
-            info "생성: ${user}@${host}"
-        fi
-
         databases="$(get_value "$section" databases "")"
-        if [[ -z "$databases" ]]; then
-            info "  권한 대상 databases 미지정 — 권한을 주지 않음"
-            continue
-        fi
 
-        IFS=',' read -ra db_list <<< "$databases"
-        for db in "${db_list[@]}"; do
-            db="$(echo "$db" | xargs)"
-            [[ -z "$db" ]] && continue
+        IFS=',' read -ra host_list <<< "$hosts"
+        for host in "${host_list[@]}"; do
+            host="$(echo "$host" | xargs)"
+            [[ -z "$host" ]] && continue
+            validate_host "$host"
+            esc_host="$(sql_escape "$host")"
 
-            if [[ "$db" == "*" ]]; then
-                run_sql "GRANT ${privileges} ON *.* TO '${esc_user}'@'${esc_host}';"
-                info "  권한: ${privileges} ON *.*"
+            exists="$(query "SELECT COUNT(*) FROM mysql.user WHERE user='${esc_user}' AND host='${esc_host}';")"
+            if [[ "${exists:-0}" -gt 0 ]]; then
+                run_sql "ALTER USER '${esc_user}'@'${esc_host}' IDENTIFIED BY '${esc_pw}';"
+                info "갱신: ${user}@${host} (비밀번호 반영)"
             else
-                validate_identifier "$db" "데이터베이스 이름"
-                run_sql "GRANT ${privileges} ON \`${db}\`.* TO '${esc_user}'@'${esc_host}';"
-                info "  권한: ${privileges} ON ${db}.*"
+                run_sql "CREATE USER '${esc_user}'@'${esc_host}' IDENTIFIED BY '${esc_pw}';"
+                info "생성: ${user}@${host}"
             fi
+
+            if [[ -z "$databases" ]]; then
+                info "  권한 대상 databases 미지정 — 권한을 주지 않음"
+                continue
+            fi
+
+            IFS=',' read -ra db_list <<< "$databases"
+            for db in "${db_list[@]}"; do
+                db="$(echo "$db" | xargs)"
+                [[ -z "$db" ]] && continue
+
+                if [[ "$db" == "*" ]]; then
+                    run_sql "GRANT ${privileges} ON *.* TO '${esc_user}'@'${esc_host}';"
+                    info "  권한: ${privileges} ON *.* (${user}@${host})"
+                else
+                    validate_identifier "$db" "데이터베이스 이름"
+                    run_sql "GRANT ${privileges} ON \`${db}\`.* TO '${esc_user}'@'${esc_host}';"
+                    info "  권한: ${privileges} ON ${db}.* (${user}@${host})"
+                fi
+            done
         done
 
         run_sql "FLUSH PRIVILEGES;"

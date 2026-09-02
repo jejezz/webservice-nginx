@@ -16,6 +16,11 @@ After=network-online.target
 # Kamailio 는 필수 의존이 아닙니다. 등록은 브라우저가 붙을 때 일어나고, 그때
 # Kamailio 가 살아 있으면 됩니다. 다만 순서는 맞춰 둡니다.
 After=kamailio.service
+# 공인 IP 를 설치본에 맞추고 나서 뜹니다. Janus 는 기동할 때 읽은 값을 ICE
+# 후보로 계속 광고하므로, 고칠 수 있는 자리가 여기뿐입니다.
+# Wants 라서 그 유닛이 실패해도 Janus 는 뜹니다 (LAN 통화는 무관합니다).
+Wants=janus-public-ip.service
+After=janus-public-ip.service
 
 [Service]
 Type=simple

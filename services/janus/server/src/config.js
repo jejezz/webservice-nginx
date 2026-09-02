@@ -6,6 +6,26 @@
  * services/janus/install.sh 가 sudo 로 합니다. (kamailio-dashboard 와 같은 자세)
  */
 const path = require('path');
+const fs = require('fs');
+const os = require('os');
+
+// install.sh --apply 가 남긴 값 → settings.ini → 기본 경로의 LAN 주소 순으로 본다.
+function sipLocalIp() {
+  const dir = path.resolve(__dirname, '../..');
+  for (const f of ['.applied-settings', 'settings.ini']) {
+    try {
+      const m = fs.readFileSync(path.join(dir, f), 'utf8')
+        .match(/^[ \t]*sip_local_ip[ \t]*=[ \t]*(\S+)[ \t]*$/m);
+      if (m) return m[1];
+    } catch { /* 없으면 다음 것을 본다 */ }
+  }
+  for (const [, addrs] of Object.entries(os.networkInterfaces())) {
+    for (const a of addrs || []) {
+      if (a.family === 'IPv4' && !a.internal) return a.address;
+    }
+  }
+  return '127.0.0.1';   // 여기까지 오면 통화는 안 되지만, 화면은 떠야 한다
+}
 
 module.exports = {
   SERVICE_NAME: 'janus-dashboard',
@@ -51,7 +71,10 @@ module.exports = {
   //
   // ⚠️ 루프백이 아니라 LAN 주소다. 127.0.0.1 로 붙으면 시그널링은 되는데
   //    SDP 에 실리는 주소가 어긋나 소리가 안 난다 (docs/plan.md ③).
-  SIP_PROXY: process.env.SIP_PROXY || 'sip:192.168.0.252:5060',
+  //
+  // 주소를 박아 두지 않는다 — install.sh --apply 가 정한 값을 따라간다.
+  // 장비마다 다른 값이라, 박아 두면 다른 장비에서 조용히 틀린 곳으로 건다.
+  SIP_PROXY: process.env.SIP_PROXY || `sip:${sipLocalIp()}:5060`,
   SIP_DOMAIN: process.env.SIP_DOMAIN || 'pluto.org',
 
   REQUEST_TIMEOUT_MS: parseInt(process.env.REQUEST_TIMEOUT_MS, 10) || 3000,

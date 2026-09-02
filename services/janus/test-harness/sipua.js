@@ -28,7 +28,17 @@ const arg = (name, def) => {
 };
 const USER = arg('user', '9999999904');
 const DOMAIN = arg('domain', 'pluto.org');
-const [PROXY_HOST, PROXY_PORT] = arg('proxy', '192.168.0.252:5060').split(':');
+// 기본값은 쓰이지 않는다 — verify-bridge.sh 가 --proxy 로 이 장비의 값을 준다.
+// 여기에 특정 장비의 주소를 박아 두면 손으로 돌릴 때 조용히 틀린 곳으로 건다.
+// 이 장비의 첫 LAN 주소. 루프백과 내부 인터페이스는 뺀다.
+function lanIp() {
+  for (const addrs of Object.values(require('os').networkInterfaces())) {
+    for (const a of addrs || []) if (a.family === 'IPv4' && !a.internal) return a.address;
+  }
+  return '127.0.0.1';
+}
+
+const [PROXY_HOST, PROXY_PORT] = arg('proxy', `${lanIp()}:5060`).split(':');
 const SECRET = fs.readFileSync(arg('pw-file'), 'utf8').trim();
 const MODE = arg('mode', 'answer');
 const PEER = arg('peer', '9999999901');
@@ -39,7 +49,7 @@ const DURATION = parseInt(arg('duration', '8'), 10);
  * 안전장치를 DURATION 기준으로 잡았더니 통화 2초 만에 스스로 끊어 버렸다.
  */
 const WAIT = parseInt(arg('wait', '120'), 10);
-const LOCAL_IP = arg('local-ip', '192.168.0.252');
+const LOCAL_IP = arg('local-ip', lanIp());
 const SIP_PORT = parseInt(arg('sip-port', '45060'), 10);
 const RTP_PORT = parseInt(arg('rtp-port', '40100'), 10);
 /*

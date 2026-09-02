@@ -56,6 +56,12 @@ API_SECRET_FILE="${SECRETS_DIR}/api-secret"
 # 파일이 없으면 기본값(LAN 전용 · 20000-20200)으로 설치됩니다.
 # 값이 형식에 맞지 않으면 --apply 가 아무것도 바꾸지 않고 멈춥니다.
 SETTINGS_FILE="${SCRIPT_DIR}/settings.ini"
+# 파일에 그 키가 없을 때 쓰는 값. 설치할 때와 점검할 때가 반드시 같아야 한다 —
+# 갈리면 "설치본과 저장한 값이 다르다" 는 거짓 경보가 난다.
+DEFAULT_PUBLIC_IP=""
+DEFAULT_RTP_RANGE="20000-20200"
+# settings.ini 뼈대를 만드는 공용 도구 (settings-schema.json 을 읽는다).
+SETTINGS_INIT_CMD="node ../../lib/settings.js --init ."
 # 마지막으로 설치한 값. 대시보드가 '적용 대기'를 이걸로 가른다.
 APPLIED_FILE="${SCRIPT_DIR}/.applied-settings"
 
@@ -70,10 +76,91 @@ settings_get() {
     v="${v//[[:space:]]/}"
     echo "${v:-$fallback}"
 }
+
+# 통화에 쓸 수 있는 인터페이스만 고른다. 가상 브리지·컨테이너·터널은 뺀다 —
+# ICE 후보로 실어 보내면 상대가 닿지 않는 곳에 붙으려다 기다린다 (janus.jcfg).
+lan_candidates() {
+    local ifc cidr
+    while read -r ifc cidr; do
+        case "$ifc" in
+            lo|docker*|virbr*|veth*|br-*|tun*|tap*|wg*|vmnet*|zt*) continue ;;
+        esac
+        echo "${ifc} ${cidr%%/*}"
+    done < <(ip -4 -o addr show scope global 2>/dev/null | awk '{print $2, $4}')
+}
+
+# 기본 경로가 나가는 인터페이스. 여럿일 때 무엇을 권할지 정하는 기준이다.
+default_route_iface() { ip -4 route show default 2>/dev/null | awk '{print $5; exit}'; }
+
+# SIP_LOCAL_IP · LAN_IFACE 를 정한다.
+#   $1 = "ask" 면 후보가 여럿일 때 물어본다. 그 밖에는 절대 묻지 않는다
+#        (점검은 아무것도 바꾸지 않고 --yes 는 사람이 없는 자리다).
+resolve_lan() {
+    local may_ask="${1:-}" cands n pick def_ifc line
+    SIP_LOCAL_IP="$(settings_get sip_local_ip "")"
+    LAN_IFACE="$(settings_get lan_iface "")"
+
+    cands="$(lan_candidates)"
+    n="$(printf '%s\n' "$cands" | grep -c . || true)"
+
+    # settings.ini 에 박혀 있으면 그대로 쓴다. 다만 이 장비에 실재하는지는 본다 —
+    # 없는 주소로 설치하면 Janus 는 뜨고 소리만 안 난다.
+    if [[ -n "$SIP_LOCAL_IP" && -n "$LAN_IFACE" ]]; then
+        printf '%s\n' "$cands" | grep -qx "${LAN_IFACE} ${SIP_LOCAL_IP}" && return 0
+        warn "settings.ini 의 sip_local_ip/lan_iface 가 이 장비에 없습니다: ${LAN_IFACE} ${SIP_LOCAL_IP}"
+        SIP_LOCAL_IP=""; LAN_IFACE=""
+    fi
+
+    (( n > 0 )) || return 1
+
+    def_ifc="$(default_route_iface)"
+    # 하나뿐이면 물어볼 것이 없다.
+    if (( n == 1 )); then
+        read -r LAN_IFACE SIP_LOCAL_IP <<<"$cands"
+        return 0
+    fi
+
+    # 여럿이다. 기본 경로가 나가는 것을 권한다.
+    pick="$(printf '%s\n' "$cands" | awk -v d="$def_ifc" '$1==d{print; exit}')"
+    [[ -n "$pick" ]] || pick="$(printf '%s\n' "$cands" | head -1)"
+
+    if [[ "$may_ask" == "ask" && -t 0 ]]; then
+        echo
+        echo "통화에 쓸 인터페이스를 고르세요 (SIP SDP 주소 · ICE 후보):"
+        local i=0 sel
+        while read -r line; do
+            i=$((i + 1))
+            [[ "$line" == "$pick" ]] \
+                && echo "  ${i}) ${line}   ← 기본 경로. 권장" \
+                || echo "  ${i}) ${line}"
+        done <<<"$cands"
+        read -r -p "번호 [기본: 권장] " sel || sel=""
+        if [[ "$sel" =~ ^[0-9]+$ ]] && (( sel >= 1 && sel <= n )); then
+            pick="$(printf '%s\n' "$cands" | sed -n "${sel}p")"
+        fi
+    fi
+    read -r LAN_IFACE SIP_LOCAL_IP <<<"$pick"
+    return 0
+}
+
+# 고른 값을 settings.ini 에 남긴다. 다음 실행부터 묻지 않고, 대시보드도 읽는다.
+settings_put() {
+    local key="$1" val="$2"
+    if [[ -f "$SETTINGS_FILE" ]] && grep -q "^[[:space:]]*${key}[[:space:]]*=" "$SETTINGS_FILE"; then
+        sed -i "s|^[[:space:]]*${key}[[:space:]]*=.*|${key} = ${val}|" "$SETTINGS_FILE"
+    else
+        [[ -f "$SETTINGS_FILE" ]] || echo "; install.sh 가 만들었습니다. 항목의 뜻은 settings-schema.json 에 있습니다." > "$SETTINGS_FILE"
+        echo "${key} = ${val}" >> "$SETTINGS_FILE"
+    fi
+    chown "$SUDO_UID:$SUDO_GID" "$SETTINGS_FILE" 2>/dev/null || true
+}
 # ═════════════════════════════════════════════════════════════════════
 
 SERVICE_TEMPLATE="${SCRIPT_DIR}/janus.service"
 SERVICE_UNIT="/etc/systemd/system/janus.service"
+# 기동 직전에 공인 IP 를 설치본에 맞추는 유닛. janus.service 가 Wants 로 부른다.
+PUBIP_TEMPLATE="${SCRIPT_DIR}/janus-public-ip.service"
+PUBIP_UNIT="/etc/systemd/system/janus-public-ip.service"
 JANUS_USER="janus"
 
 # 계획서 ①③⑦ 에서 정한 값들. 설정 파일과 여기가 어긋나면 점검이 잡아낸다.
@@ -82,10 +169,17 @@ API_PORT=8088
 ADMIN_PORT=7088
 WS_PORT=8188
 DASHBOARD_PORT=28087
-# SIP 쪽 SDP 에 실릴 주소. 루프백을 쓰면 시그널링은 되고 소리만 안 난다 (계획서 ③).
-SIP_LOCAL_IP="192.168.0.252"
-# ICE 후보를 여기서만 모은다. docker0/virbr0 까지 실어 보내면 통화 성립이 느려진다.
-LAN_IFACE="enp2s0"
+# SIP 쪽 SDP 에 실릴 주소와 ICE 후보를 모을 인터페이스.
+#
+# 예전에는 이 둘을 여기에 박아 두었다(192.168.0.252 · enp2s0). 처음 세운 장비의
+# 값이라 다른 장비에서는 틀렸고, 틀린 채로도 Janus 는 떠서 **시그널링은 되고
+# 소리만 안 나는** 모양이 됐다 (계획서 ③).
+#
+# 그래서 감지한다. 통화에 못 쓰는 인터페이스(도커·libvirt·터널)는 빼고,
+# 남은 것이 여럿이면 사람에게 고르게 한다. 고른 값은 settings.ini 에 적어 다음
+# 실행부터는 묻지 않는다.
+SIP_LOCAL_IP=""
+LAN_IFACE=""
 
 # 점검 출력은 공용 규약을 따른다 (docs/check-contract.md).
 # ok · warn · info 는 예전과 같고, 예전의 no() 는 skip/pend 로 나뉜다.
@@ -158,6 +252,49 @@ jcfg_rtp_range() {
     fi
     [[ -r "$file" ]] || return 0
     sed -n 's/^[[:space:]]*rtp_port_range[[:space:]]*=[[:space:]]*"\([0-9]\{1,\}\)-\([0-9]\{1,\}\)".*/\1 \2/p' "$file" | head -1
+}
+
+# ── 미디어 릴레이는 배포판마다 다르다 ──────────────────────────────────
+#
+# Kamailio 가 NAT 로 판정한 통화의 미디어를 중계하는 데몬이다. 이 배치에서는
+# LAN 단말 전부가 NAT 로 판정되므로 사실상 모든 통화가 여기를 지난다
+# (docs/plan.md ③ 정정).
+#
+#   Ubuntu 22.04   rtpproxy      (24.04 저장소에서 빠졌다)
+#   Ubuntu 24.04   rtpengine     (kamailio.cfg 의 WITH_RTPENGINE 분기)
+#
+# 그래서 이름 하나를 못 박지 않고 **있는 쪽**을 본다. 둘 다 없으면 이 OS 에서
+# 무엇을 넣어야 하는지 알려 준다.
+media_relay_kind() {
+    if pgrep -x rtpengine >/dev/null 2>&1 || [[ -f /etc/rtpengine/rtpengine.conf ]]; then
+        echo rtpengine; return 0
+    fi
+    if pgrep -x rtpproxy >/dev/null 2>&1 || [[ -f /etc/default/rtpproxy ]]; then
+        echo rtpproxy; return 0
+    fi
+    echo ""
+}
+
+# 데몬 유닛 이름은 패키지마다 다르다 (rtpengine-daemon · rtpengine).
+relay_unit_state() {
+    local kind="$1" u
+    case "$kind" in
+        rtpengine) for u in rtpengine-daemon rtpengine ngcp-rtpengine-daemon; do
+                       systemctl list-unit-files "${u}.service" &>/dev/null || continue
+                       systemctl is-active "$u" 2>/dev/null && return 0
+                   done ;;
+        rtpproxy)  systemctl is-active rtpproxy 2>/dev/null && return 0 ;;
+    esac
+    echo inactive
+}
+
+# rtpengine 의 포트 범위. /etc/rtpengine/rtpengine.conf 의 port-min · port-max.
+rtpengine_range() {
+    local f="/etc/rtpengine/rtpengine.conf" mn mx
+    [[ -r "$f" ]] || return 0
+    mn="$(sed -n 's/^[[:space:]]*port-min[[:space:]]*=[[:space:]]*\([0-9]\{1,\}\).*/\1/p' "$f" | tail -1)"
+    mx="$(sed -n 's/^[[:space:]]*port-max[[:space:]]*=[[:space:]]*\([0-9]\{1,\}\).*/\1/p' "$f" | tail -1)"
+    [[ -n "$mn" && -n "$mx" ]] && echo "$mn $mx"
 }
 
 # rtpproxy 가 쓰는 포트 범위. 배포판 기본값은 35000-65000 이고 -m/-M 이 덮는다.
@@ -270,13 +407,20 @@ report() {
         problems=$((problems + 1))
     fi
 
+    # WebSocket 트랜스포트가 여기 끼어 있는 이유 — 이것이 빠져도 configure 는
+    # 실패하지 않는다. libwebsockets-dev 가 없으면 요약에 "WebSockets transport:
+    # no" 라고만 적고 그냥 넘어간다. 그러면 설치는 다 끝난 것처럼 보이다가
+    # 기동 뒤 8188 이 안 열리는 것으로만 드러난다. 빌드에서 잡는 편이 낫다.
     local missing_mod=0 mod
-    for mod in "lib/janus/plugins/libjanus_sip.so" "lib/janus/transports/libjanus_http.so"; do
+    for mod in "lib/janus/plugins/libjanus_sip.so" \
+               "lib/janus/transports/libjanus_http.so" \
+               "lib/janus/transports/libjanus_websockets.so"; do
         [[ -e "${JANUS_PREFIX}/${mod}" ]] || { warn "모듈 없음: ${JANUS_PREFIX}/${mod}"; missing_mod=1; }
     done
     if [[ $missing_mod -eq 0 ]]; then
-        ok "필요한 모듈 있음 (SIP 플러그인 · HTTP 트랜스포트)"
+        ok "필요한 모듈 있음 (SIP 플러그인 · HTTP · WebSocket 트랜스포트)"
     else
+        warn "  빌드에 빠진 것입니다 — sudo ./bootstrap.sh --install 뒤 소스에서 다시 빌드하세요"
         problems=$((problems + 1))
     fi
 
@@ -326,6 +470,8 @@ report() {
                 -n 's%^\([[:space:]]*admin_secret = \).*%\1«%' \
                 -n 's%^\([[:space:]]*api_secret = \).*%\1«%' \
                 -n 's%^\([[:space:]]*rtp_port_range = \).*%\1«%' \
+                -n 's%^\([[:space:]]*local_ip = \).*%\1«%' \
+                -n 's%^\([[:space:]]*ice_enforce_list = \).*%\1«%' \
                 -x 'nat_1_1_mapping' \
                 -x 'keep_private_host' \
                 "$target" "$tmpl" \
@@ -395,6 +541,16 @@ report() {
         systemctl is-active --quiet janus 2>/dev/null \
             && ok "구동 중" \
             || { warn "구동 중이 아닙니다 (journalctl -u janus -n 40)"; problems=$((problems + 1)); }
+        # 공인 IP 동기화 유닛. __REPO_DIR__ 은 설치할 때 이 디렉토리로 바뀌므로
+        # 비교 전에 원본에도 같은 치환을 걸어 준다.
+        if [[ -f "$PUBIP_UNIT" ]]; then
+            report_config_diff "유닛 ${PUBIP_UNIT##*/}" "sudo $0 --apply" \
+                -n "s%__REPO_DIR__%${SCRIPT_DIR}%g" \
+                "$PUBIP_UNIT" "$PUBIP_TEMPLATE" || problems=$((problems + 1))
+        else
+            pend "유닛 없음: ${PUBIP_UNIT} — 공인 IP 가 바뀌면 기동 뒤 외부 통화가 무음이 됩니다"
+            pending=$((pending + 1))
+        fi
     else
         pend "유닛 없음: ${SERVICE_UNIT}"
         pending=$((pending + 1))
@@ -450,6 +606,8 @@ report() {
     # /janus-ws 로 넘긴다 (nginx-conf/service.ini 의 [route:ws]).
     if [[ -z "$ws_addr" ]]; then
         pend "WebSocket 트랜스포트(${WS_PORT})가 열려 있지 않습니다 — WebRTC 클라이언트가 붙을 곳이 없습니다"
+        [[ -e "${JANUS_PREFIX}/lib/janus/transports/libjanus_websockets.so" ]] \
+            || pend "  모듈이 아예 없습니다 — libwebsockets 없이 빌드된 것입니다 (위의 '모듈 없음' 참고)"
         pending=$((pending + 1))
     elif [[ "$ws_addr" == 127.0.0.1:* ]]; then
         ok "WebSocket 수신 중: ${ws_addr} (루프백 전용 — 밖에서는 nginx 의 /janus-ws 로)"
@@ -520,7 +678,12 @@ report() {
     local web_range sip_range rtpp_range
     web_range="$(jcfg_rtp_range "${SCRIPT_DIR}/janus.jcfg")"
     sip_range="$(jcfg_rtp_range "${SCRIPT_DIR}/janus.plugin.sip.jcfg")"
-    rtpp_range="$(rtpproxy_range)"
+    local relay; relay="$(media_relay_kind)"
+    case "$relay" in
+        rtpengine) rtpp_range="$(rtpengine_range)" ;;
+        rtpproxy)  rtpp_range="$(rtpproxy_range)" ;;
+        *)         rtpp_range="" ;;
+    esac
 
     [[ -n "$web_range" ]] && ok "Janus WebRTC 쪽: ${web_range% *}-${web_range#* } (janus.jcfg)" \
                           || { warn "janus.jcfg 에서 rtp_port_range 를 읽지 못했습니다"; problems=$((problems + 1)); }
@@ -529,8 +692,8 @@ report() {
 
     if [[ -n "$rtpp_range" ]]; then
         local rtpp_state
-        rtpp_state="$(systemctl is-active rtpproxy 2>/dev/null || echo inactive)"
-        info "  rtpproxy:        ${rtpp_range% *}-${rtpp_range#* } (${rtpp_state})"
+        rtpp_state="$(relay_unit_state "$relay")"
+        info "  ${relay}:$(printf '%*s' $(( 16 - ${#relay} )) '')${rtpp_range% *}-${rtpp_range#* } (${rtpp_state})"
         info "                   Kamailio 가 NAT 로 판정한 통화의 미디어를 중계합니다."
         info "                   이 배치에서는 LAN 단말 전부가 그렇습니다 (docs/plan.md ③ 정정)."
 
@@ -540,30 +703,43 @@ report() {
             [[ "${label#*:}" == "" ]] && continue
             j1="${label#*:}"; j2="${j1#* }"; j1="${j1% *}"
             if ranges_overlap "$r1" "$r2" "$j1" "$j2"; then
-                warn "rtpproxy(${r1}-${r2}) 와 Janus ${label%%:*}(${j1}-${j2}) 가 겹칩니다"
-                warn "  /etc/default/rtpproxy 의 EXTRA_OPTS 에 -M 을 주어 위쪽을 막으세요."
-                warn "  -M 이 없으면 최대가 65000 이라 Janus 범위를 통째로 삼킵니다."
+                warn "${relay}(${r1}-${r2}) 와 Janus ${label%%:*}(${j1}-${j2}) 가 겹칩니다"
+                if [[ "$relay" == "rtpengine" ]]; then
+                    warn "  /etc/rtpengine/rtpengine.conf 의 port-min · port-max 를 옮기세요."
+                else
+                    warn "  /etc/default/rtpproxy 의 EXTRA_OPTS 에 -M 을 주어 위쪽을 막으세요."
+                    warn "  -M 이 없으면 최대가 65000 이라 Janus 범위를 통째로 삼킵니다."
+                fi
                 clashes=$((clashes + 1))
                 problems=$((problems + 1))
             fi
         done
         [[ $clashes -eq 0 ]] && ok "범위가 서로 겹치지 않습니다"
+    elif [[ -n "$relay" ]]; then
+        skip "${relay} 의 포트 범위를 읽지 못해 겹침을 검사하지 못했습니다"
     else
-        skip "rtpproxy 설정(/etc/default/rtpproxy)을 읽지 못해 겹침을 검사하지 못했습니다"
+        skip "미디어 릴레이가 없습니다 — services/kamailio 가 소유합니다 (아래 '연동 대상')"
     fi
 
     info ""
-    info "ICE 후보를 모을 인터페이스"
+    info "통화에 쓸 인터페이스 (SIP SDP 주소 · ICE 후보)"
     # 이 장비에는 통화와 무관한 인터페이스가 여럿이다. 그대로 두면 Janus 가
     # 저 주소까지 후보로 실어 보내고, 상대는 닿지 않는 곳에 붙으려다 기다린다.
+    if resolve_lan; then
+        if [[ -n "$(settings_get lan_iface '')" ]]; then
+            ok "${LAN_IFACE} ${SIP_LOCAL_IP}  ← settings.ini 에 정해 둔 값"
+        else
+            ok "${LAN_IFACE} ${SIP_LOCAL_IP}  ← 감지한 값 (--apply 가 물어보고 settings.ini 에 적습니다)"
+        fi
+    else
+        warn "쓸 수 있는 인터페이스를 찾지 못했습니다 — 이 장비에 LAN 주소가 있습니까?"
+        problems=$((problems + 1))
+    fi
     local iface addr
     while read -r iface addr; do
         [[ "$iface" == "lo" ]] && continue
-        if [[ "$iface" == "$LAN_IFACE" ]]; then
-            ok "${iface} ${addr}  ← ice_enforce_list 로 이것만 쓴다"
-        else
-            skip "${iface} ${addr}  (ICE 후보에서 빠져야 한다)"
-        fi
+        [[ "$iface" == "$LAN_IFACE" ]] && continue
+        skip "${iface} ${addr}  (ICE 후보에서 빠진다)"
     done < <(ip -o -4 addr show 2>/dev/null | awk '{print $2, $4}')
 
     info ""
@@ -603,10 +779,25 @@ report() {
     # "모른다" 이므로 대기로 보고하지 않는다 (lib/settings.js 와 같은 규칙).
     info ""
     info "배포 설정 (settings.ini)"
+    if [[ ! -r "$SETTINGS_FILE" ]]; then
+        info "  파일이 없어 기본값으로 봅니다 (LAN 전용 · ${DEFAULT_RTP_RANGE})."
+        info "  값을 넣으려면 뼈대를 만들어 채우세요:  ${SETTINGS_INIT_CMD}"
+        info "  (구축 마법사 /manager/setup 의 폼도 같은 파일을 씁니다)"
+    fi
     if [[ -r "$APPLIED_FILE" ]]; then
-        local key saved applied
-        for key in public_ip rtp_port_range; do
-            saved="$(settings_get "$key" '')"
+        local key saved applied fallback
+        for key in public_ip rtp_port_range sip_local_ip lan_iface; do
+            # 키가 없으면 --apply 가 쓴 것과 같은 기본값으로 친다. 빈 값으로
+            # 비교하면 settings.ini 가 없는 장비에서 언제나 어긋나 보인다.
+            case "$key" in
+                public_ip)      fallback="$DEFAULT_PUBLIC_IP" ;;
+                rtp_port_range) fallback="$DEFAULT_RTP_RANGE" ;;
+                # 이 둘은 settings.ini 에 없으면 감지한 값이 곧 설치될 값이다.
+                sip_local_ip)   fallback="$SIP_LOCAL_IP" ;;
+                lan_iface)      fallback="$LAN_IFACE" ;;
+                *)              fallback="" ;;
+            esac
+            saved="$(settings_get "$key" "$fallback")"
             applied="$(sed -n "s/^[[:space:]]*${key}[[:space:]]*=[[:space:]]*\(.*\)$/\1/p" "$APPLIED_FILE" | tail -1)"
             applied="${applied//[[:space:]]/}"
             if [[ "$saved" == "$applied" ]]; then
@@ -701,6 +892,7 @@ apply() {
     echo "다음을 설치합니다:"
     echo "  ${JANUS_ETC}/{$(IFS=,; echo "${OWNED_CFGS[*]}")}"
     echo "  ${SERVICE_UNIT}   (systemd 유닛, enable + start)"
+    echo "  ${PUBIP_UNIT}   (기동 직전 공인 IP 동기화)"
     echo "  ${SECRETS_DIR}/{admin-secret,api-secret}"
     echo
     echo "배포본 설정은 *.jcfg.sample 로 그대로 남고, 기존 파일은 백업합니다."
@@ -735,7 +927,7 @@ apply() {
     # 대시보드를 우회해 손으로 고친 경우에도 같은 관문을 지나게 하려는 것이다.
     local public_ip rtp_range
     public_ip="$(settings_get public_ip "")"
-    rtp_range="$(settings_get rtp_port_range "20000-20200")"
+    rtp_range="$(settings_get rtp_port_range "$DEFAULT_RTP_RANGE")"
 
     if [[ -n "$public_ip" ]]; then
         [[ "$public_ip" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] \
@@ -754,6 +946,34 @@ apply() {
     (( rlo < rhi ))        || die "settings.ini 의 rtp_port_range 는 시작이 끝보다 작아야 합니다: ${rtp_range}"
     (( rlo >= 1024 && rhi <= 65535 )) || die "settings.ini 의 rtp_port_range 는 1024~65535 안이어야 합니다: ${rtp_range}"
     info "  WebRTC 미디어 포트: ${rtp_range}"
+
+    # 값을 보여 주면서 바꾸는 법을 말하지 않으면, 읽는 사람은 그것이 고칠 수 있는
+    # 값인지조차 알 수 없다. 대시보드가 아직 안 떠 있는 자리라서 더 그렇다.
+    if [[ -r "$SETTINGS_FILE" ]]; then
+        info "  ↳ 바꾸려면 ${SETTINGS_FILE} 를 고치고 이 명령을 다시 돌리세요."
+    else
+        info "  ↳ 이 둘은 settings.ini 에서 옵니다. 지금은 그 파일이 없어 기본값입니다."
+        info "     바꾸려면 뼈대를 만들어 채운 뒤 이 명령을 다시 돌리세요 (커밋되지 않습니다):"
+        info "         ${SETTINGS_INIT_CMD}"
+    fi
+    info "     대시보드가 떠 있으면 /janus/dashboard/settings 가 같은 파일을 씁니다."
+
+    # --- 통화에 쓸 인터페이스 ---
+    #
+    # 박아 두지 않고 감지한다. 후보가 여럿이면 물어보고, 고른 값은 settings.ini
+    # 에 적어 다음부터 묻지 않는다. --yes 는 사람이 없는 자리라 묻지 않고
+    # 기본 경로 쪽을 쓴다.
+    local ask="ask"
+    if $ASSUME_YES; then ask=""; fi
+    resolve_lan "$ask" || die "통화에 쓸 LAN 인터페이스를 찾지 못했습니다 (ip -4 addr 로 확인하세요)"
+    info ""
+    info "  통화에 쓸 인터페이스: ${LAN_IFACE} ${SIP_LOCAL_IP}"
+    info "    SIP SDP 의 c= 주소와 ice_enforce_list 가 이 값으로 설치됩니다 (plan.md ③)"
+    if [[ "$(settings_get lan_iface '')" != "$LAN_IFACE" || "$(settings_get sip_local_ip '')" != "$SIP_LOCAL_IP" ]]; then
+        settings_put lan_iface "$LAN_IFACE"
+        settings_put sip_local_ip "$SIP_LOCAL_IP"
+        info "    settings.ini 에 적었습니다 — 바꾸려면 그 값을 고치고 다시 --apply 하세요"
+    fi
 
     # --- 설정 ---
     local target mode owner
@@ -785,6 +1005,15 @@ apply() {
             # 자리표시자를 두지 않은 이유는 janus.jcfg 가 그 자체로 온전한
             # 설정으로 남아 있게 하기 위해서다 (그대로 복사해도 동작한다).
             sed -i "s|^\([[:space:]]*rtp_port_range[[:space:]]*=[[:space:]]*\)\"[0-9]\{1,\}-[0-9]\{1,\}\"|\1\"${rtp_range}\"|" "$target"
+
+            # ICE 후보를 모을 인터페이스 — 같은 이유로 값을 덮어쓴다.
+            sed -i "s|^\([[:space:]]*ice_enforce_list[[:space:]]*=[[:space:]]*\)\".*\"|\1\"${LAN_IFACE}\"|" "$target"
+        fi
+
+        if [[ "$cfg" == "janus.plugin.sip.jcfg" ]]; then
+            # SIP 쪽 SDP 에 실릴 주소. 이것이 이 장비의 LAN 주소가 아니면
+            # 시그널링은 되고 소리만 안 난다 (계획서 ③).
+            sed -i "s|^\([[:space:]]*local_ip[[:space:]]*=[[:space:]]*\)\".*\"|\1\"${SIP_LOCAL_IP}\"|" "$target"
         fi
         info "  설치: ${target} (${mode})"
     done
@@ -798,6 +1027,8 @@ apply() {
         echo "; install.sh --apply 가 마지막으로 설치한 값. 손으로 고치지 마세요."
         echo "public_ip = ${public_ip}"
         echo "rtp_port_range = ${rtp_range}"
+        echo "sip_local_ip = ${SIP_LOCAL_IP}"
+        echo "lan_iface = ${LAN_IFACE}"
     } > "$APPLIED_FILE"
     chmod 644 "$APPLIED_FILE"
     info "  적용 기록: ${APPLIED_FILE}"
@@ -806,9 +1037,16 @@ apply() {
     backup "$SERVICE_UNIT"
     install -o root -g root -m 644 "$SERVICE_TEMPLATE" "$SERVICE_UNIT"
     info "  설치: ${SERVICE_UNIT}"
+    # 기동 직전 공인 IP 동기화. 저장소 위치를 유닛에 박아 넣는다 — systemd 는
+    # 상대 경로도 ~ 도 풀어 주지 않는다.
+    backup "$PUBIP_UNIT"
+    install -o root -g root -m 644 "$PUBIP_TEMPLATE" "$PUBIP_UNIT"
+    sed -i "s|__REPO_DIR__|${SCRIPT_DIR}|g" "$PUBIP_UNIT"
+    info "  설치: ${PUBIP_UNIT}"
     systemctl daemon-reload
     systemctl enable janus >/dev/null 2>&1
-    info "  enable: 재부팅 후에도 뜹니다"
+    systemctl enable janus-public-ip >/dev/null 2>&1
+    info "  enable: 재부팅 후에도 뜹니다 (기동 직전 공인 IP 동기화 포함)"
 
     # --- 기동 ---
     #
@@ -851,9 +1089,15 @@ apply() {
     [[ "$admin_addr" == 127.0.0.1:* ]] \
         && ok "Admin API: ${admin_addr} (루프백 전용)" \
         || warn "Admin API 가 예상과 다릅니다: ${admin_addr:-열려 있지 않음}"
-    [[ "$ws_addr" == 127.0.0.1:* ]] \
-        && ok "WebSocket: ${ws_addr} (루프백 전용)" \
-        || warn "WebSocket 이 예상과 다릅니다: ${ws_addr:-열려 있지 않음}"
+    if [[ "$ws_addr" == 127.0.0.1:* ]]; then
+        ok "WebSocket: ${ws_addr} (루프백 전용)"
+    else
+        warn "WebSocket 이 예상과 다릅니다: ${ws_addr:-열려 있지 않음}"
+        [[ -e "${JANUS_PREFIX}/lib/janus/transports/libjanus_websockets.so" ]] \
+            || warn "  libjanus_websockets.so 가 없습니다 — libwebsockets 없이 빌드됐습니다."
+        [[ -e "${JANUS_PREFIX}/lib/janus/transports/libjanus_websockets.so" ]] \
+            || warn "  sudo ./bootstrap.sh --install 뒤 소스에서 다시 빌드하고 --apply 를 다시 하세요."
+    fi
 
     echo
     #echo "다음 단계 — 계획서 3단계 (대시보드 서비스와 라우트 개방):"
@@ -872,6 +1116,11 @@ remove() {
     echo "  - ${SECRETS_DIR} 는 지우지 않습니다 (다시 설치할 때 그대로 씁니다)"
     confirm "계속할까요?" || { echo "취소했습니다."; exit 0; }
 
+    if [[ -f "$PUBIP_UNIT" ]]; then
+        systemctl disable janus-public-ip 2>/dev/null || true
+        rm -f "$PUBIP_UNIT"
+        info "  제거: ${PUBIP_UNIT}"
+    fi
     if [[ -f "$SERVICE_UNIT" ]]; then
         systemctl stop janus 2>/dev/null || true
         systemctl disable janus 2>/dev/null || true

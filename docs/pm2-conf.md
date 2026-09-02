@@ -54,9 +54,33 @@ script = src/index.js
 | `merge_logs` | `true` | |
 | `log_date_format` | `YYYY-MM-DD HH:mm:ss` | |
 | `enabled` | `true` | `false` 면 apps 배열에서 빠집니다 |
+| `groups` | — | 이 앱이 있어야 일하는 **보조 그룹** (쉼표 구분). pm2 는 모르는 값이고 `pm2/restart.sh` 가 읽습니다 — 아래 |
 
 `enabled = false` 는 **선언을 남긴 채 프로세스만 빼는** 수단입니다. `nginx-conf`
 의 같은 이름 키와 짝을 이룹니다 — 서비스를 잠시 내릴 때 둘 다 `false` 로 둡니다.
+
+### `groups` — pm2 가 아니라 데몬을 띄우는 셸에 필요한 것
+
+어떤 앱은 보조 그룹이 있어야 일을 합니다. `kamailio-dashboard` 는 Kamailio 의
+JSON-RPC FIFO 를 읽는데 `/run/kamailio` 가 `drwxrwx--- kamailio:kamailio` 입니다.
+
+```ini
+[app]
+name   = kamailio-dashboard
+groups = kamailio
+```
+
+**pm2 에 넘어가는 값이 아닙니다.** 보조 그룹은 프로세스가 시작될 때 부모에게서
+물려받는 것이라, pm2 가 앱마다 따로 정해 줄 수 없습니다. 데몬이 갖고 있지 않으면
+그 데몬이 띄운 앱은 전부 갖지 못합니다. 그래서 이 값은 **데몬을 어떻게 띄워야
+하는지**를 적어 두는 자리이고, `pm2/restart.sh` 가 그것을 읽어 처리합니다.
+
+```bash
+pm2/restart.sh            # 데몬과 앱이 필요한 그룹을 갖췄는지 본다
+pm2/restart.sh --restart  # 갖춰서 다시 띄우고, 잠시 뒤 확인한다
+```
+
+`pm2 restart <앱>` 으로는 바뀌지 않습니다 — 데몬 자체를 다시 띄워야 합니다.
 
 ### `interpreter` 를 절대 경로로 바꾸는 이유
 

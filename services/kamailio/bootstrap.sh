@@ -36,6 +36,31 @@ FEATURES=(
 
 # 배포판 kamailio 패키지에 이미 들어 있어 따로 설치할 것이 없는 모듈.
 BUILTIN=(xhttp tsilo nathelper rtpengine dispatcher)
+
+# 미디어 릴레이 데몬은 **배포판마다 이름이 다릅니다.**
+#
+#   Ubuntu 22.04   rtpproxy            (24.04 저장소에서 빠졌습니다)
+#   Ubuntu 24.04   rtpengine-daemon    (noble/universe)
+#
+# 이름을 못 박지 않고 이 판에 있는 것을 고릅니다. kamailio.cfg 는 둘 다
+# 다룰 수 있습니다 (WITH_RTPENGINE 분기).
+relay_package_label() {
+    local p; p="$(relay_package)"
+    case "$p" in
+        rtpengine-daemon) echo "rtpengine-daemon (sudo apt install rtpengine-daemon)" ;;
+        rtpproxy)         echo "rtpproxy (sudo apt install rtpproxy)" ;;
+        *)                echo "저장소에 rtpproxy 도 rtpengine 도 없습니다 — 소스 빌드" ;;
+    esac
+}
+# ⚠️ `apt-cache ... | grep -q` 로 쓰면 안 된다. grep -q 는 첫 일치에서 바로
+#    끝나 apt-cache 가 SIGPIPE(141)로 죽고, set -o pipefail 이 그 파이프라인을
+#    실패로 판정한다. 있는 패키지를 없다고 말하게 된다 — 실제로 그랬다.
+apt_has() { [[ "$(apt-cache policy "$1" 2>/dev/null)" =~ Candidate:[[:space:]]+[0-9] ]]; }
+relay_package() {
+    apt_has rtpengine-daemon && { echo rtpengine-daemon; return; }
+    apt_has rtpproxy && { echo rtpproxy; return; }
+    echo ""
+}
 # 점검 출력은 공용 규약을 따른다 (docs/check-contract.md).
 source "${SCRIPT_DIR}/../../lib/check-report.sh"
 
@@ -88,6 +113,19 @@ missing_packages() {
         IFS='|' read -r pkg mod _ <<<"$line"
         have_module "$mod" || echo "$pkg"
     done
+    # 미디어 릴레이 데몬. kamailio 모듈이 아니라 별도 패키지이고, 이름이
+    # 배포판마다 달라서 FEATURES 에 못 박을 수 없다.
+    relay_installed || relay_package
+}
+
+# 이 장비에 릴레이가 이미 있는가.
+relay_installed() {
+    command -v rtpengine >/dev/null 2>&1 || command -v rtpproxy >/dev/null 2>&1
+}
+
+# 설치 이유를 사람이 볼 때 쓰는 설명.
+relay_why() {
+    echo "Kamailio 가 NAT 로 판정한 통화의 미디어 중계 (LAN 등록 전부가 그렇습니다)"
 }
 
 # ── 점검 ────────────────────────────────────────────────────────────────────
@@ -109,10 +147,23 @@ report() {
     for b in "${BUILTIN[@]}"; do
         have_module "$b" || warn "$b 가 없습니다 — 배포판 kamailio 에 들어 있어야 합니다"
     done
+    # 미디어 릴레이 데몬 — 이름이 배포판마다 다르다 (22.04 rtpproxy · 24.04 rtpengine).
+    if command -v rtpengine >/dev/null 2>&1; then
+        ok "$(printf '%-30s' rtpengine)$(relay_why)"
+    elif command -v rtpproxy >/dev/null 2>&1; then
+        ok "$(printf '%-30s' rtpproxy)$(relay_why)"
+    else
+        warn "$(printf '%-30s' "$(relay_package)")$(relay_why)"
+        warn "  이 판에 있는 것: $(relay_package_label)"
+        problems=$((problems + 1))
+    fi
 
     info ""
     info "2. 그룹 (대시보드가 RPC FIFO 를 읽는 데 필요)"
-    local gid; gid="$(getent group kamailio 2>/dev/null | cut -d: -f3)"
+    # || true 가 필요하다. set -e + pipefail 아래에서 그룹이 **없으면** getent 가 2 로
+    # 끝나 대입문이 실패하고, 점검이 여기서 죽는다 — 그룹이 없는 상태야말로 이
+    # 점검이 알려 주어야 하는 상태다.
+    local gid; gid="$(getent group kamailio 2>/dev/null | cut -d: -f3 || true)"
     local target="${SUDO_USER:-$(id -un)}"
     if [[ -z "$gid" ]]; then
         pend "kamailio 그룹이 없습니다 (패키지 설치 전)"
@@ -162,7 +213,12 @@ report() {
         problems=$((problems + 1))
     fi
     local code
-    code="$(curl -s -m 3 -o /dev/null -w '%{http_code}' http://127.0.0.1:5080/health 2>/dev/null)"
+    # || true 가 필요하다. WS 를 아직 켜지 않았으면 curl 이 7(연결 실패)로 끝나고,
+    # set -e 아래에서는 그 대입문 하나가 스크립트를 통째로 끝낸다. 사람이 보는
+    # 모드에서는 여기까지 찍힌 것이 남아 티가 안 나지만, --json 은 출력을 모아
+    # check_finish 에서 한 번에 내므로 **아무것도 나오지 않는다.** 구축 마법사가
+    # "점검 출력을 읽지 못했습니다" 를 띄운 원인이다.
+    code="$(curl -s -m 3 -o /dev/null -w '%{http_code}' http://127.0.0.1:5080/health 2>/dev/null || true)"
     [[ "${code:-000}" == "200" ]] && ok "WS 포트의 /health → 200" \
         || { skip "WS /health 응답 없음 (code=${code:-000})"; problems=$((problems + 1)); }
 
@@ -176,8 +232,11 @@ report() {
     return 0
 }
 
+# 사람이 보는 안내다. cat 으로 바로 찍으면 --json 모드에서도 stdout 에 섞여
+# 나가 JSON 을 깨뜨린다 — info 를 거쳐야 JSON 모드에서 조용해진다.
 print_order() {
-    cat <<ORDER
+    local line
+    while IFS= read -r line; do info "$line"; done <<ORDER
 
 ── 처음부터 세우는 순서 ──────────────────────────────────────────────────
 
@@ -209,8 +268,9 @@ print_order() {
        전부 초록인지 확인.
 
   이 밖에 저장소 밖에서 해야 하는 것:
-    · 공유기 포워딩 — 30000-30500/udp (rtpengine, 미디어 도입 시)
-    · rtpengine 데몬 — 배포판에 없음. rtpengine.conf 참고
+    · 미디어 릴레이 — 이 판에서는 $(relay_package_label)
+    · 공유기 포워딩 — Janus 의 WebRTC 범위만 (services/janus/settings.ini).
+                      릴레이 범위(10200-19999)는 LAN 안에서만 씁니다
     · 단말 앱 — /register 에 sipUser 를 함께 보내야 착신 푸시가 간다
 ORDER
 }

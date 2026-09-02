@@ -24,7 +24,7 @@
 #
 #   6-2  브라우저 → 평문 단말 : 협상 코덱이 PCMU/PCMA 인가, RTP 가 양방향인가
 #   6-3  평문 단말 → 브라우저 : 방향이 바뀌어도 같은가 (SDP 협상 순서가 다르다)
-#   6-4  SDP 의 c= 가 192.168.0.252 인가 (③의 local_ip 결정)
+#   6-4  SDP 의 c= 가 이 장비의 LAN 주소인가 (③의 local_ip 결정)
 #
 # **코덱이 opus 로 나오면 실패다.** Janus 는 트랜스코딩하지 않으므로, opus 로
 # 붙었다는 것은 평문 단말까지 도달하지 못했다는 뜻이다.
@@ -42,9 +42,25 @@ JANUS_HTTP_PORT="${JANUS_HTTP_PORT:-8088}"
 HARNESS_PORT="${HARNESS_PORT:-28201}"
 
 SIP_DOMAIN="${SIP_DOMAIN:-pluto.org}"
-SIP_PROXY="${SIP_PROXY:-sip:192.168.0.252:5060}"
+# SIP 프록시 주소는 박아 두지 않는다. install.sh --apply 가 정한 값(.applied-settings)
+# 이나 settings.ini 를 따라가고, 둘 다 없으면 기본 경로의 LAN 주소를 쓴다.
+# 여기와 설치본이 어긋나면 등록부터 실패한다.
+janus_lan_ip() {
+    local v
+    for f in "${SCRIPT_DIR}/.applied-settings" "${SCRIPT_DIR}/settings.ini"; do
+        [[ -r "$f" ]] || continue
+        v="$(sed -n 's/^[[:space:]]*sip_local_ip[[:space:]]*=[[:space:]]*\(.*\)$/\1/p' "$f" | tail -1)"
+        v="${v//[[:space:]]/}"
+        [[ -n "$v" ]] && { echo "$v"; return 0; }
+    done
+    ip -4 -o addr show scope global 2>/dev/null \
+        | awk -v d="$(ip -4 route show default 2>/dev/null | awk '{print $5; exit}')" \
+              '$2==d {split($4,a,"/"); print a[1]; exit}'
+}
+
+SIP_PROXY="${SIP_PROXY:-sip:$(janus_lan_ip):5060}"
 # 평문 단말이 자기 SDP 에 실을 주소. Janus 의 local_ip 와 같아야 한다 (③).
-LOCAL_IP="${LOCAL_IP:-192.168.0.252}"
+LOCAL_IP="${LOCAL_IP:-$(janus_lan_ip)}"
 UA_SIP_PORT="${UA_SIP_PORT:-45060}"
 UA_RTP_PORT="${UA_RTP_PORT:-40100}"
 

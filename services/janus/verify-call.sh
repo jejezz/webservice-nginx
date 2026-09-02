@@ -38,7 +38,23 @@ HARNESS_PORT="${HARNESS_PORT:-28199}"
 
 # SIP 쪽 기본값은 server/src/config.js 와 같게 둔다. 다르면 등록부터 실패한다.
 SIP_DOMAIN="${SIP_DOMAIN:-pluto.org}"
-SIP_PROXY="${SIP_PROXY:-sip:192.168.0.252:5060}"
+# SIP 프록시 주소는 박아 두지 않는다. install.sh --apply 가 정한 값(.applied-settings)
+# 이나 settings.ini 를 따라가고, 둘 다 없으면 기본 경로의 LAN 주소를 쓴다.
+# 여기와 설치본이 어긋나면 등록부터 실패한다.
+janus_lan_ip() {
+    local v
+    for f in "${SCRIPT_DIR}/.applied-settings" "${SCRIPT_DIR}/settings.ini"; do
+        [[ -r "$f" ]] || continue
+        v="$(sed -n 's/^[[:space:]]*sip_local_ip[[:space:]]*=[[:space:]]*\(.*\)$/\1/p' "$f" | tail -1)"
+        v="${v//[[:space:]]/}"
+        [[ -n "$v" ]] && { echo "$v"; return 0; }
+    done
+    ip -4 -o addr show scope global 2>/dev/null \
+        | awk -v d="$(ip -4 route show default 2>/dev/null | awk '{print $5; exit}')" \
+              '$2==d {split($4,a,"/"); print a[1]; exit}'
+}
+
+SIP_PROXY="${SIP_PROXY:-sip:$(janus_lan_ip):5060}"
 
 # 점검 출력은 공용 규약을 따른다 (docs/check-contract.md).
 source "${SCRIPT_DIR}/../../lib/check-report.sh"

@@ -26,10 +26,38 @@
       "pattern": "^\\d{4,5}-\\d{4,5}$",
       "patternHint": "시작-끝 (예: 20000-20200)",
       "conflicts": [
-        { "name": "SIP 미디어", "lo": 30000, "hi": 30200 },
-        { "name": "rtpproxy", "lo": 10200, "hi": 19999 }
+        {
+          "name": "SIP 미디어",
+          "lo": 30000,
+          "hi": 30200
+        },
+        {
+          "name": "rtpproxy",
+          "lo": 10200,
+          "hi": 19999
+        }
       ],
       "effect": "janus.jcfg 의 media.rtp_port_range 가 됩니다. SIP 미디어(30000-30200)·rtpproxy(10200-19999)와 겹치면 안 됩니다."
+    },
+    {
+      "key": "sip_local_ip",
+      "label": "통화에 쓸 LAN 주소",
+      "help": "SIP 쪽 SDP 의 c= 에 실립니다. 비워 두면 install.sh 가 이 장비에서 감지해 채웁니다.",
+      "placeholder": "10.10.0.224",
+      "optional": true,
+      "type": "ipv4",
+      "pattern": "^\\d{1,3}(\\.\\d{1,3}){3}$",
+      "patternHint": "IPv4 (예: 10.10.0.224)",
+      "effect": "janus.plugin.sip.jcfg 의 local_ip 가 됩니다. 루프백이나 다른 장비의 주소면 시그널링은 되고 소리가 나지 않습니다."
+    },
+    {
+      "key": "lan_iface",
+      "label": "통화에 쓸 인터페이스",
+      "help": "ICE 후보를 이 인터페이스에서만 모읍니다. 비워 두면 install.sh 가 감지해 채웁니다.",
+      "placeholder": "enp131s0",
+      "optional": true,
+      "type": "string",
+      "effect": "janus.jcfg 의 ice_enforce_list 가 됩니다. 도커·libvirt 주소까지 후보로 실으면 통화 성립이 느려집니다."
     }
   ]
 }

@@ -48,12 +48,20 @@ BUILD_DEPS=(
     "libnice-dev|ICE — WebRTC 후보 수집과 연결"
     "libsrtp2-dev|SRTP — WebRTC 미디어 암·복호"
     "libssl-dev|DTLS · TLS"
+    "libusrsctp-dev|데이터 채널 (--enable-data-channels) — 없으면 configure 가 여기서 멈춘다"
     "libconfig-dev|.jcfg 설정 파일 파싱"
     "libcurl4-openssl-dev|Janus 본체가 쓰는 HTTP 클라이언트"
     "libmicrohttpd-dev|HTTP 트랜스포트 (libjanus_http.so) — /janus-api 가 여기로 온다"
+    # ⚠️ 이것은 없어도 configure 가 실패하지 않는다. 요약에 "WebSockets
+    #    transport: no" 라고 적고 그냥 넘어가서, 기동 뒤 8188 이 안 열리는
+    #    것으로만 드러난다. install.sh 가 모듈 존재로도 잡는다.
+    "libwebsockets-dev|WebSocket 트랜스포트 (libjanus_websockets.so) — /janus-ws 가 여기로 온다"
     "libsofia-sip-ua-dev|SIP 플러그인 (libjanus_sip.so) — 이 게이트웨이의 핵심"
     "libopus-dev|Opus 코덱"
-    "libogg-dev|녹음(post-processing)"
+    "libogg-dev|녹음 (--enable-post-processing) — ogg 컨테이너"
+    "libavcodec-dev|녹음 (--enable-post-processing) — 없으면 configure 가 여기서 멈춘다"
+    "libavformat-dev|녹음 (--enable-post-processing) — 위와 같은 ffmpeg 묶음"
+    "libavutil-dev|녹음 (--enable-post-processing) — 위와 같은 ffmpeg 묶음"
     "libtool|빌드"
     "automake|빌드"
     "build-essential|빌드"
@@ -149,10 +157,23 @@ report() {
     info "연동 대상"
     systemctl is-active --quiet kamailio && ok "Kamailio 구동 중" \
         || warn "Kamailio 가 떠 있지 않습니다 — services/kamailio/bootstrap.sh"
-    if pgrep -x rtpproxy >/dev/null 2>&1; then
+    # 미디어 릴레이는 배포판마다 이름이 다르다. 22.04 는 rtpproxy, 24.04 는
+    # 저장소에서 rtpproxy 가 빠져 rtpengine 을 쓴다. 이 저장소가 소유하는 것이
+    # 아니라(services/kamailio 의 몫) 여기서는 있는지만 본다.
+    if pgrep -x rtpengine >/dev/null 2>&1; then
+        ok "rtpengine 구동 중 — Kamailio 가 NAT 로 판정한 통화의 미디어를 중계합니다"
+    elif pgrep -x rtpproxy >/dev/null 2>&1; then
         ok "rtpproxy 구동 중 ($(pgrep -af rtpproxy | grep -oE '\-m [0-9]+ -M [0-9]+' | head -1))"
     else
-        warn "rtpproxy 가 없습니다 — Kamailio 가 NAT 로 판정한 통화의 미디어를 중계합니다"
+        warn "미디어 릴레이가 없습니다 — Kamailio 가 NAT 로 판정한 통화의 미디어를 중계합니다"
+        # grep -q 로 파이프를 끊으면 apt-cache 가 SIGPIPE 로 죽어 pipefail 이
+        # 그 파이프라인을 실패로 본다. 출력을 받아서 검사한다.
+        if [[ "$(apt-cache policy rtpproxy 2>/dev/null)" =~ Candidate:[[:space:]]+[0-9] ]]; then
+            warn "  이 배포판에는 rtpproxy 가 있습니다 — services/kamailio 가 설치합니다"
+        else
+            warn "  이 배포판(24.04~)에는 rtpproxy 가 없습니다 — rtpengine 을 씁니다"
+            warn "  (kamailio.cfg 의 WITH_RTPENGINE 분기. services/kamailio 가 소유합니다)"
+        fi
     fi
 
     info
@@ -185,8 +206,10 @@ print_order() {
         make && sudo make install && sudo make configs
 
     이 서버는 v1.4.0-5-gae0078e1 을 위 플래그로 빌드했습니다. configure 끝의
-    요약에서 **SIP plugin 과 REST(HTTP) transport 가 yes** 인지 꼭 보세요 —
-    아니면 libsofia-sip-ua-dev · libmicrohttpd-dev 가 빠진 것입니다.
+    요약에서 **SIP plugin · REST(HTTP) transport · WebSockets transport 가 셋 다
+    yes** 인지 꼭 보세요 — 아니면 libsofia-sip-ua-dev · libmicrohttpd-dev ·
+    libwebsockets-dev 가 빠진 것입니다. 특히 WebSockets 는 없어도 configure 가
+    멈추지 않고 no 로만 적고 지나갑니다.
 
  3. 설정과 systemd 유닛
         sudo ./install.sh --apply        # 실패하면 자동 롤백
