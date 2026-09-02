@@ -82,7 +82,7 @@ services/kamailio/
 
 | | 단계 | 명령 | 확인 |
 |---|---|---|---|
-| **0** | 사전 조건 — ws-bridge digest 인증 | ✅ 완료 (할 일 없음) | |
+| **0** | 사전 조건 — websocket-relay digest 인증 | ✅ 완료 (할 일 없음) | |
 | **1** | 패키지 · kamailio 그룹 | `sudo ./bootstrap.sh --install` | **다시 로그인** |
 | **2** | 데이터베이스 | `cd database && sudo ./setup_mariadb.sh` | `kamailio.version` |
 | **3** | 이 장비의 값 | `settings.ini` 편집 또는 `/manager/setup` | `./install.sh` |
@@ -107,7 +107,7 @@ services/kamailio/
 데이터베이스는 `database/database.ini` 가 소유하고, Kamailio 설정은 `install.sh` 가
 담당합니다. `kamdbctl create` 는 쓰지 않습니다 — 그러면 DB 가 프로젝트 관리 밖에 놓입니다.
 
-## 0. 사전 조건 — ws-bridge digest 인증 ✅ 완료
+## 0. 사전 조건 — websocket-relay digest 인증 ✅ 완료
 
 인증을 켜면 Kamailio 가 401 로 challenge 를 보냅니다.
 ws-bridge 는 이미 이를 처리합니다. (`src/protocols/sip/digest.js`, 테스트 `npm test`)
