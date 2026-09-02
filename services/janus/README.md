@@ -284,11 +284,21 @@ LAN 전용으로 설치됩니다 ([plan.md](docs/plan.md) 9 단계).
 아직 안 떴으면 — 설치 순서상 8 단계가 먼저인 경우가 흔합니다 — **파일을 손으로
 만들면 됩니다.** 대시보드도 결국 이 파일을 씁니다.
 
+뼈대는 공용 도구가 만들어 줍니다 — `settings-schema.json` 을 읽어 항목마다 뜻과
+형식을 주석으로 달아 줍니다. 값만 채우면 됩니다.
+
+```bash
+node ../../lib/settings.js --init .     # services/janus 에서 (sudo 불필요)
+```
+
 ```ini
-; services/janus/settings.ini   (없으면 만드세요. 절[section] 없이 키 = 값 뿐입니다)
+; services/janus/settings.ini   — 절[section] 없이 키 = 값 뿐입니다
 public_ip      = 125.242.8.15      ; 비우거나 줄을 빼면 LAN 전용
 rtp_port_range = 20000-20200       ; 공유기에서 UDP 로 포워딩할 범위
 ```
+
+파일이 아예 없어도 `--apply` 는 기본값(LAN 전용 · `20000-20200`)으로 설치합니다.
+`./install.sh` 의 **배포 설정** 절이 그때도 무엇을 기준으로 보는지 알려 줍니다.
 
 | 키 | 없으면 | 무엇이 바뀌나 |
 |---|---|---|

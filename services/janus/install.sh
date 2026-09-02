@@ -56,6 +56,12 @@ API_SECRET_FILE="${SECRETS_DIR}/api-secret"
 # 파일이 없으면 기본값(LAN 전용 · 20000-20200)으로 설치됩니다.
 # 값이 형식에 맞지 않으면 --apply 가 아무것도 바꾸지 않고 멈춥니다.
 SETTINGS_FILE="${SCRIPT_DIR}/settings.ini"
+# 파일에 그 키가 없을 때 쓰는 값. 설치할 때와 점검할 때가 반드시 같아야 한다 —
+# 갈리면 "설치본과 저장한 값이 다르다" 는 거짓 경보가 난다.
+DEFAULT_PUBLIC_IP=""
+DEFAULT_RTP_RANGE="20000-20200"
+# settings.ini 뼈대를 만드는 공용 도구 (settings-schema.json 을 읽는다).
+SETTINGS_INIT_CMD="node ../../lib/settings.js --init ."
 # 마지막으로 설치한 값. 대시보드가 '적용 대기'를 이걸로 가른다.
 APPLIED_FILE="${SCRIPT_DIR}/.applied-settings"
 
@@ -612,10 +618,22 @@ report() {
     # "모른다" 이므로 대기로 보고하지 않는다 (lib/settings.js 와 같은 규칙).
     info ""
     info "배포 설정 (settings.ini)"
+    if [[ ! -r "$SETTINGS_FILE" ]]; then
+        info "  파일이 없어 기본값으로 봅니다 (LAN 전용 · ${DEFAULT_RTP_RANGE})."
+        info "  값을 넣으려면 뼈대를 만들어 채우세요:  ${SETTINGS_INIT_CMD}"
+        info "  (구축 마법사 /manager/setup 의 폼도 같은 파일을 씁니다)"
+    fi
     if [[ -r "$APPLIED_FILE" ]]; then
-        local key saved applied
+        local key saved applied fallback
         for key in public_ip rtp_port_range; do
-            saved="$(settings_get "$key" '')"
+            # 키가 없으면 --apply 가 쓴 것과 같은 기본값으로 친다. 빈 값으로
+            # 비교하면 settings.ini 가 없는 장비에서 언제나 어긋나 보인다.
+            case "$key" in
+                public_ip)      fallback="$DEFAULT_PUBLIC_IP" ;;
+                rtp_port_range) fallback="$DEFAULT_RTP_RANGE" ;;
+                *)              fallback="" ;;
+            esac
+            saved="$(settings_get "$key" "$fallback")"
             applied="$(sed -n "s/^[[:space:]]*${key}[[:space:]]*=[[:space:]]*\(.*\)$/\1/p" "$APPLIED_FILE" | tail -1)"
             applied="${applied//[[:space:]]/}"
             if [[ "$saved" == "$applied" ]]; then
@@ -744,7 +762,7 @@ apply() {
     # 대시보드를 우회해 손으로 고친 경우에도 같은 관문을 지나게 하려는 것이다.
     local public_ip rtp_range
     public_ip="$(settings_get public_ip "")"
-    rtp_range="$(settings_get rtp_port_range "20000-20200")"
+    rtp_range="$(settings_get rtp_port_range "$DEFAULT_RTP_RANGE")"
 
     if [[ -n "$public_ip" ]]; then
         [[ "$public_ip" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] \
@@ -770,9 +788,8 @@ apply() {
         info "  ↳ 바꾸려면 ${SETTINGS_FILE} 를 고치고 이 명령을 다시 돌리세요."
     else
         info "  ↳ 이 둘은 settings.ini 에서 옵니다. 지금은 그 파일이 없어 기본값입니다."
-        info "     바꾸려면 ${SETTINGS_FILE} 를 만들고 (커밋되지 않습니다) 이 명령을 다시 돌리세요:"
-        info "         public_ip      = 125.242.8.15      ; 비우거나 빼면 LAN 전용"
-        info "         rtp_port_range = 20000-20200       ; 공유기에서 UDP 포워딩할 범위"
+        info "     바꾸려면 뼈대를 만들어 채운 뒤 이 명령을 다시 돌리세요 (커밋되지 않습니다):"
+        info "         ${SETTINGS_INIT_CMD}"
     fi
     info "     대시보드가 떠 있으면 /janus/dashboard/settings 가 같은 파일을 씁니다."
 
