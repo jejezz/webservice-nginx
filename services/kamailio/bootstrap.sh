@@ -36,6 +36,31 @@ FEATURES=(
 
 # 배포판 kamailio 패키지에 이미 들어 있어 따로 설치할 것이 없는 모듈.
 BUILTIN=(xhttp tsilo nathelper rtpengine dispatcher)
+
+# 미디어 릴레이 데몬은 **배포판마다 이름이 다릅니다.**
+#
+#   Ubuntu 22.04   rtpproxy            (24.04 저장소에서 빠졌습니다)
+#   Ubuntu 24.04   rtpengine-daemon    (noble/universe)
+#
+# 이름을 못 박지 않고 이 판에 있는 것을 고릅니다. kamailio.cfg 는 둘 다
+# 다룰 수 있습니다 (WITH_RTPENGINE 분기).
+relay_package_label() {
+    local p; p="$(relay_package)"
+    case "$p" in
+        rtpengine-daemon) echo "rtpengine-daemon (sudo apt install rtpengine-daemon)" ;;
+        rtpproxy)         echo "rtpproxy (sudo apt install rtpproxy)" ;;
+        *)                echo "저장소에 rtpproxy 도 rtpengine 도 없습니다 — 소스 빌드" ;;
+    esac
+}
+# ⚠️ `apt-cache ... | grep -q` 로 쓰면 안 된다. grep -q 는 첫 일치에서 바로
+#    끝나 apt-cache 가 SIGPIPE(141)로 죽고, set -o pipefail 이 그 파이프라인을
+#    실패로 판정한다. 있는 패키지를 없다고 말하게 된다 — 실제로 그랬다.
+apt_has() { [[ "$(apt-cache policy "$1" 2>/dev/null)" =~ Candidate:[[:space:]]+[0-9] ]]; }
+relay_package() {
+    apt_has rtpengine-daemon && { echo rtpengine-daemon; return; }
+    apt_has rtpproxy && { echo rtpproxy; return; }
+    echo ""
+}
 # 점검 출력은 공용 규약을 따른다 (docs/check-contract.md).
 source "${SCRIPT_DIR}/../../lib/check-report.sh"
 
@@ -220,8 +245,9 @@ print_order() {
        전부 초록인지 확인.
 
   이 밖에 저장소 밖에서 해야 하는 것:
-    · 공유기 포워딩 — 30000-30500/udp (rtpengine, 미디어 도입 시)
-    · rtpengine 데몬 — 배포판에 없음. rtpengine.conf 참고
+    · 미디어 릴레이 — 이 판에서는 $(relay_package_label)
+    · 공유기 포워딩 — Janus 의 WebRTC 범위만 (services/janus/settings.ini).
+                      릴레이 범위(10200-19999)는 LAN 안에서만 씁니다
     · 단말 앱 — /register 에 sipUser 를 함께 보내야 착신 푸시가 간다
 ORDER
 }

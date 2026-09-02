@@ -166,7 +166,9 @@ report() {
         ok "rtpproxy 구동 중 ($(pgrep -af rtpproxy | grep -oE '\-m [0-9]+ -M [0-9]+' | head -1))"
     else
         warn "미디어 릴레이가 없습니다 — Kamailio 가 NAT 로 판정한 통화의 미디어를 중계합니다"
-        if apt-cache policy rtpproxy 2>/dev/null | grep -q 'Candidate: [0-9]'; then
+        # grep -q 로 파이프를 끊으면 apt-cache 가 SIGPIPE 로 죽어 pipefail 이
+        # 그 파이프라인을 실패로 본다. 출력을 받아서 검사한다.
+        if [[ "$(apt-cache policy rtpproxy 2>/dev/null)" =~ Candidate:[[:space:]]+[0-9] ]]; then
             warn "  이 배포판에는 rtpproxy 가 있습니다 — services/kamailio 가 설치합니다"
         else
             warn "  이 배포판(24.04~)에는 rtpproxy 가 없습니다 — rtpengine 을 씁니다"
