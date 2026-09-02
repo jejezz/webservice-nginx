@@ -4,6 +4,8 @@
 #
 #   ./check-public-ip.sh              지금 값과 설치된 값을 비교한다
 #   ./check-public-ip.sh --write      현재 값을 settings.ini 에 쓴다 (적용은 별개)
+#   sudo ./check-public-ip.sh --sync  설치된 janus.jcfg 의 nat_1_1_mapping 을
+#                                     지금 값으로 맞춘다 (Janus 기동 전에 쓴다)
 #
 # settings.ini 는 대시보드의 '설정' 화면도 씁니다. 이 스크립트는 public_ip 줄만
 # 건드리고 나머지 값은 그대로 둡니다.
@@ -43,10 +45,12 @@ set -- "${CHECK_REST[@]:-}"
 
 QUIET=0
 WRITE=0
+SYNC=0
 for a in "$@"; do
     case "$a" in
         --quiet) QUIET=1 ;;
         --write) WRITE=1 ;;
+        --sync)  SYNC=1 ;;
         -h|--help) sed -n '2,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
         "") ;;                  # check_args 가 비운 자리
         *) echo "Unknown option: $a" >&2; exit 2 ;;
@@ -95,6 +99,47 @@ if [[ -r "$INSTALLED_CFG" ]]; then
     say "설치된 설정     ${installed:-(nat_1_1_mapping 없음 — LAN 전용)}"
 else
     say "설치된 설정     읽을 수 없음 (0640 root:janus — 정상입니다)"
+fi
+
+# ── --sync : 기동 전에 설치본을 지금 값으로 맞춘다 ──────────────────────
+#
+# janus-public-ip.service 가 Janus 기동 직전에 이것을 부른다. 가정용 회선은
+# 공인 IP 가 바뀌는데, Janus 는 기동할 때 읽은 값을 ICE 후보로 계속 광고한다.
+# 그래서 **기동 직전**이 고칠 수 있는 유일한 자리다.
+#
+# 규칙 하나: **없는 줄을 만들지 않는다.** nat_1_1_mapping 이 없다는 것은 LAN
+# 전용으로 설치했다는 뜻이고, 그것은 사람이 정한 것이다. 부팅 때 조용히 켜서
+# 외부로 주소를 광고하기 시작하면 안 된다.
+if [[ $SYNC -eq 1 ]]; then
+    [[ $EUID -eq 0 ]] || { echo "--sync 는 root 로 실행해야 합니다 (설치본을 고칩니다)" >&2; exit 2; }
+
+    if [[ ! -f "$INSTALLED_CFG" ]]; then
+        say "설치된 설정이 없습니다: ${INSTALLED_CFG} — 할 일이 없습니다."
+        exit 0
+    fi
+    if ! grep -qE '^[[:space:]]*nat_1_1_mapping[[:space:]]*=' "$INSTALLED_CFG"; then
+        say "LAN 전용으로 설치돼 있습니다 (nat_1_1_mapping 없음) — 그대로 둡니다."
+        say "  켜려면: settings.ini 의 public_ip 를 채우고 sudo ./install.sh --apply"
+        exit 0
+    fi
+    if [[ "$installed" == "$current" ]]; then
+        say "이미 같습니다: ${current} — 고치지 않습니다."
+        exit 0
+    fi
+
+    sed -i "s|^\([[:space:]]*nat_1_1_mapping[[:space:]]*=[[:space:]]*\)\"[^\"]*\"|\1\"${current}\"|" "$INSTALLED_CFG"
+    logger -t janus-publicip "nat_1_1_mapping ${installed:-(없음)} → ${current}" 2>/dev/null || true
+    say "설치본을 고쳤습니다: ${installed:-(비어 있음)} → ${current}"
+
+    # 저장소 쪽 값도 따라가게 둔다. 그러지 않으면 점검이 '반영 안 됨' 으로 본다.
+    # 부팅 중에는 이 파일들이 없을 수도 있어(홈이 늦게 붙는 등) 실패해도 넘어간다.
+    for f in "$SETTINGS_FILE" "$APPLIED_FILE"; do
+        [[ -w "$f" ]] || continue
+        grep -qE '^[[:space:]]*public_ip[[:space:]]*=' "$f" \
+            && sed -i "s|^[[:space:]]*public_ip[[:space:]]*=.*|public_ip = ${current}|" "$f" \
+            || printf 'public_ip = %s\n' "$current" >> "$f"
+    done
+    exit 0
 fi
 
 if [[ $WRITE -eq 1 ]]; then

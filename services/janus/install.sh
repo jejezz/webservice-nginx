@@ -158,6 +158,9 @@ settings_put() {
 
 SERVICE_TEMPLATE="${SCRIPT_DIR}/janus.service"
 SERVICE_UNIT="/etc/systemd/system/janus.service"
+# 기동 직전에 공인 IP 를 설치본에 맞추는 유닛. janus.service 가 Wants 로 부른다.
+PUBIP_TEMPLATE="${SCRIPT_DIR}/janus-public-ip.service"
+PUBIP_UNIT="/etc/systemd/system/janus-public-ip.service"
 JANUS_USER="janus"
 
 # 계획서 ①③⑦ 에서 정한 값들. 설정 파일과 여기가 어긋나면 점검이 잡아낸다.
@@ -495,6 +498,16 @@ report() {
         systemctl is-active --quiet janus 2>/dev/null \
             && ok "구동 중" \
             || { warn "구동 중이 아닙니다 (journalctl -u janus -n 40)"; problems=$((problems + 1)); }
+        # 공인 IP 동기화 유닛. __REPO_DIR__ 은 설치할 때 이 디렉토리로 바뀌므로
+        # 비교 전에 원본에도 같은 치환을 걸어 준다.
+        if [[ -f "$PUBIP_UNIT" ]]; then
+            report_config_diff "유닛 ${PUBIP_UNIT##*/}" "sudo $0 --apply" \
+                -n "s%__REPO_DIR__%${SCRIPT_DIR}%g" \
+                "$PUBIP_UNIT" "$PUBIP_TEMPLATE" || problems=$((problems + 1))
+        else
+            pend "유닛 없음: ${PUBIP_UNIT} — 공인 IP 가 바뀌면 기동 뒤 외부 통화가 무음이 됩니다"
+            pending=$((pending + 1))
+        fi
     else
         pend "유닛 없음: ${SERVICE_UNIT}"
         pending=$((pending + 1))
@@ -825,6 +838,7 @@ apply() {
     echo "다음을 설치합니다:"
     echo "  ${JANUS_ETC}/{$(IFS=,; echo "${OWNED_CFGS[*]}")}"
     echo "  ${SERVICE_UNIT}   (systemd 유닛, enable + start)"
+    echo "  ${PUBIP_UNIT}   (기동 직전 공인 IP 동기화)"
     echo "  ${SECRETS_DIR}/{admin-secret,api-secret}"
     echo
     echo "배포본 설정은 *.jcfg.sample 로 그대로 남고, 기존 파일은 백업합니다."
@@ -969,9 +983,16 @@ apply() {
     backup "$SERVICE_UNIT"
     install -o root -g root -m 644 "$SERVICE_TEMPLATE" "$SERVICE_UNIT"
     info "  설치: ${SERVICE_UNIT}"
+    # 기동 직전 공인 IP 동기화. 저장소 위치를 유닛에 박아 넣는다 — systemd 는
+    # 상대 경로도 ~ 도 풀어 주지 않는다.
+    backup "$PUBIP_UNIT"
+    install -o root -g root -m 644 "$PUBIP_TEMPLATE" "$PUBIP_UNIT"
+    sed -i "s|__REPO_DIR__|${SCRIPT_DIR}|g" "$PUBIP_UNIT"
+    info "  설치: ${PUBIP_UNIT}"
     systemctl daemon-reload
     systemctl enable janus >/dev/null 2>&1
-    info "  enable: 재부팅 후에도 뜹니다"
+    systemctl enable janus-public-ip >/dev/null 2>&1
+    info "  enable: 재부팅 후에도 뜹니다 (기동 직전 공인 IP 동기화 포함)"
 
     # --- 기동 ---
     #
@@ -1041,6 +1062,11 @@ remove() {
     echo "  - ${SECRETS_DIR} 는 지우지 않습니다 (다시 설치할 때 그대로 씁니다)"
     confirm "계속할까요?" || { echo "취소했습니다."; exit 0; }
 
+    if [[ -f "$PUBIP_UNIT" ]]; then
+        systemctl disable janus-public-ip 2>/dev/null || true
+        rm -f "$PUBIP_UNIT"
+        info "  제거: ${PUBIP_UNIT}"
+    fi
     if [[ -f "$SERVICE_UNIT" ]]; then
         systemctl stop janus 2>/dev/null || true
         systemctl disable janus 2>/dev/null || true

@@ -61,6 +61,7 @@ services/janus/
 ├── janus.transport.websockets.jcfg  ↗  (install.sh --apply 가 설치)
 ├── janus.plugin.sip.jcfg   ↗
 ├── janus.service           systemd 유닛 원본
+├── janus-public-ip.service 기동 직전 공인 IP 동기화 유닛 원본
 ├── settings-schema.json    장비마다 다른 값의 정의 (커밋함)
 ├── settings.ini            그 값 — 공인 IP · 미디어 포트 (커밋하지 않음)
 ├── secrets/                admin-secret · api-secret · sip-*.pw (600, 커밋 금지)
@@ -345,9 +346,30 @@ sudo ./install.sh --apply
 ICE 후보로 광고**하고, 신호는 붙는데 소리가 나지 않습니다
 ([T-5](#t-5-밖에서-걸면-소리가-나지-않는다--공인-ip)).
 
+**부팅 때는 저절로 맞춰집니다.** `--apply` 가 유닛을 하나 더 설치합니다.
+
+```
+janus-public-ip.service   Before=janus.service   →  check-public-ip.sh --sync
+```
+
+Janus 는 **기동할 때 읽은 주소**를 그 뒤로 계속 ICE 후보로 광고하므로, 고칠 수
+있는 자리가 기동 직전뿐입니다. 그래서 `Before=` 로 끼웁니다. `Wants=` 라서 이
+유닛이 실패해도(이름 해석 실패 등) Janus 는 그대로 뜹니다 — LAN 통화는 이 값과
+무관하기 때문입니다.
+
+| | |
+|---|---|
+| LAN 전용으로 설치된 장비 | **아무것도 하지 않습니다.** `nat_1_1_mapping` 이 없다는 것은 사람이 그렇게 정했다는 뜻이라, 부팅 때 조용히 켜서 밖으로 주소를 광고하지 않습니다 |
+| 값이 같으면 | 고치지 않고 넘어갑니다 |
+| 바뀌었으면 | 설치본의 `nat_1_1_mapping` 을 새 값으로 바꾸고 `journal` 에 남깁니다 (`journalctl -u janus-public-ip`) |
+
+**돌고 있는 동안 바뀌면 여전히 사람이 손대야 합니다.** 파일만 고쳐서는 이미 뜬
+Janus 가 다시 읽지 않고, 재시작은 통화를 끊습니다. 그건 알림으로 둡니다.
+
 ```bash
 ./check-public-ip.sh              # 0 같음 · 1 다름 · 2 확인 불가
 ./check-public-ip.sh --write      # 현재 값을 settings.ini 에 적는다 (적용은 별개)
+sudo ./check-public-ip.sh --sync  # 설치본을 지금 값으로 맞춘다 (유닛이 쓰는 것)
 ```
 
 항목 정의는 `settings-schema.json` 에 있습니다(커밋합니다). 구축 마법사
@@ -636,6 +658,9 @@ ICE 후보로 광고하므로, 신호는 붙고 화면에는 아무 오류도 �
 ./check-public-ip.sh              # 0 같음 · 1 다름 · 2 확인 불가
 ./check-public-ip.sh --write && sudo ./install.sh --apply
 ```
+
+재부팅으로도 풀립니다 — `janus-public-ip.service` 가 기동 직전에 맞춥니다
+(8-4). 돌고 있는 동안 바뀐 경우에는 위 명령이 필요합니다.
 
 주기적으로 보려면 crontab 에 넣습니다.
 
