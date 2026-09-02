@@ -342,6 +342,18 @@ CRITICAL: <core> [core/cfg.y]: yyerror_at(): parse error in config file
           kamailio-websocket.cfg, line 41
 ```
 
+> ⚠️ **`/etc/kamailio/kamailio-websocket.cfg` 는 `install.sh` 가 소유하지
+> 않습니다** — `setup-websocket.sh` 가 깝니다. 그래서 저장소를 고쳐도 그 파일은
+> 그대로 남아 있고, `--apply` 가 계속 같은 자리에서 막힙니다. 이미 깔려 있다면
+> 먼저 갱신하세요.
+>
+> ```bash
+> sudo ./setup-websocket.sh --enable     # 감싼 판으로 다시 설치
+> sudo ./setup-websocket.sh --disable    # WS 를 안 쓰면 걷어내기
+> ```
+>
+> `install.sh` 는 이 상태를 **아무것도 쓰기 전에** 잡아 멈춥니다.
+
 ### 포트 범위 — Janus 의 두 범위와 겹치면 안 됩니다
 
 셋 다 같은 장비에서 UDP 포트를 바인딩하는 **다른 프로세스**입니다.

@@ -110,6 +110,19 @@ MEDIA_PORT_RANGE="$(settings_get media_port_range '10200-19999')"
 # 브라우저가 Janus 로 붙으므로 비워 둔다 (LAN 전용).
 MEDIA_PUBLIC_IP="$(settings_get media_public_ip '')"
 
+# WS 오버라이드가 WITH_NAT 을 감싸지 않은 옛 판인가.
+#
+# 그 파일은 setup-websocket.sh 가 소유하므로 이 스크립트가 고치지 않는다.
+# 그런데 둘 다 WITH_NAT 을 켜면 파서가 죽어서(already defined) --apply 가
+# 설정을 다 깔고 나서야 되돌아온다. 미리 잡는 편이 낫다.
+ws_cfg_conflicts() {
+    local ws="${KAM_ETC}/kamailio-websocket.cfg"
+    [[ -r "$ws" ]] || return 1
+    grep -q '^[[:space:]]*#!define[[:space:]][[:space:]]*WITH_NAT' "$ws" || return 1
+    grep -q '^[[:space:]]*#!ifndef[[:space:]][[:space:]]*WITH_NAT' "$ws" && return 1
+    return 0
+}
+
 # 이 장비에 실제로 있는 릴레이. 없으면 빈 문자열.
 relay_kind() {
     [[ -x /usr/bin/rtpengine || -x /usr/sbin/rtpengine ]] && { echo rtpengine; return; }
@@ -377,6 +390,12 @@ report() {
         -n 's%^#!define SIP_PUSH_URL .*%#!define SIP_PUSH_URL «%' \
         "$LOCAL_CFG" "$TEMPLATE" \
         || problems=$((problems + 1))
+
+    if ws_cfg_conflicts; then
+        warn "kamailio-websocket.cfg 가 WITH_NAT 을 감싸지 않은 옛 판입니다 — --apply 가 막힙니다"
+        warn "  sudo ./setup-websocket.sh --enable (또는 --disable) 로 갱신하세요"
+        problems=$((problems + 1))
+    fi
 
     info ""
     info "미디어 릴레이"
@@ -678,6 +697,18 @@ apply() {
     fi
 
     [[ -f "$TEMPLATE" ]] || die "템플릿이 없습니다: ${TEMPLATE}"
+
+    if ws_cfg_conflicts; then
+        echo
+        echo "  ${KAM_ETC}/kamailio-websocket.cfg 가 WITH_NAT 을 그냥 #!define 합니다." >&2
+        echo "  kamailio-local.cfg 도 같은 값을 켜므로 설정 검사가 죽습니다:" >&2
+        echo "      pp_define(): already defined: WITH_NAT" >&2
+        echo >&2
+        echo "  그 파일은 setup-websocket.sh 가 소유합니다. 먼저 갱신하세요:" >&2
+        echo "      sudo ./setup-websocket.sh --enable     # 감싼 판으로 다시 설치" >&2
+        echo "      sudo ./setup-websocket.sh --disable    # WS 를 안 쓰면 걷어내기" >&2
+        die "먼저 위를 처리하세요. 아무것도 바꾸지 않았습니다."
+    fi
 
     grep -q 'import_file "kamailio-local.cfg"' "$MAIN_CFG" \
         || die "기본 설정이 kamailio-local.cfg 를 읽지 않습니다: ${MAIN_CFG}"
