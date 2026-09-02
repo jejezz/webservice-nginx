@@ -386,7 +386,9 @@ report() {
     kind="$(relay_kind)"
     unit="$(relay_unit)"
     declared=rtpproxy
-    grep -q '^[[:space:]]*#!define[[:space:]][[:space:]]*WITH_RTPENGINE' "$TEMPLATE" 2>/dev/null && declared=rtpengine
+    if grep -q '^[[:space:]]*#!define[[:space:]][[:space:]]*WITH_RTPENGINE' "$TEMPLATE" 2>/dev/null; then
+        declared=rtpengine
+    fi
     if [[ -z "$kind" ]]; then
         warn "릴레이 데몬이 없습니다 — 통화 때 미디어가 붙지 않습니다"
         warn "  sudo ./bootstrap.sh --install  (이 판에 있는 것을 골라 설치합니다)"
@@ -550,8 +552,17 @@ write_rtpengine_cfg() {
             ok "${unit} 구동 중"
             # 커널 모듈이 없으면 userspace 로 중계한다. 동작에는 지장이 없고
             # CPU 만 더 쓴다 — 로그에 FAILED TO CREATE KERNEL TABLE 로 남는다.
-            journalctl -u "$unit" -n 20 --no-pager 2>/dev/null | grep -q "KERNEL FORWARDING DISABLED" \
-                && info "  커널 모듈(xt_RTPENGINE) 없이 userspace 로 중계합니다 — 동작은 정상입니다"
+            # ⚠️ `journalctl | grep -q && info` 로 쓰면 안 된다. 두 가지로 죽는다.
+            #    · grep -q 가 첫 일치에서 파이프를 끊어 journalctl 이 SIGPIPE(141)
+            #      로 죽고, pipefail 이 그 파이프라인을 실패로 본다
+            #    · 일치하지 않으면 이 문장 자체가 1 을 내고 set -e 가 스크립트를
+            #      끝낸다 — 설정만 깔린 채 재시작도 적용 기록도 없이 멈춘다
+            #    실제로 그렇게 멈췄다. 출력을 받아서 검사한다.
+            local relay_log
+            relay_log="$(journalctl -u "$unit" -n 20 --no-pager 2>/dev/null || true)"
+            if [[ "$relay_log" == *"KERNEL FORWARDING DISABLED"* ]]; then
+                info "  커널 모듈(xt_RTPENGINE) 없이 userspace 로 중계합니다 — 동작은 정상입니다"
+            fi
         else
             warn "${unit} 이 뜨지 않았습니다 — journalctl -u ${unit} -n 30"
             warn "  설정을 되돌립니다 (설치 전 상태)."
@@ -699,7 +710,9 @@ apply() {
     write_kamctlrc "$password"
     # 미디어 릴레이는 이 장비에 있는 것을 쓴다. rtpengine 이면 설정도 우리가
     # 소유한다. rtpproxy(22.04)는 배포판 기본 설정을 그대로 둔다.
-    [[ "$(relay_kind)" == "rtpengine" ]] && write_rtpengine_cfg
+    if [[ "$(relay_kind)" == "rtpengine" ]]; then
+        write_rtpengine_cfg
+    fi
 
     # 문법 검사를 통과하지 못하면 되돌린다. 깨진 설정으로 재시작하면 서비스가 죽는다.
     local bin; bin="$(running_binary)"; bin="${bin:-/usr/sbin/kamailio}"
