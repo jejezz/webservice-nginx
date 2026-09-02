@@ -144,27 +144,25 @@ report() {
             info ""
             info "다만 이 셸에는 kamailio 그룹이 없습니다. 지금 서비스는 올바른 그룹으로"
             info "떠 있지만, **이 셸에서 pm2 를 다시 띄우면 그룹을 잃습니다.**"
-            info "다시 로그인한 뒤에 하시거나, 아래 ②를 쓰세요."
+            info "아래 스크립트가 그것을 막아 줍니다."
         fi
     else
         info "해결할 항목이 ${problems}개 있습니다."
     fi
 
+    # 그룹 문제를 여기서 손으로 풀라고 적지 않는다. 명령을 옮겨 적게 하면 절대경로를
+    # 틀리거나 pm2 restart 로 대신하게 되고, 띄운 뒤 실제로 그룹을 받았는지는 또
+    # 따로 확인해야 한다. 그 셋을 한 번에 하는 스크립트가 있다.
     if [[ $problems -gt 0 || "$shell_has_group" == "no" ]]; then
         info ""
-        info "그룹 관련 — 둘 중 하나:"
+        info "그룹은 pm2 데몬을 다시 띄워야 반영됩니다 — 자식이 데몬에게서 물려받기"
+        info "때문입니다. pm2 restart 로는 바뀌지 않습니다."
         info ""
-        info "  ① 다시 로그인한 뒤 (권장, 재부팅 후에도 유효)"
-        info "       pm2 kill"
-        info "       cd ${PROJECT_ROOT}/pm2 && pm2 start ecosystem.config.js && pm2 save"
+        info "  ${PROJECT_ROOT}/pm2/restart.sh              지금 상태를 본다"
+        info "  ${PROJECT_ROOT}/pm2/restart.sh --restart    다시 띄우고 확인까지"
         info ""
-        info "  ② 로그아웃 없이 — sg 로 데몬을 띄운다"
-        info "       pm2 kill"
-        info "       sg kamailio -c \"cd ${PROJECT_ROOT}/pm2 && pm2 start ecosystem.config.js && pm2 save\""
-        info ""
-        info "  ②는 데몬의 기본 그룹이 kamailio 가 되므로 임시 조치로만 쓰세요."
-        info "  pm2 kill 이 필요한 이유: 데몬이 자식에게 그룹을 물려주므로 데몬 자체를"
-        info "  다시 띄워야 반영됩니다. pm2 restart 로는 바뀌지 않습니다."
+        info "  이 셸에 그룹이 없으면 --restart 는 거부하고, 다시 로그인할지"
+        info "  --sg 로 감쌀지 그 자리에서 알려 줍니다."
     fi
     return 0
 }
