@@ -84,9 +84,6 @@ function superCookieOptions() {
     sameSite: 'strict',
     secure: config.cookieSecure,
     // 이 쿠키는 manager 자신만 쓴다. 다른 서비스로 새어 나가지 않도록 basePath에 묶는다.
-    // 다만 루트에 붙어 있으면(basePath = '') 경로로 좁힐 수 없어 '/'가 된다 —
-    // 같은 오리진의 다른 location(/face/, /complex/ …)에도 전달된다는 뜻이다.
-    // 콘솔을 격리하려면 basePath를 '/manager' 같은 하위 경로로 옮긴다.
     path: config.basePath || '/',
     maxAge: config.superAdmin.sessionTtlMs,
   };
@@ -97,7 +94,7 @@ function cookieOptions() {
     httpOnly: true,
     sameSite: 'lax',
     secure: config.cookieSecure,
-    // Path를 '/'로 두어 다른 서비스의 대시보드(/cassini/, /complex/admin/ 등)에도 전달한다.
+    // Path를 '/'로 두어 다른 서비스의 대시보드(/ws-bridge/dashboard 등)에도 전달한다.
     // 각 서비스는 공유 시크릿으로 이 쿠키를 검증하므로 로그인은 한 번이면 된다.
     path: '/',
     maxAge: config.sessionTtlMs,

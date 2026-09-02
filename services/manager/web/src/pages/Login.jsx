@@ -28,14 +28,15 @@ export default function Login() {
 
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  // 비밀번호가 새로 저장되는 경우에만 확인 입력을 받는다.
-  // null 이면 평범한 로그인, 'signup' 이면 신규 등록, 'reset' 이면 승인 전 재설정.
-  const [confirmMode, setConfirmMode] = useState(null);
-  const [passwordConfirm, setPasswordConfirm] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
+
+  // 비밀번호가 **새로 저장되는** 경우에만 확인 입력을 받는다.
+  // null 이면 평범한 로그인, 'signup' 이면 신규 등록, 'reset' 이면 승인 전 재설정.
+  const [confirmMode, setConfirmMode] = useState(null);
+  const [passwordConfirm, setPasswordConfirm] = useState('');
 
   // 어느 장비에 로그인하는 중인지. 서버가 여러 대일 때 헷갈리지 않도록 띄운다.
   // 못 가져와도 로그인은 되어야 하므로 실패는 조용히 넘긴다.
@@ -70,7 +71,6 @@ export default function Login() {
     e.preventDefault();
     setError('');
     setNotice('');
-
     // 서버도 검사하지만, 여기서 걸러내면 왕복 한 번을 아낀다.
     if (confirmMode && password !== passwordConfirm) {
       setError('두 비밀번호가 일치하지 않습니다. 다시 입력하세요.');
@@ -106,6 +106,8 @@ export default function Login() {
         return;
       }
 
+      resetConfirm();
+
       // 승인 대기는 실패가 아니라 안내다.
       if (err.code === 'pending_approval') {
         setNotice(err.message);
@@ -113,7 +115,6 @@ export default function Login() {
         setError(err.message || '로그인에 실패했습니다.');
       }
       setPassword('');
-      resetConfirm();
     } finally {
       setSubmitting(false);
     }
@@ -244,7 +245,7 @@ export default function Login() {
 
               <Button type="submit" className="w-full" disabled={submitting}>
                 {submitting && <Loader2 className="animate-spin" />}
-                {confirmMode === 'signup' ? '승인 요청' : confirmMode === 'reset' ? '비밀번호 재설정' : '로그인'}
+                로그인
               </Button>
             </form>
           </CardContent>

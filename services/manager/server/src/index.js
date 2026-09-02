@@ -81,7 +81,7 @@ if (hasBuild) {
     })
   );
 
-  // SPA 폴백 — 클라이언트 라우팅(/login, /dashboard 등)을 index.html이 처리한다.
+  // SPA 폴백 — 클라이언트 라우팅(/manager/login 등)을 index.html이 처리한다.
   router.get('*', (req, res, next) => {
     if (req.path.startsWith('/api/')) return next();
     res.sendFile(indexHtml);
@@ -94,8 +94,9 @@ if (hasBuild) {
   });
 }
 
-// 기본값은 루트(basePath = '')다. Nginx의 location / 이 이 서버로 그대로 넘긴다.
-// basePath를 지정하면 그 경로와 루트 양쪽에 마운트해 포트로 직접 접근할 때도 동작한다.
+// basePath(/manager)와 루트 양쪽에 마운트한다.
+// Nginx의 proxy_pass에 URI가 없으므로 원본 URI(/manager/...)가 그대로 전달되고,
+// 포트로 직접 접근할 때는 루트 경로가 쓰인다.
 if (config.basePath) app.use(config.basePath, router);
 app.use('/', router);
 
@@ -107,15 +108,7 @@ app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
 const server = app.listen(config.port, config.host, () => {
   log.info(`Manager listening on ${config.host}:${config.port} (basePath: ${config.basePath || '/'})`);
   log.info(`Config: ${config.configPath}`);
-  log.info(`서비스 선언: ${config.servicesDir}/*/nginx-conf/*.ini`);
-  log.info(`nginx 서버 설정: ${config.nginxStackPath}`);
-
-  if (!config.superAdmin.passwordHash && !config.superAdmin.password) {
-    log.warn(
-      '관리자 콘솔 비밀번호가 설정되지 않아 로그인 화면의 설정 버튼이 동작하지 않습니다. ' +
-        "config.json 의 superAdmin.passwordHash 에 `npm run hash-password -- '<비밀번호>'` 결과를 넣으세요."
-    );
-  }
+  log.info(`nginx-stack.conf: ${config.nginxStackPath}`);
 });
 
 function shutdown(signal) {

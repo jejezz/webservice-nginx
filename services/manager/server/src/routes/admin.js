@@ -6,7 +6,7 @@ const password = require('../auth/password');
 const { DbUserStore } = require('../auth/db-user-store');
 
 /**
- * 관리자 콘솔 (/api/admin).
+ * 관리자 콘솔 (/manager/api/admin).
  *
  * 로그인 화면의 설정 버튼 → 고정 계정으로 로그인 → administrator 테이블 CRUD.
  * 일반 로그인 세션과는 쿠키·토큰이 모두 분리되어 있어 서로를 대신할 수 없다.
@@ -15,6 +15,16 @@ const { DbUserStore } = require('../auth/db-user-store');
  * 항상 DB 저장소를 직접 쓴다.
  */
 const store = new DbUserStore();
+
+// 비밀번호가 없으면 콘솔은 열리지 않는다. 로그인할 때마다 남기면 무차별 시도에
+// 로그가 묻히므로, 기동할 때 한 번만 알린다.
+if (!config.superAdmin.passwordHash && !config.superAdmin.password) {
+  log.warn(
+    '관리자 콘솔 비밀번호가 없습니다 — 콘솔은 열리지 않습니다. ' +
+      "config.json 의 superAdmin.passwordHash 를 채우세요 " +
+      "(printf '%s' '<비밀번호>' | node tools/hash-password.js --stdin)"
+  );
+}
 
 // --- 로그인 시도 제한 (IP 단위, 인메모리) ---
 const MAX_ATTEMPTS = 5;
@@ -47,7 +57,8 @@ function recordFailure(key) {
 function checkCredentials(username, plain) {
   const { username: expectedUser, password: expectedPw, passwordHash } = config.superAdmin;
 
-  // 비밀번호가 설정되지 않았으면 콘솔을 열지 않는다. (기본 비밀번호를 두지 않는다)
+  // 비밀번호가 설정되지 않았으면 콘솔을 열지 않는다 (기본 비밀번호를 두지 않는다).
+  // 이것이 없으면 빈 문자열끼리 비교가 통과해 누구나 들어온다.
   if (!passwordHash && !expectedPw) return false;
 
   // 아이디가 틀려도 비밀번호 검사를 건너뛰지 않는다. (응답 시간으로 아이디를 알아내지 못하게)

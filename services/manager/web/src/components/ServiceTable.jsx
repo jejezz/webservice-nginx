@@ -29,10 +29,8 @@ function DetailRow({ service }) {
 
   const items = [
     ['Health URL', service.healthUrl || '—'],
-    ['등록 위치', (service.sources || []).map((s) => (s === 'nginx' ? 'nginx-conf/' : 'ecosystem.config.js')).join(' + ') || '—'],
-    ['선언 파일', service.declaredIn || '— (선언 없음)'],
-    ['업스트림', service.upstream || '— (라우트 없음)'],
-    ['Nginx location', (service.locations || []).join(', ') || service.location || '— (라우트 없음)'],
+    ['등록 위치', (service.sources || []).map((s) => (s === 'nginx' ? 'nginx-conf' : 'pm2-conf')).join(' + ') || '—'],
+    ['Nginx location', service.location || '— (라우트 없음)'],
     ['proxy_pass', service.proxyPass || '—'],
     ['WebSocket', service.websocket ? '사용' : '미사용'],
     ['대상 호스트', target ? `${target.host}:${target.port}` : '—'],
@@ -96,7 +94,7 @@ export function ServiceTable({ services, onRecheck, rechecking }) {
   if (services.length === 0) {
     return (
       <div className="p-10 text-center text-sm text-muted-foreground">
-        nginx-conf/service.ini 를 선언한 서비스도, 등록된 PM2 앱도 없습니다.
+        nginx-conf에 정의된 라우트가 없습니다.
       </div>
     );
   }
@@ -148,7 +146,7 @@ export function ServiceTable({ services, onRecheck, rechecking }) {
                     </Badge>
                   )}
                   {!service.location && (
-                    <Badge variant="secondary" className="hidden sm:inline-flex" title="Nginx 업스트림 없이 포트로 직접 접근">
+                    <Badge variant="secondary" className="hidden sm:inline-flex" title="nginx 라우트 없이 포트로 직접 접근">
                       직결
                     </Badge>
                   )}

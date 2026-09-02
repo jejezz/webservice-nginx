@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
   Activity,
   AlertCircle,
   CheckCircle2,
+  ListChecks,
   LogOut,
   RefreshCw,
   Server,
@@ -24,6 +26,109 @@ import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
 
 const REFRESH_INTERVAL_MS = 5000;
+
+const CERT_KIND_LABEL = {
+  letsencrypt: 'Let\u2019s Encrypt (공인)',
+  'letsencrypt-staging': 'Let\u2019s Encrypt STAGING',
+  'private-ca': '사설 CA',
+  unknown: '알 수 없음',
+};
+
+/**
+ * 서버가 **지금 내밀고 있는** 인증서.
+ *
+ * 파일이 아니라 TLS 접속으로 읽으므로, 갱신은 됐는데 nginx 가 reload 되지 않아
+ * 옛 인증서가 나가는 상태도 여기서 드러난다.
+ */
+function CertCard({ cert }) {
+  if (!cert?.ok) {
+    return (
+      <Card>
+        <CardHeader className="flex-row items-center justify-between space-y-0">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <ShieldCheck className="size-4" />
+            TLS 인증서
+          </CardTitle>
+          <Badge variant="destructive">확인 불가</Badge>
+        </CardHeader>
+        <CardContent>
+          <p className="text-xs text-muted-foreground">
+            {cert?.port ? `127.0.0.1:${cert.port} 에서 인증서를 받지 못했습니다.` : '상태를 읽지 못했습니다.'}
+            {cert?.error ? ` (${cert.error})` : ''}
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const tone = cert.level === 'critical' ? 'destructive' : cert.level === 'warn' ? 'warning' : 'success';
+  const rows = [
+    ['종류', CERT_KIND_LABEL[cert.kind] || cert.kind],
+    ['이름', cert.subject || '—'],
+    ['발급자', cert.issuer || '—'],
+    ['만료', `${formatDateTime(cert.expiresAt)} (${cert.daysLeft}일)`],
+    ['자동 갱신', cert.renewTimer === 'active' ? 'certbot.timer 동작 중' : `certbot.timer — ${cert.renewTimer}`],
+  ];
+  if (cert.dns) {
+    rows.push([
+      'DNS',
+      cert.dns.ok
+        ? `이 서버를 가리킴 (${cert.dns.current})`
+        : `${cert.dns.resolved || '레코드 없음'} — 지금은 ${cert.dns.current || '?'}`,
+    ]);
+  }
+
+  // 무엇을 해야 하는지까지 적는다. 상태만 보여 주면 결국 문서를 뒤지게 된다.
+  const notes = [];
+  if (cert.kind === 'letsencrypt-staging') {
+    notes.push('시험용 인증서가 물려 있습니다. 브라우저와 앱이 거부합니다 — 실제 발급으로 바꾸세요.');
+  }
+  if (cert.kind === 'private-ca') {
+    notes.push('사설 CA 입니다. 앱이 CA 를 미리 심어야만 접속됩니다 — 공인 인증서로 이관이 남았습니다.');
+  }
+  if (cert.kind === 'letsencrypt' && cert.renewTimer !== 'active') {
+    notes.push('자동 갱신이 꺼져 있습니다. 90일 뒤 조용히 만료됩니다.');
+  }
+  if (cert.daysLeft != null && cert.daysLeft < 30) {
+    notes.push('만료가 가깝습니다. 갱신이 도는지 확인하세요.');
+  }
+  if (cert.dns && !cert.dns.ok) {
+    // 유동 IP 인데 A 레코드가 고정이라 생기는 일이다. 지금 아무도 못 붙는 상태다.
+    notes.push(
+      `이름이 이 서버를 가리키지 않습니다. 앱이 접속하지 못합니다 — 등록기관에서 A 레코드를 ${cert.dns.current || '현재 공인 IP'} 로 고치세요.`,
+    );
+  }
+
+  return (
+    <Card>
+      <CardHeader className="flex-row items-center justify-between space-y-0">
+        <CardTitle className="flex items-center gap-2 text-base">
+          <ShieldCheck className="size-4" />
+          TLS 인증서
+        </CardTitle>
+        <Badge variant={tone}>{cert.daysLeft != null ? `${cert.daysLeft}일 남음` : cert.level}</Badge>
+      </CardHeader>
+
+      <CardContent>
+        <dl className="grid grid-cols-1 gap-x-8 gap-y-1 sm:grid-cols-2">
+          {rows.map(([label, value]) => (
+            <div key={label} className="flex items-baseline justify-between gap-4 border-b border-border/50 py-1.5">
+              <dt className="text-xs text-muted-foreground">{label}</dt>
+              <dd className="truncate font-mono text-xs">{String(value)}</dd>
+            </div>
+          ))}
+        </dl>
+        {notes.length > 0 && (
+          <ul className="mt-3 space-y-1">
+            {notes.map((n) => (
+              <li key={n} className="text-xs text-muted-foreground">· {n}</li>
+            ))}
+          </ul>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 function NginxCard({ nginx, server }) {
   const rows = [
@@ -167,6 +272,13 @@ export default function Dashboard() {
               </Label>
             </div>
 
+            <Button variant="outline" size="sm" asChild title="구축 마법사">
+              <Link to="/setup">
+                <ListChecks className="size-3.5" />
+                <span className="hidden sm:inline">구축</span>
+              </Link>
+            </Button>
+
             <Button variant="outline" size="sm" onClick={load} disabled={refreshing}>
               <RefreshCw className={cn('size-3.5', refreshing && 'animate-spin')} />
               <span className="hidden sm:inline">새로고침</span>
@@ -221,15 +333,13 @@ export default function Dashboard() {
             </div>
 
             <NginxCard nginx={data.nginx} server={data.server} />
+            <CertCard cert={data.cert} />
 
             <Card>
               <CardHeader className="flex-row items-center justify-between space-y-0">
                 <CardTitle className="text-base">서비스</CardTitle>
                 <div className="text-right">
-                  <p className="font-mono text-xs text-muted-foreground">
-                    {data.source.servicesDir}/*/nginx-conf/*.ini
-                    {typeof data.source.declarations === 'number' && ` (${data.source.declarations})`}
-                  </p>
+                  <p className="font-mono text-xs text-muted-foreground">{data.source.path}</p>
                   {data.source.ecosystemPath && (
                     <p className="font-mono text-xs text-muted-foreground">{data.source.ecosystemPath}</p>
                   )}

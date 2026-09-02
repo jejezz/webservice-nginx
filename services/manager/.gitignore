@@ -3,4 +3,6 @@ server/public/
 
 # 계정 정보와 세션 시크릿이 들어 있으므로 커밋하지 않는다. (config.example.json 참고)
 config.json
-secrets/
+
+# 구축 마법사의 사람 확인 기록 (이 장비의 구축 이력)
+setup-attest.json

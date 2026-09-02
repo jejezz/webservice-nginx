@@ -5,6 +5,9 @@ const log = require('./logger');
 
 const SERVER_DIR = path.resolve(__dirname, '..');
 const MANAGER_DIR = path.resolve(SERVER_DIR, '..');
+// 저장소 뿌리(services/manager 의 두 단계 위). 구축 마법사가 점검 스크립트를
+// 여기 기준으로 찾고, 이 밖으로 나가는 경로는 실행하지 않는다.
+const REPO_ROOT = path.resolve(MANAGER_DIR, '..', '..');
 
 const DEFAULTS = {
   port: 28084,
@@ -12,16 +15,13 @@ const DEFAULTS = {
   // 이렇게 해야 TLS를 우회해 백엔드 포트로 직접 들어오는 평문 접근이 차단된다.
   // 외부에 직접 노출해야 한다면 '0.0.0.0'으로 바꾼다.
   host: '127.0.0.1',
-  // Nginx의 기본 웹페이지를 대신하므로 루트에 붙는다.
-  // 하위 경로로 옮기려면 '/manager' 처럼 넣고 web/vite.config.js의 base도 함께 바꾼다.
-  basePath: '',
+  basePath: '/manager',
   sessionSecret: '',
   sessionTtlMinutes: 120,
   cookieSecure: true,
-  // MANAGER_DIR(Public/WebServices/services/manager) 기준 상대 경로.
-  // servicesDir 아래의 */nginx-conf/*.ini 가 서비스 목록의 진실 공급원이다.
-  // (install_nginx_stack.sh 가 읽는 파일과 같다)
-  servicesDir: '..',
+  // MANAGER_DIR(services/manager) 기준 상대 경로
+  // 라우팅 선언은 services/*/nginx-conf/*.ini 에 있고, 그 위치는
+  // nginx-stack.conf 의 services_dir 이 정한다.
   nginxStackPath: '../../nginx/nginx-stack.conf',
   ecosystemPath: '../../pm2/ecosystem.config.js',
   healthTimeoutMs: 3000,
@@ -33,10 +33,17 @@ const DEFAULTS = {
   // 로그인 화면의 설정 버튼으로 들어가는 관리자 콘솔 계정.
   // administrator 테이블 자체를 다루므로 일반 로그인 계정과 분리해 둔다.
   //
-  // 이 계정 하나로 모든 관리자 계정을 만들고 지울 수 있고, 이 대시보드는 루트에
-  // 붙어 있으므로 기본 비밀번호를 두지 않는다. 둘 다 비어 있으면 관리자 로그인은
-  // 항상 실패한다(fail-closed). `npm run hash-password -- '<비밀번호>'`로 만든
-  // scrypt$... 값을 config.json의 superAdmin.passwordHash에 넣어 사용한다.
+  // ⚠️ 기본 비밀번호를 두지 않는다. 둘 다 비어 있으면 콘솔은 **항상 실패**한다
+  //    (fail-closed — routes/admin.js 의 checkCredentials).
+  //
+  //    이 콘솔은 모든 관리자 계정을 만들고 지울 수 있다. 기본 비밀번호를 두면
+  //    그것이 저장소에 커밋되고 README 에도 실리므로, 바꾸지 않은 장비는 클론을
+  //    받은 누구에게나 열린다. "나중에 바꾸겠다" 가 지켜지지 않는 자리다.
+  //
+  //    비밀번호는 passwordHash 로 넣는다:
+  //      cd services/manager/server
+  //      printf '%s' '<비밀번호>' | node tools/hash-password.js --stdin
+  //    bootstrap.sh 가 config.json 을 만들 때 이것을 대신 해 준다.
   superAdmin: {
     username: 'zoomon',
     password: '',
@@ -48,7 +55,7 @@ const DEFAULTS = {
     port: 3306,
     user: 'jyahn',
     // MANAGER_DIR 기준 상대 경로. 비밀번호를 config.json에 두지 않는다.
-    passwordFile: './secrets/manager-db.pw',
+    passwordFile: '../../database/secrets/jyahn.pw',
     passwordEnv: '',
     name: 'manager',
     connectionLimit: 5,
@@ -114,7 +121,7 @@ const host = process.env.MANAGER_HOST || merged.host;
 const basePath = normalizeBasePath(process.env.MANAGER_BASE_PATH || merged.basePath);
 
 // 서비스 대시보드들이 같은 로그인 세션을 공유하도록 시크릿을 파일 하나로 관리한다.
-// (다른 서비스가 이 파일로 manager 쿠키를 검증하면 로그인은 한 번이면 된다)
+// (ws-bridge 등 다른 서비스가 이 파일로 manager 쿠키를 검증한다)
 const SECRET_FILE = process.env.SESSION_SECRET_FILE || path.resolve(MANAGER_DIR, '..', '.session-secret');
 
 function loadSharedSecret() {
@@ -144,6 +151,7 @@ module.exports = Object.freeze({
   configPath,
   managerDir: MANAGER_DIR,
   serverDir: SERVER_DIR,
+  repoRoot: REPO_ROOT,
   publicDir: path.join(SERVER_DIR, 'public'),
 
   port,
@@ -154,7 +162,6 @@ module.exports = Object.freeze({
   cookieSecure: merged.cookieSecure !== false,
   cookieName: 'manager_session',
 
-  servicesDir: path.resolve(MANAGER_DIR, merged.servicesDir),
   nginxStackPath: path.resolve(MANAGER_DIR, merged.nginxStackPath),
   ecosystemPath: path.resolve(MANAGER_DIR, merged.ecosystemPath),
   healthTimeoutMs: parseInt(merged.healthTimeoutMs, 10) || 3000,

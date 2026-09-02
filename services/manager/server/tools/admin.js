@@ -200,7 +200,7 @@ main()
   .catch((err) => {
     console.error(`오류: ${err.code || ''} ${err.message}`);
     if (err.code === 'ECONNREFUSED' || err.code === 'ER_ACCESS_DENIED_ERROR') {
-      console.error('데이터베이스 접속을 확인하세요. (manager/config.json 의 database 항목)');
+      console.error('데이터베이스 접속을 확인하세요. (services/manager/config.json 의 database 항목)');
     }
     process.exitCode = 1;
   })

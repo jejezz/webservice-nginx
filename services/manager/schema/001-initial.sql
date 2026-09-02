@@ -1,6 +1,7 @@
 -- manager 스키마 (DB 이름: manager)
 --
--- sudo ./schema/setup_database.sh 를 실행하면 이 디렉토리의 *.sql 이 이름순으로 실행된다.
+-- database/database.ini 의 [database:manager] schema_dir 이 이 디렉토리를 가리킨다.
+-- sudo database/setup_mariadb.sh 를 실행하면 이 디렉토리의 *.sql 이 이름순으로 실행된다.
 --
 -- 여러 번 실행해도 안전하도록 모두 IF NOT EXISTS 를 쓴다.
 -- 기존 테이블의 컬럼은 바꾸지 않으므로, 구조 변경은 002-xxx.sql 처럼 새 파일로 추가한다.
