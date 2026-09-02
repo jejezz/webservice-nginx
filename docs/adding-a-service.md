@@ -64,6 +64,7 @@ cd pm2 && pm2 start ecosystem.config.js --only my-service && pm2 save
 | nginx 라우트·업스트림 | `nginx/generate_nginx_conf.py` 가 `services/*/nginx-conf/*.ini` 를 훑습니다 |
 | pm2 앱 등록 | `pm2/ecosystem.config.js` 가 `services/*/pm2-conf/*.ini` 를 훑습니다 |
 | manager 대시보드의 서비스 카드·헬스 | 같은 `nginx-conf` 선언을 읽습니다 |
+| plug-in 서비스의 DB·전용 계정 | `database/setup_mariadb.sh` 가 `services/*/db-conf/*.ini` 를 훑습니다 ([db-conf.md](db-conf.md)) |
 | 설정 입력 폼 | 그 디렉터리에 `settings-schema.json` 만 두면 화면이 생깁니다 ([settings-contract.md](settings-contract.md)) |
 | 포트·경로 충돌 검사 | 위 두 `--check` 가 막습니다 |
 
@@ -72,7 +73,10 @@ cd pm2 && pm2 start ecosystem.config.js --only my-service && pm2 save
 
 ## 손으로 고쳐야 하는 자리 — 셋
 
-### ① DB 스키마를 쓴다면 `database/database.ini`
+### ① DB 스키마를 쓴다면
+
+서비스가 **이 저장소 안에** 이력째 들어와 있다면(`manager`·`kamailio`·
+`janus`·`websocket-relay`) `database/database.ini` 에 손으로 등록합니다.
 
 ```ini
 [database:my_service]
@@ -84,6 +88,21 @@ schema_dir = ../services/my-service/schema
 
 > DB 이름에는 하이픈을 쓸 수 없습니다 — `my-service` 디렉터리에 `my_service`
 > 스키마가 되는 것이 정상입니다 (websocket-relay ↔ rtc_relay 와 같은 이유).
+
+서비스가 **이 저장소 밖에 자기 저장소**를 가진 plug-in 이라면(예:
+`apartment-mgmt-server-node`) `database.ini` 를 손댈 필요가 없습니다. 대신
+`nginx-conf`·`pm2-conf` 와 같은 자리에 스스로 선언합니다.
+
+```ini
+; services/my-service/db-conf/database.ini
+[database]
+name = my_service
+```
+
+`setup_mariadb.sh` 가 `services/*/db-conf/*.ini` 를 스캔해 DB 와, 그 DB
+하나에만 권한을 갖는 전용 계정을 자동으로 만듭니다. 이쪽은 손으로 고칠
+자리가 아니므로 **이 문서의 "손으로 고쳐야 하는 자리"에 들어가지 않습니다.**
+자세한 필드는 [db-conf.md](db-conf.md).
 
 ### ② 여럿이 쓰는 값이 필요하면 `site/settings-schema.json`
 
@@ -161,7 +180,10 @@ manager 대시보드(`/manager`)에 카드가 새로 생기고 헬스가 초록�
 남는 것은 손으로 적었던 셋뿐입니다.
 
 - `database/database.ini` 의 `[database:...]` 절 (DB 자체는 남습니다 — 지울지는
-  사람이 정합니다)
+  사람이 정합니다). `db-conf` 로 선언한 DB 는 디렉터리를 지우면 선언은
+  같이 사라지지만, DB 와 전용 계정은 `setup_mariadb.sh` 가 추가·갱신만 하고
+  지우지 않으므로 서버에 그대로 남습니다 — 지우려면 손으로 `DROP DATABASE` ·
+  `DROP USER` 를 해야 합니다
 - `setup.js` 의 단계, 그리고 **다른 단계의 `requires` 에서 그 id**
 - `site/settings-schema.json` 에 그 서비스만 쓰던 값이 있다면
 
