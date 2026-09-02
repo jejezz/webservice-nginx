@@ -89,7 +89,7 @@ services/kamailio/
 | **4** | Kamailio 설정 설치 | `sudo ./install.sh --apply` | `systemctl status kamailio` |
 | **5** | SIP over WebSocket *(선택)* | `sudo ./setup-websocket.sh --enable` | `./setup-websocket.sh` |
 | **6** | 대시보드 빌드 | `./setup-dashboard.sh --build` | `./setup-dashboard.sh` |
-| **7** | pm2 등록 | `pm2 kill` 후 재기동 | `pm2 list` |
+| **7** | pm2 등록 | `pm2/restart.sh --restart` | 스크립트가 스스로 |
 | **8** | SIP 계정 등록 | `sudo /usr/sbin/kamctl add …` | `./check-accounts.sh` |
 | **9** | 마지막 점검 | `./bootstrap.sh` | 전부 초록 |
 
@@ -362,35 +362,36 @@ cd web && npm run dev
 > usermod 이전에 만들어진 것**이었습니다. `/etc/group` 에는 등록돼 있으니 겉으로는
 > 다 맞아 보입니다.
 
-**7-1. 다시 로그인한 뒤 데몬을 새로 띄웁니다** (권장 — 재부팅 후에도 유효)
+**7-1.** 손으로 외울 것이 없습니다. `pm2/restart.sh` 가 필요한 그룹을 선언에서
+읽어(`pm2-conf/dashboard.ini` 의 `groups = kamailio`) 처리하고, **다시 띄운 뒤
+확인까지** 합니다.
 
 ```bash
-pm2 kill
-cd pm2 && pm2 start ecosystem.config.js && pm2 save
+cd ../../pm2
+./restart.sh              # 지금 상태만 본다 (아무것도 바꾸지 않음)
+./restart.sh --restart    # pm2 kill 후 다시 띄우고, 잠시 뒤 확인
 ```
 
-**7-2. 로그아웃할 수 없다면 — `sg` 로 데몬을 띄웁니다** (임시 조치)
+**7-2.** 지금 셸에 그룹이 없으면 `--restart` 는 **거부하고** 두 길을 알려 줍니다.
+그 셸로 띄우면 대시보드가 Kamailio 에 닿지 못하기 때문입니다.
+
+| | |
+|---|---|
+| **다시 로그인한 뒤** `./restart.sh --restart` | 권장 — 재부팅 후에도 유효 |
+| `./restart.sh --restart --sg` | 임시 조치 — 데몬의 **기본 그룹**이 `kamailio` 가 되고, 다음 부팅에는 남지 않습니다 |
+
+**7-3.** `pm2 restart <앱>` 으로는 바뀌지 않습니다 — 보조 그룹은 데몬이 자식에게
+물려주므로 **데몬 자체를 다시 띄워야** 합니다. 그래서 `pm2 kill` 이 필요하고,
+그것을 이 스크립트가 합니다.
+
+**7-4.** 따로 확인하고 싶다면:
 
 ```bash
-pm2 kill
-sg kamailio -c "cd <프로젝트>/pm2 && pm2 start ecosystem.config.js && pm2 save"
+cd services/kamailio && ./setup-dashboard.sh              # 대시보드 쪽 전체 점검
+grep ^Groups: /proc/$(pm2 pid kamailio-dashboard)/status  # getent group kamailio 의 gid 가 있어야 한다
 ```
 
-데몬의 **기본 그룹**이 `kamailio` 가 되므로 임시로만 쓰세요.
-
-**7-3.** `pm2 restart` 로는 바뀌지 않습니다 — 데몬이 자식에게 그룹을 물려주므로
-**데몬 자체를 다시 띄워야** 합니다. 그래서 `pm2 kill` 이 필요합니다.
-
-**7-4.** 확인합니다.
-
-```bash
-./setup-dashboard.sh                                      # 전체 점검
-getent group kamailio | cut -d: -f3                       # 이 장비의 gid
-grep ^Groups: /proc/$(pm2 pid kamailio-dashboard)/status  # 그 gid 가 있어야 한다
-grep ^Groups: /proc/$(pgrep -f "God Daemon" | head -1)/status   # pm2 데몬 자신도
-```
-
-닿지 않으면 대시보드 화면과 pm2 로그에 원인과 위 해결 방법이 그대로 표시됩니다.
+닿지 않으면 대시보드 화면과 pm2 로그에 원인과 해결 방법이 그대로 표시됩니다.
 
 ## 8. SIP 계정 등록
 
@@ -607,13 +608,15 @@ realm 은 단말이 보낸 `From` 도메인이 그대로 쓰이고 DNS 조회는
 
 ## T-6. 대시보드가 "Kamailio 에 닿지 않습니다"
 
-거의 항상 **kamailio 그룹**입니다. [7. pm2 등록](#7-pm2-등록) 을 그대로 따르세요 —
-`usermod` 후 **다시 로그인**하고 `pm2 restart` 가 아니라 `pm2 kill` 로 데몬을 새로 띄워야 합니다.
+거의 항상 **kamailio 그룹**입니다. 진단과 해결이 한 곳에 있습니다.
 
 ```bash
-./setup-dashboard.sh
-grep ^Groups: /proc/$(pm2 pid kamailio-dashboard)/status   # getent group kamailio 의 gid 가 있어야 한다
+pm2/restart.sh              # 셸 · 데몬 · 앱 중 어디에 그룹이 없는지 짚어 준다
+pm2/restart.sh --restart    # 갖춰서 다시 띄우고 확인
 ```
+
+`usermod` 만으로는 부족하고 `pm2 restart` 로도 바뀌지 않습니다 —
+[7. pm2 등록](#7-pm2-등록) 을 보세요.
 
 ## T-7. Janus 등록 실패
 
@@ -677,8 +680,7 @@ Error: Cannot find module 'express'
 
 ```bash
 ./setup-dashboard.sh --build        # 6 단계를 먼저
-pm2 restart kamailio-dashboard      # 그 뒤에 다시 띄운다
-pm2 list                            # status 가 online 인지
+../../pm2/restart.sh --restart      # 그 뒤에 다시 띄운다 (확인까지 한다)
 ```
 
 > 다만 `pm2 restart` 는 **그룹을 고치지 못합니다.** 이것으로 `online` 이 되고도
