@@ -112,7 +112,10 @@ report() {
 
     info ""
     info "2. 그룹 (대시보드가 RPC FIFO 를 읽는 데 필요)"
-    local gid; gid="$(getent group kamailio 2>/dev/null | cut -d: -f3)"
+    # || true 가 필요하다. set -e + pipefail 아래에서 그룹이 **없으면** getent 가 2 로
+    # 끝나 대입문이 실패하고, 점검이 여기서 죽는다 — 그룹이 없는 상태야말로 이
+    # 점검이 알려 주어야 하는 상태다.
+    local gid; gid="$(getent group kamailio 2>/dev/null | cut -d: -f3 || true)"
     local target="${SUDO_USER:-$(id -un)}"
     if [[ -z "$gid" ]]; then
         pend "kamailio 그룹이 없습니다 (패키지 설치 전)"
@@ -162,7 +165,12 @@ report() {
         problems=$((problems + 1))
     fi
     local code
-    code="$(curl -s -m 3 -o /dev/null -w '%{http_code}' http://127.0.0.1:5080/health 2>/dev/null)"
+    # || true 가 필요하다. WS 를 아직 켜지 않았으면 curl 이 7(연결 실패)로 끝나고,
+    # set -e 아래에서는 그 대입문 하나가 스크립트를 통째로 끝낸다. 사람이 보는
+    # 모드에서는 여기까지 찍힌 것이 남아 티가 안 나지만, --json 은 출력을 모아
+    # check_finish 에서 한 번에 내므로 **아무것도 나오지 않는다.** 구축 마법사가
+    # "점검 출력을 읽지 못했습니다" 를 띄운 원인이다.
+    code="$(curl -s -m 3 -o /dev/null -w '%{http_code}' http://127.0.0.1:5080/health 2>/dev/null || true)"
     [[ "${code:-000}" == "200" ]] && ok "WS 포트의 /health → 200" \
         || { skip "WS /health 응답 없음 (code=${code:-000})"; problems=$((problems + 1)); }
 
@@ -176,8 +184,11 @@ report() {
     return 0
 }
 
+# 사람이 보는 안내다. cat 으로 바로 찍으면 --json 모드에서도 stdout 에 섞여
+# 나가 JSON 을 깨뜨린다 — info 를 거쳐야 JSON 모드에서 조용해진다.
 print_order() {
-    cat <<ORDER
+    local line
+    while IFS= read -r line; do info "$line"; done <<ORDER
 
 ── 처음부터 세우는 순서 ──────────────────────────────────────────────────
 

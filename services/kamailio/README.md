@@ -390,8 +390,10 @@ sudo /usr/sbin/kamctl ul show       # 현재 접속 중인 단말
 ./check-push.sh         # 착신 푸시 (docs/incoming-call.md)
 ```
 
-전부 초록이면 됩니다. 네 스크립트 모두 `--json` 을 받습니다
+전부 초록이면 됩니다. `bootstrap.sh` · `check-accounts.sh` · `check-push.sh` 는
+`--json` 도 받습니다 — 구축 마법사가 그것을 읽습니다
 ([docs/check-contract.md](../../docs/check-contract.md)).
+`setup-dashboard.sh` 는 아직 사람이 보는 출력만 냅니다.
 
 ## 이 저장소 밖에서 해야 하는 것
 
@@ -620,7 +622,7 @@ Kamailio 는 이 프로젝트가 만든 프로그램이 아니라 배포판 패�
 | `nginx-conf/` | SIP over WS 라우트. **아직 `enabled = false`** | [docs/nginx-conf.md](../../docs/nginx-conf.md) |
 | `pm2-conf/` | 대시보드는 진짜 프로세스, Kamailio 본체는 **껍데기** (systemd 가 띄움) | [docs/pm2-conf.md](../../docs/pm2-conf.md) |
 | `settings.ini` | 장비마다 다른 값 3개 | [docs/settings-contract.md](../../docs/settings-contract.md) |
-| `*.sh --json` | 점검 스크립트 넷 | [docs/check-contract.md](../../docs/check-contract.md) |
+| `*.sh --json` | `bootstrap.sh` · `install.sh` · `check-accounts.sh` · `check-push.sh` | [docs/check-contract.md](../../docs/check-contract.md) |
 
 `pm2-conf/app.ini` 를 비워 두지 않고 껍데기라도 두는 이유는, 나중에 보는 사람이
 "선언을 빠뜨린 것"과 "pm2 대상이 아닌 것"을 구별할 수 있게 하기 위해서입니다.
