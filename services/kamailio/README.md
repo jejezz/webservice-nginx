@@ -82,7 +82,7 @@ services/kamailio/
 
 | | 단계 | 명령 | 확인 |
 |---|---|---|---|
-| **0** | 사전 조건 — websocket-relay digest 인증 | ✅ 완료 (할 일 없음) | |
+| **0** | 사전 조건 — Janus 가 digest 를 처리 | ✅ 완료 (할 일 없음) | |
 | **1** | 패키지 · kamailio 그룹 | `sudo ./bootstrap.sh --install` | **다시 로그인** |
 | **2** | 데이터베이스 | `cd database && sudo ./setup_mariadb.sh` | `kamailio.version` |
 | **3** | 이 장비의 값 | `settings.ini` 편집 또는 `/manager/setup` | `./install.sh` |
@@ -107,11 +107,16 @@ services/kamailio/
 데이터베이스는 `database/database.ini` 가 소유하고, Kamailio 설정은 `install.sh` 가
 담당합니다. `kamdbctl create` 는 쓰지 않습니다 — 그러면 DB 가 프로젝트 관리 밖에 놓입니다.
 
-## 0. 사전 조건 — websocket-relay digest 인증 ✅ 완료
+## 0. 사전 조건 — Janus 가 digest 를 처리 ✅ 완료
 
-인증을 켜면 Kamailio 가 401 로 challenge 를 보냅니다.
-ws-bridge 는 이미 이를 처리합니다. (`src/protocols/sip/digest.js`, 테스트 `npm test`)
-계정 비밀번호는 WS 클라이언트가 `register` 메시지의 `password` 필드로 보냅니다.
+인증을 켜면 Kamailio 가 401 로 challenge 를 보냅니다. 그 응답은 **Janus 의 SIP
+플러그인**이 합니다 — 브라우저는 `register` 요청에 계정과 비밀번호만 담아 보내고,
+digest 주고받기는 플러그인이 Kamailio 와 직접 합니다.
+(`services/janus/janus.plugin.sip.jcfg`)
+
+계정을 소유하는 것은 그 플러그인이 아닙니다. 계정은 이 디렉토리의 `subscriber`
+테이블에 있고, websocket-relay 가 단말 승인 시점에 발급합니다
+(`services/websocket-relay` 의 `libs/sipAccount.js`, [docs/identity.md](../../docs/identity.md)).
 
 ## 1. 패키지 · kamailio 그룹
 
@@ -159,7 +164,7 @@ privileges = ALL
 ```
 
 `[user:jyahn]` 의 `databases` 에도 `kamailio` 를 추가해 두었습니다.
-ws-bridge 등 다른 서비스가 같은 계정으로 계정 테이블을 다룰 수 있게 하기 위함입니다.
+websocket-relay 가 같은 계정으로 SIP 계정을 발급·조회할 수 있게 하기 위함입니다.
 
 **2-2.** 무엇이 바뀌는지 먼저 봅니다.
 
@@ -371,13 +376,21 @@ sudo /usr/sbin/kamctl ul show       # 현재 접속 중인 단말
 `check-accounts.sh` 는 조용히 실패하는 자리 둘을 봅니다 — **도메인이 어긋난 계정**과
 **비밀번호 컬럼이 빈 계정**입니다. 둘 다 계정은 있는데 등록만 안 되는 상태를 만듭니다.
 
-**8-3.** WS 클라이언트의 `register` 메시지에 `password` 를 넣습니다.
+**8-3.** 브라우저는 Janus SIP 플러그인에 `register` 를 보냅니다. 비밀번호는
+`secret` 에 들어갑니다.
 
 ```json
-{ "type": "register", "protocol": "sip", "userId": "1001",
-  "contactIp": "192.168.0.100", "contactPort": 5060, "deviceId": "...",
-  "password": "내선1001비밀번호" }
+{ "request": "register",
+  "username": "sip:1001@pluto.org",
+  "authuser": "1001",
+  "secret": "내선1001비밀번호",
+  "proxy": "sip:192.168.0.252:5060",
+  "outbound_proxy": "sip:192.168.0.252:5060" }
 ```
+
+`proxy` 는 루프백이 아니라 LAN 주소여야 하고, `outbound_proxy` 를 빠뜨리면 등록은
+되는데 **발신만 조용히 실패합니다.** 두 함정의 경위는
+`services/janus/web/src/pages/TestCall.jsx` 의 주석에 적혀 있습니다.
 
 자세한 내용과 SQL 로 다루는 방법은 [accounts.md](accounts.md).
 
@@ -486,7 +499,7 @@ sudo mariadb -e "DROP DATABASE kamailio;"
 | 올바른 비밀번호인데 401 이 반복됨 | [T-4](#t-4-올바른-비밀번호인데-401-이-반복됨) |
 | `403 Not relaying` | [T-5](#t-5-403-not-relaying--realm-과-도메인) |
 | 대시보드가 "Kamailio 에 닿지 않습니다" | [T-6](#t-6-대시보드가-kamailio-에-닿지-않습니다) |
-| ws-bridge 등록 실패 | [T-7](#t-7-ws-bridge-등록-실패) |
+| Janus 등록 실패 | [T-7](#t-7-janus-등록-실패) |
 
 ## T-1. 기동하지 않음 — 먼저 볼 것
 
@@ -561,11 +574,18 @@ realm 은 단말이 보낸 `From` 도메인이 그대로 쓰이고 DNS 조회는
 grep ^Groups: /proc/$(pm2 pid kamailio-dashboard)/status   # 143 이 있어야 한다
 ```
 
-## T-7. ws-bridge 등록 실패
+## T-7. Janus 등록 실패
 
-`pm2 logs ws-bridge` 에 이유가 남습니다.
-비밀번호가 없으면 "register 메시지에 password를 담아 보내세요", 틀리면 "아이디 또는 비밀번호가
-올바르지 않습니다" 로 구분됩니다.
+브라우저에는 `registration_failed` 이벤트가 돌아옵니다. 이유는 Janus 쪽 로그에
+남습니다 — Janus 도 pm2 가 아니라 systemd 가 띄웁니다.
+
+```bash
+journalctl -u janus -n 40 --no-pager
+journalctl -u kamailio -f | grep REGISTER      # Kamailio 가 무엇을 돌려주는가
+```
+
+계정 쪽이 원인인 경우가 대부분입니다. [T-4](#t-4-올바른-비밀번호인데-401-이-반복됨) 와
+`./check-accounts.sh` 를 먼저 보세요.
 
 ---
 
@@ -628,8 +648,9 @@ Kamailio 는 이 프로젝트가 만든 프로그램이 아니라 배포판 패�
 "선언을 빠뜨린 것"과 "pm2 대상이 아닌 것"을 구별할 수 있게 하기 위해서입니다.
 
 > 이 디렉토리는 원래 `services/ws-bridge/kamailio/` 에 있었습니다. Kamailio 는
-> ws-bridge 의 부속이 아니라 독립 서비스이고, 앞으로 websocket-relay 도
-> (착신 푸시 때문에) 붙게 되므로 한 서비스 밑에 두는 것이 맞지 않습니다.
+> ws-bridge 의 부속이 아니라 독립 서비스이므로 한 서비스 밑에 두는 것이 맞지
+> 않았습니다. 옮겨 두길 잘했습니다 — 그 뒤 ws-bridge 는 없어졌고, 지금은 Janus
+> (digest)와 websocket-relay(계정 발급·착신 푸시)가 함께 이 서버에 붙습니다.
 
 ## 남은 보안 항목
 
