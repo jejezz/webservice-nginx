@@ -400,11 +400,11 @@ sudo /usr/sbin/kamctl ul show       # 현재 접속 중인 단말
 
 ```json
 { "request": "register",
-  "username": "sip:1001@pluto.org",
+  "username": "sip:1001@<sip_domain>",
   "authuser": "1001",
   "secret": "내선1001비밀번호",
-  "proxy": "sip:192.168.0.252:5060",
-  "outbound_proxy": "sip:192.168.0.252:5060" }
+  "proxy": "sip:<sip_listen_addr>:5060",
+  "outbound_proxy": "sip:<sip_listen_addr>:5060" }
 ```
 
 `proxy` 는 루프백이 아니라 LAN 주소여야 하고, `outbound_proxy` 를 빠뜨리면 등록은
@@ -519,6 +519,7 @@ sudo mariadb -e "DROP DATABASE kamailio;"
 | `403 Not relaying` | [T-5](#t-5-403-not-relaying--realm-과-도메인) |
 | 대시보드가 "Kamailio 에 닿지 않습니다" | [T-6](#t-6-대시보드가-kamailio-에-닿지-않습니다) |
 | Janus 등록 실패 | [T-7](#t-7-janus-등록-실패) |
+| 마법사가 "점검 출력을 읽지 못했습니다" | [T-8](#t-8-마법사가-점검-출력을-읽지-못했습니다) |
 
 ## T-1. 기동하지 않음 — 먼저 볼 것
 
@@ -606,29 +607,74 @@ journalctl -u kamailio -f | grep REGISTER      # Kamailio 가 무엇을 돌려�
 계정 쪽이 원인인 경우가 대부분입니다. [T-4](#t-4-올바른-비밀번호인데-401-이-반복됨) 와
 `./check-accounts.sh` 를 먼저 보세요.
 
+## T-8. 마법사가 "점검 출력을 읽지 못했습니다"
+
+구축 마법사는 판정을 스스로 하지 않고 이 디렉토리의 점검 스크립트를
+`--check --json` 으로 실행해 그 출력을 읽습니다. 그래서 **스크립트가 JSON 한
+덩어리를 내지 못하면 마법사가 그 단계를 `unknown` 으로 둡니다.**
+
+먼저 손으로 같은 것을 돌려 봅니다. 마법사가 무엇을 부르는지는 그 단계 화면에
+그대로 적혀 있습니다.
+
+```bash
+./bootstrap.sh --check --json | jq .
+```
+
+원인은 거의 둘 중 하나입니다.
+
+**① 사람이 보는 출력이 JSON 에 섞였다.** `echo` 나 `cat` 으로 stdout 에 바로
+찍으면 JSON 앞뒤에 붙어 나옵니다. `lib/check-report.sh` 의 `info` 를 거쳐야
+JSON 모드에서 조용해집니다.
+
+**② 스크립트가 `check_finish` 전에 죽었다.** 이때는 stdout 이 **아예 빕니다** —
+`--json` 은 출력을 모아 마지막에 한 번에 내기 때문입니다. `set -e` 아래에서는
+실패하는 명령 하나가 대입문에 있어도 스크립트가 그 자리에서 끝납니다.
+
+```bash
+./bootstrap.sh --check --json; echo "exit=$?"   # 출력이 없고 종료 코드가 0·1 이 아니면 ②
+bash -x ./bootstrap.sh --check --json 2>&1 | tail   # 어디서 멈췄는지
+```
+
+> `bootstrap.sh` 가 실제로 ②였습니다. WS(5080)를 켜지 않은 장비에서 `/health` 를
+> 찍어 보는 `curl` 이 7(연결 실패)로 끝나고, `set -e` 아래의 그 대입문 하나가
+> 점검을 통째로 끝냈습니다. 사람이 보는 모드에서는 거기까지 찍힌 줄이 남아
+> 티가 나지 않아 오래 몰랐습니다. 지금은 `|| true` 로 막혀 있습니다.
+
 ---
 
 # 배경
 
-## 현황 (2026-08-19 확인)
+## 현황 (2026-09-02 확인)
+
+**이 장비는 아직 1~2 단계까지만 되어 있습니다.** 패키지와 그룹은 있고, 이
+저장소의 설정은 하나도 설치되지 않았습니다.
 
 | 항목 | 값 |
 |---|---|
-| 구동 중인 바이너리 | `/usr/sbin/kamailio` **5.5.4** (배포판 패키지) |
-| 설정 | `/etc/kamailio/kamailio.cfg` — **배포판 설정의 포크** (`install.sh --apply`). `kamailio-local.cfg` · `kamailio-websocket.cfg` 오버라이드 |
-| systemd | `kamailio.service` → `ExecStart=/usr/sbin/kamailio ... -f /etc/kamailio/kamailio.cfg` |
-| 또 하나의 설치 | `/usr/local/sbin/kamailio` **5.7.7** (소스빌드, 2026-03-05) — **구동되지 않음** |
-| SIP 소켓 | `192.168.0.252:5060`, `192.168.122.1:5060`, `127.0.0.1:5060` (udp/tcp) + WS `127.0.0.1:5080` |
-| SIP 도메인 | `pluto.org` (`alias=`) |
-| 인증 | digest — `subscriber` 테이블 (`use_domain=0`) |
+| 구동 중인 바이너리 | `/usr/sbin/kamailio` **5.7.4** (배포판 패키지) |
+| 설정 | `/etc/kamailio/kamailio.cfg` — **배포판 그대로** (2024-04-01). 이 저장소의 포크는 아직 설치되지 않았습니다 |
+| 오버라이드 | `kamailio-local.cfg` · `kamailio-websocket.cfg` **둘 다 없음** — 지금은 **인증 없이** REGISTER 를 받습니다 |
+| systemd | `kamailio.service` → `ExecStart=/usr/sbin/kamailio -P … -f $CFGFILE` |
+| SIP 소켓 | `10.10.0.224:5060`, `127.0.0.1:5060` — 배포판 기본값의 자동 바인딩 (WS 5080 없음) |
+| 이 장비의 주소 | `enp131s0` = `10.10.0.224/8` — `settings.ini` 의 `sip_listen_addr` 에 넣을 값입니다 |
+| SIP 도메인 | 서비스 값이 비어 있어 **사이트 값**(`site/settings.ini` 의 `sip_domain`)을 씁니다 |
+| 인증 | 아직 없음. 3·4 단계를 마치면 digest — `subscriber` 테이블 (`use_domain=0`) |
+| `settings.ini` | **없음** — 3 단계에서 만듭니다 |
 
-## 두 벌 설치 — 도구는 반드시 절대경로로
+> 이 표는 사람이 손으로 옮겨 적은 것이라 언제든 뒤처집니다. 같은 내용을
+> `./bootstrap.sh` 와 `./install.sh` 가 그 자리에서 찍어 주므로, 문서와
+> 다르면 **스크립트 출력을 믿으세요.**
 
-`which kamctl` / `which kamdbctl` 은 **`/usr/local/sbin` 의 5.7.7 판**을 가리킵니다.
-그쪽은 `/usr/local/etc/kamailio/kamctlrc` 를 읽는데 그 파일은 손대지 않은 상태(`DBENGINE` 미설정)라
-그냥 실패하고, 통과하더라도 5.7 기준 스키마를 만들어 5.5.4 데몬이 거부합니다 (T-3).
+## 두 벌 설치 — 도구는 절대경로로
 
-**항상 `/usr/sbin/kamctl` 처럼 절대경로로 부르세요.**
+~~`which kamctl` 은 `/usr/local/sbin` 의 소스빌드판을 가리킵니다~~
+**해소됐습니다** (2026-09-02 확인) — `/usr/local/sbin/kamailio` 는 이제 없고
+`which kamctl` 도 `/usr/sbin/kamctl` 을 가리킵니다.
+
+그래도 이 문서는 계속 `/usr/sbin/kamctl` 처럼 **절대경로로 적습니다.** 소스빌드를
+다시 하면 `/usr/local/sbin` 이 PATH 앞에 서서 조용히 그쪽을 부르게 되고, 그 판은
+`/usr/local/etc/kamailio/kamctlrc`(`DBENGINE` 미설정)를 읽어 실패하거나, 통과하더라도
+다른 기준의 스키마를 만들어 데몬이 거부합니다 (T-3).
 
 > 인증에 쓰는 `subscriber` / `version` 테이블 정의는 5.5 와 5.7 이 **동일**함을 확인했으므로,
 > 이 디렉토리의 스키마는 나중에 5.7.7 로 올려도 그대로 씁니다.
@@ -691,10 +737,9 @@ sudo mariadb -e "DROP USER 'jyahn'@'%';"
 `jyahn` 의 비밀번호가 8자 영단어+숫자 조합이라 약한 것은 그대로입니다.
 원거리에서 닿아야 하면 3306 을 여는 대신 SSH 터널을 씁니다.
 
-**S-2. 버전 통일** — 5.5.4(2022년판, 구동 중)와 5.7.7(빌드만 되어 있음, 소스는
-`~/Public/RetroLink/kamailio/`). 5.7.7 로 옮기려면 systemd 유닛의 `ExecStart`/`CFGFILE` 을
-`/usr/local` 쪽으로 바꾸고 설정을 이식해야 합니다.
-인증 스키마는 양쪽이 동일하므로 이 디렉토리와 등록한 계정은 그대로 씁니다.
+**S-2. 버전 통일** — ~~5.5.4 와 5.7.7 두 벌~~ **해소됐습니다** (2026-09-02 확인).
+지금은 배포판 5.7.4 한 벌뿐이고 소스빌드는 남아 있지 않습니다. 다시 소스빌드를
+하게 되면 위 "두 벌 설치" 의 함정이 그대로 돌아옵니다.
 
 **S-3. `/etc/kamailio/kamctlrc` 의 배포판 기본 비밀번호** — `install.sh --apply` (4-3-4) 가
 파일을 새로 쓰면서 해소됩니다. 그 전까지는 공개된 기본값이 world-readable 상태로 남아 있습니다.
