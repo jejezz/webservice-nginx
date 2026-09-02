@@ -131,6 +131,10 @@ module.exports = {
       //
       // 방(room) 상태를 프로세스 메모리에 들고 있으므로 인스턴스는 하나뿐이다.
       // 여러 개로 늘리면 클라이언트마다 다른 방 테이블을 보게 된다.
+      //
+      // 관리 대시보드(/relay/dashboard)는 별도 빌드 산출물을 낸다:
+      //   cd services/websocket-relay && npm run web:build
+      // 없으면 서비스는 돌지만 그 경로만 503 을 준다.
       name: 'websocket-relay',
       cwd: service('websocket-relay'),
       script: 'dist/index.js',
@@ -139,7 +143,10 @@ module.exports = {
       env: {
         // services/websocket-relay/nginx-conf/service.ini 의 ports 와
         // 같아야 한다. 루프백에만 묶인다.
-        PORT: 28090,
+        //
+        // 28090 이었다. 운영판을 그대로 인계하며 그쪽 포트로 맞췄다
+        // (services/websocket-relay/docs/sync-webservice-nginx.md).
+        PORT: 28099,
         HOST: '127.0.0.1',
         NODE_ENV: 'production',
       },

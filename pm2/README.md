@@ -18,7 +18,7 @@
 | `Huygens-Server` | ✅ pm2로 관리 | `../services/apartment-mgmt-server/app`. nginx가 `/complex/*`를 이 서비스(28092)로 보냅니다. 앱 디렉토리의 `ecosystem.config.js`는 개발용(watch + tsx)으로 남아 있으니 운영에서는 쓰지 마세요 |
 | `web-cassini` | ✅ pm2로 관리 | `../services/apartment-mgmt-server/web-cassini`. nginx가 `/cassini/`를 이 서비스(28093)로 보냅니다. 예전에는 `Huygens-Server`가 복사본을 서빙했습니다 |
 | `nginx-manager` | ✅ pm2로 관리 | `../services/manager/server`. 루트(`/`)의 서비스 관리 대시보드 |
-| `websocket-relay` | ✅ pm2로 관리 | `../services/websocket-relay`. nginx가 `/relay/*`를 이 서비스(28090)로 보냅니다. WebRTC/IoT 시그널링 릴레이 |
+| `websocket-relay` | ✅ pm2로 관리 | `../services/websocket-relay`. nginx가 `/relay/*`를 이 서비스(28099)로 보냅니다. WebRTC/IoT 시그널링 릴레이 |
 | `ntp-server` | ✅ pm2로 관리 | `../services/ntp`. NTP 상태 사이드카(28094). **시각 제공은 chronyd(systemd)가 UDP 123 에서** 하고 이 프로세스는 상태만 보여줍니다 |
 | `nginx` | ❌ systemd로 유지 | 80/443 바인딩에 root 권한이 필요해서 systemd가 더 적합. [nginx는 왜 pm2로 안 옮겼나](#nginx는-왜-pm2로-관리하지-않나) 참고 |
 | `logd-server` | ⏳ 아직 미등록 | 현재 zip 파일만 있는 상태 |
