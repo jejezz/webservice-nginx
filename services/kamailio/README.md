@@ -85,7 +85,7 @@ services/kamailio/
 | **0** | 사전 조건 — Janus 가 digest 를 처리 | ✅ 완료 (할 일 없음) | |
 | **1** | 패키지 · kamailio 그룹 | `sudo ./bootstrap.sh --install` | **다시 로그인** |
 | **2** | 데이터베이스 | `cd database && sudo ./setup_mariadb.sh` | `kamailio.version` |
-| **3** | 이 장비의 값 | `settings.ini` 편집 또는 `/manager/setup` | `./install.sh` |
+| **3** | 이 장비의 값 | `/manager/setup` 의 폼, 또는 `--init` 로 뼈대 | `./install.sh` |
 | **4** | Kamailio 설정 설치 | `sudo ./install.sh --apply` | `systemctl status kamailio` |
 | **5** | SIP over WebSocket *(선택)* | `sudo ./setup-websocket.sh --enable` | `./setup-websocket.sh` |
 | **6** | 대시보드 빌드 | `./setup-dashboard.sh --build` | `./setup-dashboard.sh` |
@@ -194,14 +194,33 @@ sudo mariadb -e "SELECT * FROM kamailio.version;"
 
 ## 3. 이 장비의 값 — `settings.ini`
 
-장비마다 다른 값 셋은 스크립트가 아니라 `settings.ini` 에 있습니다. 구축
-마법사(`/manager/setup` 의 4단계)의 폼에서 넣거나, 편집기로 직접 적습니다.
+장비마다 다른 값 셋은 스크립트가 아니라 `settings.ini` 에 있습니다. 이 파일은
+커밋하지 않으므로 **새 장비에는 없습니다.** 만드는 길이 둘입니다.
+
+**3-1. 구축 마법사** (권장) — `/manager/setup` 의 Kamailio 설정 단계에 폼이
+있습니다. 항목 설명·형식 검사·저장이 한자리에서 끝나고, 저장한 값이 아직
+반영되지 않았다는 것도 그 화면이 알려 줍니다.
+
+**3-2. 편집기로 직접** — 마법사를 띄울 수 없는 장비라면 뼈대를 만들어 채웁니다.
+항목 설명이 주석으로 함께 들어갑니다.
+
+```bash
+node ../../lib/settings.js --init .    # settings.ini 뼈대를 만든다
+node ../../lib/settings.js --print .   # 만들지 않고 무엇이 필요한지만 본다
+```
+
+값이 이미 있는 파일은 덮지 않습니다. 만들어진 뼈대는 이런 모양입니다.
 
 ```ini
-sip_domain      = pluto.org
-sip_listen_addr = 192.168.0.252          ; 이 장비의 LAN 주소 — 기본값이 없다
-sip_push_url    = http://127.0.0.1:28099/sip-push
+; SIP 를 받을 주소  (필수)
+;   이 장비의 LAN 주소입니다. 장비마다 다르므로 기본값이 없습니다.
+;   형식: IPv4 (예: 192.168.0.252)
+sip_listen_addr =
 ```
+
+`sip_listen_addr` 는 이 장비에 실제로 있는 주소여야 합니다 — `ip -4 -br addr` 로
+확인하세요. 없는 주소를 적으면 Kamailio 가 기동에서 죽고, `install.sh --apply`
+는 그것을 미리 막습니다 (4-3-0).
 
 | 키 | 어디로 가는가 |
 |---|---|

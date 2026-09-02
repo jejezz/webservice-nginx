@@ -165,7 +165,7 @@ validate_settings() {
     SETTINGS_PENDING=()
 
     [[ -r "$SETTINGS_FILE" ]] \
-        || SETTINGS_PENDING+=("settings.ini 가 없습니다: ${SETTINGS_FILE} — 마법사의 설정 폼이나 편집기로 만드세요")
+        || SETTINGS_PENDING+=("settings.ini 가 없습니다: ${SETTINGS_FILE} — 마법사의 설정 폼(/manager/setup)에서 넣거나, node ../../lib/settings.js --init . 로 뼈대를 만들어 채우세요")
 
     [[ "$SIP_DOMAIN" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ ]] \
         || SETTINGS_PROBLEMS+=("sip_domain 이 도메인으로 보이지 않습니다: ${SIP_DOMAIN}")
