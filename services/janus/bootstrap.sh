@@ -157,10 +157,21 @@ report() {
     info "연동 대상"
     systemctl is-active --quiet kamailio && ok "Kamailio 구동 중" \
         || warn "Kamailio 가 떠 있지 않습니다 — services/kamailio/bootstrap.sh"
-    if pgrep -x rtpproxy >/dev/null 2>&1; then
+    # 미디어 릴레이는 배포판마다 이름이 다르다. 22.04 는 rtpproxy, 24.04 는
+    # 저장소에서 rtpproxy 가 빠져 rtpengine 을 쓴다. 이 저장소가 소유하는 것이
+    # 아니라(services/kamailio 의 몫) 여기서는 있는지만 본다.
+    if pgrep -x rtpengine >/dev/null 2>&1; then
+        ok "rtpengine 구동 중 — Kamailio 가 NAT 로 판정한 통화의 미디어를 중계합니다"
+    elif pgrep -x rtpproxy >/dev/null 2>&1; then
         ok "rtpproxy 구동 중 ($(pgrep -af rtpproxy | grep -oE '\-m [0-9]+ -M [0-9]+' | head -1))"
     else
-        warn "rtpproxy 가 없습니다 — Kamailio 가 NAT 로 판정한 통화의 미디어를 중계합니다"
+        warn "미디어 릴레이가 없습니다 — Kamailio 가 NAT 로 판정한 통화의 미디어를 중계합니다"
+        if apt-cache policy rtpproxy 2>/dev/null | grep -q 'Candidate: [0-9]'; then
+            warn "  이 배포판에는 rtpproxy 가 있습니다 — services/kamailio 가 설치합니다"
+        else
+            warn "  이 배포판(24.04~)에는 rtpproxy 가 없습니다 — rtpengine 을 씁니다"
+            warn "  (kamailio.cfg 의 WITH_RTPENGINE 분기. services/kamailio 가 소유합니다)"
+        fi
     fi
 
     info

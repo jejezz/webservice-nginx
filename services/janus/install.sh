@@ -254,6 +254,49 @@ jcfg_rtp_range() {
     sed -n 's/^[[:space:]]*rtp_port_range[[:space:]]*=[[:space:]]*"\([0-9]\{1,\}\)-\([0-9]\{1,\}\)".*/\1 \2/p' "$file" | head -1
 }
 
+# ── 미디어 릴레이는 배포판마다 다르다 ──────────────────────────────────
+#
+# Kamailio 가 NAT 로 판정한 통화의 미디어를 중계하는 데몬이다. 이 배치에서는
+# LAN 단말 전부가 NAT 로 판정되므로 사실상 모든 통화가 여기를 지난다
+# (docs/plan.md ③ 정정).
+#
+#   Ubuntu 22.04   rtpproxy      (24.04 저장소에서 빠졌다)
+#   Ubuntu 24.04   rtpengine     (kamailio.cfg 의 WITH_RTPENGINE 분기)
+#
+# 그래서 이름 하나를 못 박지 않고 **있는 쪽**을 본다. 둘 다 없으면 이 OS 에서
+# 무엇을 넣어야 하는지 알려 준다.
+media_relay_kind() {
+    if pgrep -x rtpengine >/dev/null 2>&1 || [[ -f /etc/rtpengine/rtpengine.conf ]]; then
+        echo rtpengine; return 0
+    fi
+    if pgrep -x rtpproxy >/dev/null 2>&1 || [[ -f /etc/default/rtpproxy ]]; then
+        echo rtpproxy; return 0
+    fi
+    echo ""
+}
+
+# 데몬 유닛 이름은 패키지마다 다르다 (rtpengine-daemon · rtpengine).
+relay_unit_state() {
+    local kind="$1" u
+    case "$kind" in
+        rtpengine) for u in rtpengine-daemon rtpengine ngcp-rtpengine-daemon; do
+                       systemctl list-unit-files "${u}.service" &>/dev/null || continue
+                       systemctl is-active "$u" 2>/dev/null && return 0
+                   done ;;
+        rtpproxy)  systemctl is-active rtpproxy 2>/dev/null && return 0 ;;
+    esac
+    echo inactive
+}
+
+# rtpengine 의 포트 범위. /etc/rtpengine/rtpengine.conf 의 port-min · port-max.
+rtpengine_range() {
+    local f="/etc/rtpengine/rtpengine.conf" mn mx
+    [[ -r "$f" ]] || return 0
+    mn="$(sed -n 's/^[[:space:]]*port-min[[:space:]]*=[[:space:]]*\([0-9]\{1,\}\).*/\1/p' "$f" | tail -1)"
+    mx="$(sed -n 's/^[[:space:]]*port-max[[:space:]]*=[[:space:]]*\([0-9]\{1,\}\).*/\1/p' "$f" | tail -1)"
+    [[ -n "$mn" && -n "$mx" ]] && echo "$mn $mx"
+}
+
 # rtpproxy 가 쓰는 포트 범위. 배포판 기본값은 35000-65000 이고 -m/-M 이 덮는다.
 #
 # ⚠️ **-M 을 안 주면 최대가 65000 이다.** /etc/default/rtpproxy 에 -m 만 적혀
@@ -635,7 +678,12 @@ report() {
     local web_range sip_range rtpp_range
     web_range="$(jcfg_rtp_range "${SCRIPT_DIR}/janus.jcfg")"
     sip_range="$(jcfg_rtp_range "${SCRIPT_DIR}/janus.plugin.sip.jcfg")"
-    rtpp_range="$(rtpproxy_range)"
+    local relay; relay="$(media_relay_kind)"
+    case "$relay" in
+        rtpengine) rtpp_range="$(rtpengine_range)" ;;
+        rtpproxy)  rtpp_range="$(rtpproxy_range)" ;;
+        *)         rtpp_range="" ;;
+    esac
 
     [[ -n "$web_range" ]] && ok "Janus WebRTC 쪽: ${web_range% *}-${web_range#* } (janus.jcfg)" \
                           || { warn "janus.jcfg 에서 rtp_port_range 를 읽지 못했습니다"; problems=$((problems + 1)); }
@@ -644,8 +692,8 @@ report() {
 
     if [[ -n "$rtpp_range" ]]; then
         local rtpp_state
-        rtpp_state="$(systemctl is-active rtpproxy 2>/dev/null || echo inactive)"
-        info "  rtpproxy:        ${rtpp_range% *}-${rtpp_range#* } (${rtpp_state})"
+        rtpp_state="$(relay_unit_state "$relay")"
+        info "  ${relay}:$(printf '%*s' $(( 16 - ${#relay} )) '')${rtpp_range% *}-${rtpp_range#* } (${rtpp_state})"
         info "                   Kamailio 가 NAT 로 판정한 통화의 미디어를 중계합니다."
         info "                   이 배치에서는 LAN 단말 전부가 그렇습니다 (docs/plan.md ③ 정정)."
 
@@ -655,16 +703,22 @@ report() {
             [[ "${label#*:}" == "" ]] && continue
             j1="${label#*:}"; j2="${j1#* }"; j1="${j1% *}"
             if ranges_overlap "$r1" "$r2" "$j1" "$j2"; then
-                warn "rtpproxy(${r1}-${r2}) 와 Janus ${label%%:*}(${j1}-${j2}) 가 겹칩니다"
-                warn "  /etc/default/rtpproxy 의 EXTRA_OPTS 에 -M 을 주어 위쪽을 막으세요."
-                warn "  -M 이 없으면 최대가 65000 이라 Janus 범위를 통째로 삼킵니다."
+                warn "${relay}(${r1}-${r2}) 와 Janus ${label%%:*}(${j1}-${j2}) 가 겹칩니다"
+                if [[ "$relay" == "rtpengine" ]]; then
+                    warn "  /etc/rtpengine/rtpengine.conf 의 port-min · port-max 를 옮기세요."
+                else
+                    warn "  /etc/default/rtpproxy 의 EXTRA_OPTS 에 -M 을 주어 위쪽을 막으세요."
+                    warn "  -M 이 없으면 최대가 65000 이라 Janus 범위를 통째로 삼킵니다."
+                fi
                 clashes=$((clashes + 1))
                 problems=$((problems + 1))
             fi
         done
         [[ $clashes -eq 0 ]] && ok "범위가 서로 겹치지 않습니다"
+    elif [[ -n "$relay" ]]; then
+        skip "${relay} 의 포트 범위를 읽지 못해 겹침을 검사하지 못했습니다"
     else
-        skip "rtpproxy 설정(/etc/default/rtpproxy)을 읽지 못해 겹침을 검사하지 못했습니다"
+        skip "미디어 릴레이가 없습니다 — services/kamailio 가 소유합니다 (아래 '연동 대상')"
     fi
 
     info ""
