@@ -23,7 +23,15 @@ import logger from '../libs/logger';
 
 export type ReauthResult =
     | { ok: true }
-    /** 비밀번호가 틀렸거나 세션이 유효하지 않다 → 401 */
+    /**
+     * 통과하지 못했다. `status` 를 그대로 응답 코드로 쓴다.
+     *
+     *   400 비밀번호를 안 보냈다
+     *   403 비밀번호가 틀렸다        ← **401 이 아니다.** 아래를 보라
+     *   401 세션이 유효하지 않다     (manager 가 우리 쿠키를 거절했다)
+     *   429 시도가 너무 많다
+     *   503 확인할 수 없다           (manager 가 안 뜸 · 이 기능이 없음)
+     */
     | { ok: false; status: number; error: string; message: string };
 
 /**
@@ -63,12 +71,59 @@ export async function verifyPassword(req: Request, password: string): Promise<Re
     if (res.ok) return { ok: true };
 
     const body: any = await res.json().catch(() => ({}));
+
+    if (res.status === 429) {
+        return {
+            ok: false, status: 429, error: body?.error ?? 'too_many_attempts',
+            message: body?.message ?? '시도가 너무 많습니다. 잠시 후 다시 하세요.',
+        };
+    }
+    if (res.status === 503) {
+        return {
+            ok: false, status: 503, error: body?.error ?? 'service_unavailable',
+            message: body?.message ?? '인증 저장소에 접속할 수 없습니다.',
+        };
+    }
+
+    /*
+     * 비밀번호가 틀렸다 → **403 으로 돌려준다. 401 이 아니다.**
+     *
+     * manager 는 여기에 401 을 쓰지만, 그 값을 그대로 흘리면 대시보드가 삼킨다.
+     * 화면의 API 클라이언트는 401 을 "세션이 끝났다" 로 읽고 **어떤 호출이든**
+     * 로그인으로 보내기 때문이다 (web/src/lib/api.js). 그래서 비밀번호를 한 자
+     * 틀리면 오류 문구 대신 다이얼로그가 그냥 사라지고, 사람은 무엇이 잘못됐는지
+     * 알 수 없었다. 세션은 멀쩡한데 이번 동작만 거절된 것이므로 403 이 맞다.
+     */
+    if (res.status === 401 && (body?.error ?? 'invalid_password') === 'invalid_password') {
+        return {
+            ok: false, status: 403, error: 'invalid_password',
+            message: body?.message ?? '비밀번호가 맞지 않습니다.',
+        };
+    }
+    if (res.status === 401) {
+        // invalid_password 가 아닌 401 은 manager 가 우리 쿠키를 거절한 것이다.
+        // 이것은 진짜 세션 문제라 로그인으로 보내는 편이 맞다.
+        return {
+            ok: false, status: 401, error: body?.error ?? 'unauthorized',
+            message: body?.message ?? '세션이 유효하지 않습니다. 다시 로그인하세요.',
+        };
+    }
+
+    /*
+     * 그 밖의 응답은 **비밀번호 문제가 아니다.**
+     *
+     * manager 가 이 기능을 갖고 있지 않으면 404 가 온다. 예전에는 그것까지
+     * 401 로 접어 넣어서, 화면은 "세션 만료" 로 읽고 조용히 로그인으로 튕겼다 —
+     * 겉으로는 다이얼로그가 사라지는 것 말고 아무 일도 일어나지 않는 것처럼
+     * 보였고, 로그에도 "비밀번호 재확인 실패" 라고만 남아 원인이 가려졌다.
+     */
+    logger.error(
+        `비밀번호 재확인: manager 가 예상 밖의 응답을 주었습니다 (HTTP ${res.status}) — ${config.manager.verifyPasswordUrl}`
+    );
     return {
-        ok: false,
-        // 429(시도 초과)와 401(틀림)을 그대로 전달해 화면이 구분해 말할 수 있게 한다.
-        status: res.status === 429 ? 429 : res.status === 503 ? 503 : 401,
-        error: body?.error ?? 'invalid_password',
-        message: body?.message ?? '비밀번호가 맞지 않습니다.',
+        ok: false, status: 503, error: 'reauth_unavailable',
+        message: `manager 가 비밀번호 확인에 응답하지 않습니다 (HTTP ${res.status}). `
+            + 'manager 가 이 기능을 지원하는 판인지, MANAGER_VERIFY_URL 이 맞는지 확인하세요.',
     };
 }
 
