@@ -200,9 +200,17 @@ export async function countApproved(rawAddress: string): Promise<number> {
 /**
  * 등록 요청을 받는다.
  *
- * **이미 승인된 단말이면 그냥 갱신한다.** 앱은 토큰이 바뀔 때마다 다시 등록하는데,
- * 그때마다 승인을 다시 받게 하면 쓸 수 없는 물건이 된다. uuid 가 단말의 신원이므로
- * 그것으로 가른다.
+ * **주소가 그대로인, 이미 승인된 단말이면 그냥 갱신한다.** 앱은 토큰이 바뀔 때마다
+ * 다시 등록하는데, 그때마다 승인을 다시 받게 하면 쓸 수 없는 물건이 된다. uuid 가
+ * 단말의 신원이므로 그것으로 가른다.
+ *
+ * **주소가 바뀌었으면 갱신이 아니다.** uuid 만 보고 가르면, 이미 한 세대(예: 504호)
+ * 승인을 받은 단말이 동/호만 바꿔 불러도(예: 505호) 그 세대 월패드의 승인 없이
+ * 그대로 통과해 옛 승인의 canCall/canControl 을 새 세대로 옮겨 가진다 — 파일
+ * 머리말의 '승인 없이는 아무 권한 없음' 을 정면으로 어긴다. 그래서 주소가 바뀌면
+ * 옛 세대의 승인을 거두고(`revokeDevice`) 아래 '새 단말' 경로로 흘려보낸다 — 그
+ * 세대에 월패드가 있는지부터 다시 확인하고, 그 세대 월패드가 실제로 승인해야만
+ * 권한이 생긴다. sip_user 도 그때(`insertApproved`) 새 주소로 다시 계산된다.
  */
 export async function requestEnrollment(
     payload: EnrollmentPayload,
@@ -222,9 +230,9 @@ export async function requestEnrollment(
 
     // ── 이미 인정된 단말인가 ──
     const known = await DbConn.select(
-        `SELECT id FROM ${config.tables.mobile} WHERE uuid = ?`, [payload.uuid]);
+        `SELECT id, address FROM ${config.tables.mobile} WHERE uuid = ?`, [payload.uuid]);
 
-    if (known.length > 0) {
+    if (known.length > 0 && normalizeAddress(known[0].address) === address) {
         await DbConn.execute(
             `UPDATE ${config.tables.mobile}
                 SET email = ?, complex = ?, address = ?, complex_id = COALESCE(?, complex_id),
@@ -265,6 +273,16 @@ export async function requestEnrollment(
             kind: 'rejected', reason: 'no_wallpad',
             message: '이 동/호에 등록된 월패드가 없습니다. 댁내 월패드가 서버에 연결된 뒤 다시 시도하세요.',
         };
+    }
+
+    if (known.length > 0) {
+        // 동/호가 바뀌었고(위에서 이미 걸렀다면 여기 안 왔다), 새 동/호에
+        // 월패드도 있다 — 옛 세대의 승인은 새 세대에 대해 아무 의미가 없으므로
+        // 거둔다. 여기서(월패드 확인을 통과한 뒤) 거두는 이유는, 오타 등으로
+        // 존재하지 않는 동/호를 잘못 불렀을 때(위 no_wallpad 로 거절) 아직 유효한
+        // 옛 승인까지 잃게 만들지 않기 위해서다.
+        await revokeDevice(known[0].address, Number(known[0].id), 'system:address-changed');
+        logger.warn(`[audit] 주소 변경으로 재승인 필요: ${payload.uuid} (${known[0].address} → ${address})`);
     }
 
     // ── 새 단말 ──
