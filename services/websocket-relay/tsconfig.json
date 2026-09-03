@@ -1,0 +1,16 @@
+{
+  /* https://blog.hansolbangul.com/post/to-boilerplate-step1 */
+  "compilerOptions": {
+  "target": "esnext",               /* 최신 JavaScript 문법으로 컴파일합니다. */
+  "module": "nodenext",               /* Node.js ES Module 방식을 사용합니다. */
+    //"lib": ["DOM", "ESNext"],         /* DOM 관련 API와 최신 ECMAScript 기능을 포함합니다. */
+    "outDir": "./dist",               /* 컴파일된 JavaScript 파일의 출력 경로를 설정합니다. */
+    "rootDir": "./src",               /* 소스 파일의 루트 디렉토리를 설정합니다. */
+    "strict": true,                   /* 엄격한 타입 검사를 활성화합니다. */
+    "esModuleInterop": true,          /* CommonJS와 ES Module 간의 호환성을 설정합니다. */
+    "skipLibCheck": true,              /* 외부 라이브러리 타입 검사를 생략합니다. */
+    "resolveJsonModule": true     /* JSON 파일을 모듈로 가져올 수 있게 합니다. */ 
+  },
+  "include": ["src/**/*"],            /* 컴파일할 파일의 경로를 지정합니다. */
+  "exclude": ["node_modules", "dist"] /* 제외할 파일 또는 디렉토리를 지정합니다. */
+}

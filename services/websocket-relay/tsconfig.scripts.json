@@ -1,0 +1,13 @@
+{
+  /* 설치·진단 스크립트 타입 검사용. 빌드하지는 않는다 (tsx 가 바로 실행한다).
+     메인 tsconfig 는 rootDir 가 src 라 scripts/ 를 포함할 수 없어 따로 둔다.
+     이게 없으면 스크립트가 조용히 썩는다 — npm run typecheck 가 둘 다 본다. */
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": ".",
+    "types": ["node"]
+  },
+  "include": ["scripts/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}
