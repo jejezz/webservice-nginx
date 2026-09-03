@@ -207,7 +207,7 @@ services/ws-bridge/schema/001-initial.sql
 
 ```ini
 [user:appuser]
-host = localhost, 127.0.0.1, 10.10.0.%
+host = localhost, 127.0.0.1, 10.10.0.%, 192.168.0.%
 databases = appdb
 privileges = ALL
 ```

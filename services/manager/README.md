@@ -80,6 +80,29 @@ services/manager/
 ## 설치 및 빌드
 
 ```bash
+cd services/manager && npm run setup
+```
+
+`server` 의존성 설치 → `web` 의존성 설치 → `web` 빌드를 차례로 합니다.
+화면만 다시 빌드하려면:
+
+```bash
+cd services/manager && npm run build
+```
+
+빌드 결과는 `web/vite.config.js` 의 `outDir` 대로 **`server/public/` 에 떨어지고**,
+express 가 그것을 그대로 내보냅니다. 없으면 대시보드가 503 으로 무엇을 하라고
+알려 줍니다.
+
+> **이 디렉터리의 `package.json` 은 부르기만 합니다.** 의존성을 갖지 않으므로
+> 여기에 `node_modules` 가 생기지 않습니다. 진짜 패키지는 둘입니다 —
+> `server/`(런타임, pm2 가 띄운다)와 `web/`(빌드 타임에만). 운영 장비에 필요한
+> 것은 `server/node_modules` 뿐이고, vite·tailwind 는 빌드가 끝나면 서비스와
+> 상관이 없습니다. 그래서 둘을 한 트리로 합치지 않았습니다.
+
+아래처럼 직접 불러도 같습니다 (`bootstrap.sh` 가 하는 것이 이것입니다).
+
+```bash
 cd services/manager/server && npm install
 cd ../web && npm install && npm run build   # 결과물이 ../server/public 에 생성됨
 ```

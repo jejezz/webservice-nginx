@@ -23,6 +23,8 @@ const { execFileSync } = require('child_process');
 const FIFO = process.env.KAMAILIO_RPC_FIFO || '/run/kamailio/kamailio_rpc.fifo';
 /** 응답 FIFO 를 둘 곳. Kamailio 의 fifo_reply_dir 과 같아야 한다 (기본 /tmp). */
 const REPLY_DIR = process.env.KAMAILIO_RPC_REPLY_DIR || '/tmp';
+/** 응답 FIFO 를 읽을 쪽. Kamailio 를 돌리는 그룹이다. */
+const REPLY_GROUP = process.env.KAMAILIO_RPC_REPLY_GROUP || 'kamailio';
 // 영숫자와 밑줄만 쓴다. Kamailio 가 이 이름으로 fifo_reply_dir 아래 파일을 찾는다.
 const REPLY_NAME = `kamailio_dashboard_reply_${process.pid}`;
 const REPLY_PATH = path.join(REPLY_DIR, REPLY_NAME);
@@ -45,15 +47,29 @@ function ensureReplyFifo() {
   if (replyFd !== null) return;
 
   if (!fs.existsSync(REPLY_PATH)) {
-    // Node 에 mkfifo 가 없다. 0660 으로 만들어 kamailio 가 쓸 수 있게 한다.
-    // /tmp 에는 setgid 비트가 없어서, 파일의 그룹은 (부가 그룹인 kamailio 가
-    // 아니라) 이 프로세스의 주 그룹(ptype)으로 만들어진다 — kamailio 는 그
-    // 그룹에 속하지 않으므로 응답을 못 쓰고 "Permission denied" 로 조용히
-    // 실패한다. chgrp 로 명시적으로 kamailio 그룹을 지정해야 한다 (파일
-    // 소유자이고 kamailio 가 부가 그룹이면 root 없이도 가능하다).
+    // Node 에 mkfifo 가 없다. 0660 으로 만든다.
     execFileSync('mkfifo', ['-m', '660', REPLY_PATH]);
-    execFileSync('chgrp', ['kamailio', REPLY_PATH]);
   }
+
+  // 그룹을 kamailio 로 **직접 바꾼다.**
+  //
+  // ⚠️ 새로 만든 파일의 그룹은 만든 프로세스의 **유효 gid** 로 정해진다.
+  //    kamailio 그룹에 보조로 들어 있는 것만으로는 부족하다 — 그때 이 FIFO 는
+  //    jejezz:jejezz 0660 으로 나오고, kamailio 는 그것을 열지 못한다:
+  //
+  //      ERROR: jsonrpcs jsonrpc_open_reply_fifo(): open error
+  //             (/tmp/kamailio_dashboard_reply_<pid>): Permission denied
+  //
+  //    그러면 요청은 나가는데(그쪽 FIFO 는 그룹 권한으로 써진다) 응답만 오지
+  //    않는다. 화면에는 "RPC 응답 시간 초과: 0바이트 받음" 으로만 보여서,
+  //    권한 문제라는 것이 전혀 드러나지 않는다.
+  //
+  //    예전에는 `sg kamailio -c` 로 pm2 를 띄우면 유효 gid 까지 kamailio 가
+  //    되어 우연히 맞았다. 그래서 **띄운 방법에 따라 되기도 하고 안 되기도
+  //    했다.** 여기서 직접 맞추면 그 의존이 사라진다.
+  //
+  //    root 는 필요 없다 — 이 파일의 소유자이고 그 그룹의 구성원이면 된다.
+  chgrpReply();
   // O_RDWR 인 이유: O_RDONLY 로 열면 쓰는 쪽이 없는 동안 read() 가 0(EOF)을
   // 돌려주어, Kamailio 가 응답을 쓰기도 전에 끝난 것으로 보인다. 우리 자신이
   // 쓰기 쪽으로도 열려 있으면 EOF 가 나지 않는다.
@@ -65,6 +81,43 @@ function ensureReplyFifo() {
     replyFd = fs.openSync(REPLY_PATH, fs.constants.O_RDWR | fs.constants.O_NONBLOCK);
   } catch (err) {
     throw explain(err);
+  }
+}
+
+/**
+ * 응답 FIFO 의 그룹을 kamailio 로 맞춘다.
+ *
+ * 이미 맞으면 아무것도 하지 않는다. 못 바꾸면 그 이유를 사람이 조치할 수 있는
+ * 문구로 바꿔 던진다 — 여기서 조용히 넘어가면 증상이 다시 '시간 초과' 가 되고,
+ * 그것만 보고 권한까지 도달하기는 어렵다.
+ */
+function chgrpReply() {
+  let gid;
+  try {
+    // getent 를 쓴다. /etc/group 만 읽으면 LDAP 같은 다른 백엔드를 놓친다.
+    const line = execFileSync('getent', ['group', REPLY_GROUP], { encoding: 'utf8' }).trim();
+    gid = Number(line.split(':')[2]);
+  } catch {
+    throw new Error(
+      `${REPLY_GROUP} 그룹을 찾지 못했습니다. Kamailio 가 설치돼 있는지 확인하세요`
+      + ' (getent group ' + REPLY_GROUP + ').'
+    );
+  }
+  if (!Number.isInteger(gid)) throw new Error(`${REPLY_GROUP} 그룹의 gid 를 읽지 못했습니다.`);
+
+  const st = fs.statSync(REPLY_PATH);
+  if (st.gid === gid) return;
+
+  try {
+    fs.chownSync(REPLY_PATH, st.uid, gid);
+  } catch (err) {
+    throw new Error(
+      `${REPLY_PATH} 의 그룹을 ${REPLY_GROUP} 으로 바꾸지 못했습니다 (${err.code}).\n`
+      + `  이 프로세스가 ${REPLY_GROUP} 그룹에 들어 있어야 합니다. usermod 만으로는\n`
+      + '  부족합니다 — 그룹은 로그인 때 정해져서, 이미 떠 있는 pm2 데몬은 옛 그룹\n'
+      + '  집합을 그대로 씁니다. 해결: pm2/restart.sh --restart (또는 --sg).\n'
+      + `  확인: grep ^Groups: /proc/${process.pid}/status  → ${gid} 가 있어야 합니다`
+    );
   }
 }
 

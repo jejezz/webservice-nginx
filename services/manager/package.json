@@ -1,0 +1,11 @@
+{
+  "name": "manager-service",
+  "private": true,
+  "version": "1.0.0",
+  "description": "관리 대시보드 — server(런타임)와 web(빌드 타임) 두 패키지를 여기서 부른다",
+  "scripts": {
+    "build": "npm --prefix web run build",
+    "setup": "npm --prefix server install --no-audit --no-fund && npm --prefix web install --no-audit --no-fund && npm --prefix web run build",
+    "dev": "npm --prefix web run dev"
+  }
+}
