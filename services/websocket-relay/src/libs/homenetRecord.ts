@@ -90,6 +90,24 @@ export async function saveHomenetRecord(
     const id = complexId();
 
     /*
+     * 주인 없는 행을 이 단지로 인수한다.
+     *
+     * 월패드는 단지 ID 를 모른다 — 인트라넷이라 이 서버로만 붙으므로, 붙는
+     * 등록은 정의상 이 단지 것이다. 그런데 `COMPLEX_ID` 를 설정하기 전에
+     * 등록된 행은 complex_id 가 NULL 로 남고, complex_key(=NULL 을 접은 값)가
+     * 빈 문자열이라 아래 INSERT ... ON DUPLICATE KEY UPDATE 의 열쇠와
+     * 어긋난다 — 그 행을 갱신하지 못하고 같은 동/호로 새 행을 또 만들려
+     * 든다. 그래서 넣기 전에 먼저 이 동/호의 주인 없는 행을 직접 인수한다.
+     */
+    if (id) {
+        await DbConn.execute(
+            `UPDATE ${config.tables.homenet}
+                SET complex_id = ?
+              WHERE complex_id IS NULL AND building = ? AND unit = ?`,
+            [id, building, unit]);
+    }
+
+    /*
      * 이미 있는지는 **등록이 보는 것과 같은 조건**으로 확인한다.
      *
      * 표의 UNIQUE 도 이제 같은 조합이다 (schema/008). 그래도 여기서 먼저 보는
