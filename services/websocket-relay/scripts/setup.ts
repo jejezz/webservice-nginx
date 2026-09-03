@@ -19,10 +19,10 @@
 import fs from 'fs';
 import { execFileSync, spawnSync } from 'child_process';
 import {
-    loadEnv, envExists, dbSettings,
+    loadEnv, envExists, dbSettings, setEnvValue, detectSipProxy,
     ENV_PATH, ENV_EXAMPLE_PATH, ROOT, APP_NAME, PM2_ECOSYSTEM, DASHBOARD_DIR, DB_SETUP,
 } from './lib/env';
-import { Reporter, confirm, closePrompt, colors } from './lib/ui';
+import { Reporter, ask, confirm, closePrompt, colors } from './lib/ui';
 
 const report = new Reporter();
 
@@ -31,6 +31,7 @@ async function main(): Promise<void> {
 
     createEnv();
     loadEnv();
+    await configureSipProxy();
     await buildDashboard();
     await applySchema();
     await startPm2();
@@ -65,6 +66,36 @@ function createEnv(): void {
     fs.chmodSync(ENV_PATH, 0o600);
     report.ok('.env.example 에서 만들었습니다.');
     report.info('COMPLEX_ID 와 JANUS_WS_URL 은 배치에 맞게 채우세요.');
+}
+
+// ── SIP 프록시 ───────────────────────────────────────
+/**
+ * 앱이 REGISTER 를 보낼 이 단지의 Kamailio 주소.
+ *
+ * Kamailio 와 Janus 는 반드시 한 PC 에 설치되므로, 이 장비에서 자동으로
+ * 찾을 수 있다(`detectSipProxy` — Kamailio settings.ini, 없으면 LAN IP).
+ * 대개는 그대로 두면 되므로, 찾은 값을 기본값으로 보여 주고 엔터만 치면
+ * 넘어가게 한다. 나중에 바뀌면 대시보드에서 고칠 수 있다.
+ */
+async function configureSipProxy(): Promise<void> {
+    report.step('SIP 프록시');
+
+    const current = (process.env.SIP_PROXY ?? '').trim();
+    if (current) {
+        report.ok(`이미 설정돼 있습니다: ${current}`);
+        return;
+    }
+
+    const detected = detectSipProxy();
+    if (!detected) {
+        report.warn('Kamailio 주소를 찾지 못했습니다 — 앱은 빌드 시점 기본값을 씁니다. 필요하면 .env 에 SIP_PROXY 를 직접 넣거나 대시보드에서 넣으세요.');
+        return;
+    }
+
+    const answer = await ask('앱이 등록할 SIP 프록시 주소', detected);
+    setEnvValue('SIP_PROXY', answer);
+    process.env.SIP_PROXY = answer;
+    report.ok(`SIP_PROXY=${answer} 로 저장했습니다.`);
 }
 
 // ── 대시보드 ─────────────────────────────────────────

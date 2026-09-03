@@ -4,6 +4,7 @@ import { usePolling } from '@/lib/usePolling';
 import { formatUptime } from '@/lib/format';
 import { InfoCard, StatTile } from '@/components/InfoCard';
 import ComplexCard from '@/components/ComplexCard';
+import SipProxyCard from '@/components/SipProxyCard';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -75,7 +76,10 @@ export default function Overview() {
         />
       </div>
 
-      <ComplexCard />
+      <div className="grid gap-4 lg:grid-cols-2">
+        <ComplexCard />
+        <SipProxyCard />
+      </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
         <InfoCard

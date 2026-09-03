@@ -25,7 +25,7 @@ import mysql from 'mysql2/promise';
 import {
     loadEnv, dbSettings, envExists, tableNames, migrations, healthUrl,
     ROOT, APP_NAME, BASE_PATH, DASHBOARD_DIR, NGINX_INSTALLER, NGINX_LIVE_CONF, DB_SETUP,
-    resolveFromRoot,
+    resolveFromRoot, detectSipProxy, SIP_PROXY_RE, SIP_PROXY_ERROR,
 } from './lib/env';
 import { Reporter } from './lib/ui';
 
@@ -81,6 +81,7 @@ function checkEnv(): void {
     }
 
     checkJanusUrl(complex);
+    checkSipProxy();
 
     // manager 로그인 세션을 이 시크릿으로 검증한다. 없으면 대시보드가 전부 막힌다.
     const secret = resolveFromRoot(process.env.SESSION_SECRET_FILE || '../.session-secret');
@@ -200,6 +201,40 @@ function checkJanusUrl(complexId: string): void {
         return;
     }
     report.ok(`Janus 주소: ${host} (디렉터리와 일치)`);
+}
+
+/**
+ * 앱이 REGISTER 를 보낼 이 단지의 Kamailio 주소.
+ *
+ * Kamailio 와 Janus 는 반드시 한 PC 에 설치되므로, 이 장비의 Kamailio
+ * settings.ini(또는 LAN IP)에서 자동으로 찾을 수 있다 (`detectSipProxy`).
+ * `.env` 가 못박아 두면 그 값이 이기지만, 감지값과 다르면 오설정일 수
+ * 있으므로 드러낸다 — `checkJanusUrl` 과 같은 자세다.
+ */
+function checkSipProxy(): void {
+    const override = (process.env.SIP_PROXY ?? '').trim();
+    const detected = detectSipProxy();
+    const raw = override || detected || '';
+
+    if (raw === '') {
+        report.info('SIP 프록시를 찾지 못했습니다 — 등록 응답에 sip.proxy 를 싣지 않습니다 (앱은 빌드 시점 기본값을 씁니다).');
+        return;
+    }
+
+    if (!SIP_PROXY_RE.test(raw)) {
+        report.bad(`SIP_PROXY 형식이 잘못됐습니다: "${raw}"`, SIP_PROXY_ERROR);
+        return;
+    }
+
+    if (override && detected && override !== detected) {
+        report.warn(`.env 의 SIP_PROXY 가 이 장비에서 자동으로 찾은 값과 다릅니다 (${override} ≠ ${detected}). 의도적으로 고친 값이 아니라면 확인하세요.`);
+        return;
+    }
+    if (!override && detected) {
+        report.ok(`SIP 프록시: ${detected} (Kamailio 에서 자동으로 찾음)`);
+        return;
+    }
+    report.ok(`SIP 프록시: ${raw}`);
 }
 
 // ── 의존성 ───────────────────────────────────────────

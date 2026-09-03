@@ -91,6 +91,10 @@ export const api = {
   complex: () => request('/complex'),
   updateComplex: (body) => request('/complex', { method: 'PUT', body: JSON.stringify(body) }),
 
+  // SIP 프록시 (Kamailio 주소)
+  sipProxy: () => request('/sip-proxy'),
+  updateSipProxy: (value) => request('/sip-proxy', { method: 'PUT', body: JSON.stringify({ value }) }),
+
   // FCM 서비스 계정 키
   firebase: () => request('/firebase'),
   analyzeFirebase: (content) => request('/firebase/analyze', { method: 'POST', body: JSON.stringify({ content }) }),
