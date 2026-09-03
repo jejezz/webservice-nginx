@@ -21,6 +21,7 @@ import { Utils } from '../libs/utils';
 import { analyze, install, installedStatus, remove } from '../libs/firebaseKey';
 import logger from '../libs/logger';
 import { complexId, setComplexId, COMPLEX_ID_RE, COMPLEX_ID_ERROR } from '../libs/complex';
+import { sipProxy, setSipProxy, detectSipProxy, SIP_PROXY_RE, SIP_PROXY_ERROR } from '../libs/sipProxy';
 import { verifyPassword } from '../auth/reauth';
 import {
     listPending, approve, reject, countApproved,
@@ -567,6 +568,47 @@ export function createDashboardApi(): Router {
         }
 
         res.json({ complexId: complexId() });
+    });
+
+    // ── SIP 프록시 ────────────────────────────────────────────────
+    //
+    // 앱이 REGISTER 를 보낼 이 단지의 Kamailio 주소. Kamailio 서버 자체를
+    // 바꾸는 기능이 아니다 — 서버가 앱에게 알려 주는 주소만 고친다. 그래서
+    // 단지 ID 와 달리 재입력·비밀번호 재확인을 요구하지 않는다: 틀려도 결과는
+    // "새 등록이 옛 프록시로 붙는다" 뿐이고, 그마저 바로 여기서 다시 고치면
+    // 그만이다.
+
+    /** 지금 값과, 이 장비에서 자동으로 찾은 값. */
+    router.get('/sip-proxy', (_req: Request, res: Response) => {
+        res.json({
+            value: sipProxy(),
+            detected: detectSipProxy(),
+            overridden: Boolean((process.env.SIP_PROXY ?? '').trim()),
+            format: { pattern: SIP_PROXY_RE.source, hint: SIP_PROXY_ERROR },
+        });
+    });
+
+    /** SIP 프록시를 바꾼다. 비우면 자동 감지로 되돌린다. */
+    router.put('/sip-proxy', (req: Request, res: Response) => {
+        const actor = (req as any).user?.username ?? 'unknown';
+        const raw = String(req.body?.value ?? '').trim();
+
+        if (raw !== '' && !SIP_PROXY_RE.test(raw)) {
+            return res.status(400).json({ error: 'invalid_format', message: SIP_PROXY_ERROR });
+        }
+        const next = raw === '' ? null : raw;
+
+        try {
+            setSipProxy(next, actor);
+        } catch (err: any) {
+            logger.error(`SIP 프록시를 .env 에 적지 못했습니다: ${err.message}`);
+            return res.status(500).json({
+                error: 'persist_failed',
+                message: `값은 적용됐지만 .env 에 기록하지 못했습니다 — 재시작하면 되돌아갑니다: ${err.message}`,
+            });
+        }
+
+        res.json({ value: sipProxy(), detected: detectSipProxy() });
     });
 
     // ── FCM 서비스 계정 키 ───────────────────────────────────────

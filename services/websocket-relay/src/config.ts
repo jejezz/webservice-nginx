@@ -248,6 +248,23 @@ export const config = {
         /** kamctlrc 의 SIP_DOMAIN 과 같아야 한다. 다르면 만든 계정으로 등록되지 않는다. */
         domain: ((process.env.SIP_DOMAIN ?? '').trim() || siteSettings().sipDomain || 'pluto.org'),
         subscriberTable: process.env.SIP_SUBSCRIBER_TABLE || 'kamailio.subscriber',
+        /**
+         * 앱이 REGISTER 를 보낼 이 단지의 Kamailio 주소 (예: `sip:10.10.0.224:5060`).
+         *
+         * `domain`(SIP 계정의 realm)과는 다른 값이다 — domain 은 여러 단지가
+         * 같은 문자열을 쓸 수 있지만, proxy 는 사설망 IP 라 단지마다 다르다.
+         *
+         * 여기 있는 건 **.env 가 못박은 값뿐**이다 — 비어 있으면 Kamailio
+         * settings.ini 나 이 장비의 LAN IP 에서 자동으로 찾는데, 그 감지·재설정
+         * 로직은 libs/sipProxy.ts 에 있다(대시보드에서 바꿀 수 있어야 해서
+         * complexId 처럼 함수로 뺐다). 실제로 쓸 값은 여기가 아니라
+         * `sipProxy()` 를 불러야 한다.
+         *
+         * 감지도 실패하면 등록 응답에 아예 싣지 않는다 — 앱은 빌드에 박힌
+         * 기본값(`--dart-define=SIP_PROXY`)으로 자연히 떨어지므로, 이 값을
+         * 나중에 채워도 배포 순서를 가리지 않는다.
+         */
+        proxy: (process.env.SIP_PROXY ?? '').trim() || null,
     },
 
     log: {

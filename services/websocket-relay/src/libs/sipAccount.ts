@@ -29,12 +29,21 @@ import crypto from 'crypto';
 import { DbConn } from './dbConnection';
 import config from '../config';
 import logger from './logger';
+import { sipProxy } from './sipProxy';
 
 /** 만들어 준 자격. 단말에게 그대로 내려간다. */
 export interface SipCredential {
     user: string;
     domain: string;
     password: string;
+    /** 이 단지의 Kamailio 주소. 감지하지도 설정하지도 않았으면 싣지 않는다 (libs/sipProxy.ts). */
+    proxy?: string;
+}
+
+/** 감지·설정돼 있을 때만 proxy 를 얹는다. 없으면 앱이 빌드 시점 기본값을 쓴다. */
+function withProxy<T extends object>(cred: T): T & { proxy?: string } {
+    const proxy = sipProxy();
+    return proxy ? { ...cred, proxy } : cred;
 }
 
 function md5(text: string): string {
@@ -78,7 +87,7 @@ export async function provision(user: string): Promise<SipCredential | null> {
              md5(`${user}:${domain}:${password}`),
              md5(`${user}@${domain}:${domain}:${password}`)]);
         logger.info(`SIP 계정 발급: ${user}@${domain}`);
-        return { user, domain, password };
+        return withProxy({ user, domain, password });
     } catch (err: any) {
         logger.error(`SIP 계정을 만들지 못했습니다 (${user}@${domain}): ${err.message}`);
         return null;
@@ -117,7 +126,7 @@ export async function credentialFor(user: string): Promise<SipCredential | null>
             [user, config.sip.domain]);
         const password = rows[0]?.password;
         if (!password) return null;
-        return { user, domain: config.sip.domain, password };
+        return withProxy({ user, domain: config.sip.domain, password });
     } catch (err: any) {
         logger.warn(`SIP 자격을 읽지 못했습니다 (${user}): ${err.message}`);
         return null;

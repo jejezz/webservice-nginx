@@ -10,6 +10,7 @@
  */
 
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import dotenv from 'dotenv';
 
@@ -120,6 +121,38 @@ export function dbSettings(): DbSettings {
 
 export function resolveFromRoot(p: string): string {
     return path.isAbsolute(p) ? p : path.resolve(ROOT, p);
+}
+
+export const SIP_PROXY_RE = /^sip:[^\s:]+:\d+$/;
+export const SIP_PROXY_ERROR = 'sip:<주소>:<포트> 형식이어야 합니다 (예: sip:10.10.0.224:5060).';
+
+/**
+ * SIP 프록시(Kamailio) 주소를 추정한다. Kamailio 와 Janus 는 반드시 한 PC 에
+ * 설치되므로(services/janus/install.sh 의 resolve_lan 이 그 전제로 LAN IP 를
+ * 고른다), Kamailio settings.ini 를 먼저 본다 — 없으면 이 서비스도 같은
+ * 장비에서 돈다는 전제로 자신의 LAN IP 를 대신 쓴다.
+ *
+ * src/libs/sipProxy.ts 에 같은 함수가 있다 — 서비스가 뜨기 전에 도는 이
+ * 스크립트는 서비스 코드를 import 하지 않으므로 의도된 중복이다 (env.ts 의
+ * setEnvValue 와 같은 사정).
+ */
+export function detectSipProxy(): string | null {
+    const file = path.join(WEBSERVICES, 'services', 'kamailio', 'settings.ini');
+    let ip: string | null = null;
+    try {
+        const m = fs.readFileSync(file, 'utf8').match(/^[ \t]*sip_listen_addr[ \t]*=[ \t]*(\S+)[ \t]*$/m);
+        if (m) ip = m[1];
+    } catch { /* Kamailio 가 아직 없는 배치다 */ }
+
+    if (!ip) {
+        for (const addrs of Object.values(os.networkInterfaces())) {
+            for (const a of addrs ?? []) {
+                if (a.family === 'IPv4' && !a.internal) { ip = a.address; break; }
+            }
+            if (ip) break;
+        }
+    }
+    return ip ? `sip:${ip}:5060` : null;
 }
 
 /** .env 의 한 항목만 바꾼다. 주석과 순서는 그대로 둔다. */
