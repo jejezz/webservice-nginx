@@ -33,7 +33,26 @@ INSTALLED_CFG="/opt/janus/etc/janus/janus.jcfg"
 # 예전에는 공유기의 DDNS(jejezzhome.iptime.org)를 봤지만 그 이름은 삭제됐다.
 # 지금은 등록기관에 둔 A 레코드를 본다. 이름이 고정값이라 회선 IP 가 바뀌면
 # 레코드를 갱신해 주어야 한다 — 공유기가 알아서 하던 일이 사라졌다.
-DDNS_NAME="${JANUS_DDNS_NAME:-c-a3f19c04.rtc.zoomon.art}"
+#
+# ── 어느 이름을 보는가 ──────────────────────────────────────────────────
+#
+# **이 장비가 실제로 맡은 단지의 이름이어야 한다.** 예전에는 여기에 특정
+# 단지의 이름을 하드코딩해 두었었다 — 그 값은 이 스크립트가 어느 장비에
+# 설치되든 항상 같았으므로, site 층(site/settings.ini)의 host 를 설정하지
+# 않은 장비나 JANUS_DDNS_NAME 을 안 준 호출은 전부 **남의 단지 이름을 보고
+# 있었다.** janus-public-ip.service 가 부팅마다 그 값으로 조용히 동기화해
+# 실제 있지도 않은 주소를 ICE 후보로 광고하게 만든 사고가 실제로 있었다
+# (신호는 붙고 소리만 안 나는 모양이라 알아채기 어렵다).
+#
+# 그래서 이제 하드코딩된 값을 두지 않는다. site/settings.ini 의 host 를
+# 보고, 그것도 없으면(site 층이 없는 배치) JANUS_DDNS_NAME 도 없을 때는
+# **모른다** 로 남긴다 — 아래에서 이름 해석에 실패해 skip 으로 끝난다.
+SITE_SETTINGS="${SCRIPT_DIR}/../../site/settings.ini"
+site_host=""
+if [[ -r "$SITE_SETTINGS" ]]; then
+    site_host="$(sed -n 's/^[[:space:]]*host[[:space:]]*=[[:space:]]*\(.*\)$/\1/p' "$SITE_SETTINGS" | tail -1)"
+fi
+DDNS_NAME="${JANUS_DDNS_NAME:-$site_host}"
 
 # 점검 출력은 공용 규약을 따른다 (docs/check-contract.md).
 source "${SCRIPT_DIR}/../../lib/check-report.sh"
@@ -61,6 +80,13 @@ done
 say() { [[ $QUIET -eq 1 || $CHECK_JSON -eq 1 ]] || echo "$@"; }
 
 # ── 지금의 공인 IP ──────────────────────────────────────────────────────
+if [[ -z "$DDNS_NAME" ]]; then
+    judge skip "이 단지의 이름을 모릅니다 (site/settings.ini 의 host 도, JANUS_DDNS_NAME 도 없습니다)"
+    check_finish
+    echo "확인 불가: site/settings.ini 의 host 를 채우거나 JANUS_DDNS_NAME 을 주세요" >&2
+    exit 2
+fi
+
 current="$(getent hosts "$DDNS_NAME" 2>/dev/null | awk '{print $1}' | head -1)"
 if [[ -z "$current" ]]; then
     judge skip "${DDNS_NAME} 를 해석하지 못해 공인 IP 를 확인할 수 없습니다"
