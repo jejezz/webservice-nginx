@@ -45,9 +45,14 @@ function ensureReplyFifo() {
   if (replyFd !== null) return;
 
   if (!fs.existsSync(REPLY_PATH)) {
-    // Node 에 mkfifo 가 없다. 0660 으로 만들어 kamailio 가 쓸 수 있게 한다
-    // (이 프로세스가 kamailio 그룹이므로 파일의 그룹도 그렇게 된다).
+    // Node 에 mkfifo 가 없다. 0660 으로 만들어 kamailio 가 쓸 수 있게 한다.
+    // /tmp 에는 setgid 비트가 없어서, 파일의 그룹은 (부가 그룹인 kamailio 가
+    // 아니라) 이 프로세스의 주 그룹(ptype)으로 만들어진다 — kamailio 는 그
+    // 그룹에 속하지 않으므로 응답을 못 쓰고 "Permission denied" 로 조용히
+    // 실패한다. chgrp 로 명시적으로 kamailio 그룹을 지정해야 한다 (파일
+    // 소유자이고 kamailio 가 부가 그룹이면 root 없이도 가능하다).
     execFileSync('mkfifo', ['-m', '660', REPLY_PATH]);
+    execFileSync('chgrp', ['kamailio', REPLY_PATH]);
   }
   // O_RDWR 인 이유: O_RDONLY 로 열면 쓰는 쪽이 없는 동안 read() 가 0(EOF)을
   // 돌려주어, Kamailio 가 응답을 쓰기도 전에 끝난 것으로 보인다. 우리 자신이
