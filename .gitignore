@@ -9,7 +9,8 @@
 #   pm2/             프로세스 오케스트레이션
 #   services/manager 관리 대시보드
 #   services/kamailio · services/janus   통화 시스템
-#   services/websocket-relay   IoT·모바일 실시간 릴레이
+#   services/websocket-relay   IoT·모바일 실시간 릴레이 (kamailio·janus 가 쓴다)
+#   services/coturn   TURN/STUN 서버 — 셀룰러 모바일의 WebRTC NAT 통과
 #
 # 나머지 서비스(face-recognition-server, apartment-mgmt-server,
 # web-cassini)는 각자 자기 git 저장소를 가집니다.
@@ -22,6 +23,7 @@ services/*
 !services/kamailio/
 !services/janus/
 !services/websocket-relay/
+!services/coturn/
 
 # services/ 바로 아래의 공유 세션 시크릿. 위 규칙에 이미 걸리지만
 # 실수로 예외를 추가할 때를 대비해 한 번 더 막습니다.

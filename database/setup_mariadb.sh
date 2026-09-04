@@ -51,7 +51,7 @@ finish() {
         echo ""
         echo "  DB 선언은 그대로 두고 스키마만 적용하지 않았습니다."
         echo "  그 서비스의 소스가 다른 저장소에 있다면 정상입니다 (예: ws-bridge)."
-        echo "  아니라면 database.ini 의 schema_dir 경로를 확인하세요."
+        echo "  아니라면 database.ini 또는 services/*/db-conf/*.ini 의 schema_dir 경로를 확인하세요."
         exit 1
     fi
     exit 0
@@ -88,11 +88,18 @@ parse_ini() {
     done < "$file"
 }
 
-get_value() {
-    local section="$1" key="$2" default="${3:-}"
+# ini_data 문자열("섹션|키|값" 줄들)에서 값을 찾는다. get_value 는 중앙
+# database.ini($INI_DATA)에 대해 이 함수를 부르는 얇은 래퍼다 — services/*/db-conf
+# 를 스캔할 때는 그 파일 하나만 파싱한 ini_data 를 직접 넘긴다.
+get_value_from() {
+    local ini_data="$1" section="$2" key="$3" default="${4:-}"
     local found
-    found="$(grep -F "${section}|${key}|" <<< "$INI_DATA" | head -1 | cut -d'|' -f3-)"
+    found="$(grep -F "${section}|${key}|" <<< "$ini_data" | head -1 | cut -d'|' -f3-)"
     echo "${found:-$default}"
+}
+
+get_value() {
+    get_value_from "$INI_DATA" "$1" "$2" "${3:-}"
 }
 
 sections_with_prefix() {
@@ -130,15 +137,18 @@ validate_host() {
 
 sql_escape() { printf '%s' "$1" | sed "s/'/''/g"; }
 
-# ini에 적힌 상대 경로를 database/ 기준 절대 경로로 바꾼다. ('../services/...' 형태 지원)
-resolve_rel() {
-    local p="$1"
+# ini에 적힌 상대 경로를 base 기준 절대 경로로 바꾼다.
+resolve_rel_from() {
+    local base="$1" p="$2"
     if [[ "$p" == /* ]]; then
         printf '%s' "$p"
     else
-        (cd "$SCRIPT_DIR" && realpath -m "$p")
+        (cd "$base" && realpath -m "$p")
     fi
 }
+
+# database.ini 안의 상대 경로는 database/ 기준이다. ('../services/...' 형태 지원)
+resolve_rel() { resolve_rel_from "$SCRIPT_DIR" "$1"; }
 
 run_sql() {
     if $DRY_RUN; then
@@ -353,6 +363,93 @@ step "데이터베이스"
 DEFAULT_CHARSET="$(get_value server character_set_server utf8mb4)"
 DEFAULT_COLLATION="$(get_value server collation_server utf8mb4_unicode_ci)"
 
+# database.ini 의 [database:...] 와 아래 5단계(services/*/db-conf/*.ini)가 같은
+# DB 이름을 각자 만들겠다고 선언하면 어느 쪽 charset·스키마가 이겼는지 알 수
+# 없다. 조용히 한쪽이 이기게 두지 않고 여기서 멈춘다.
+declare -A CLAIMED_DBS=()
+
+claim_database() {
+    local db="$1" declared_in="$2"
+    if [[ -n "${CLAIMED_DBS[$db]:-}" ]]; then
+        echo "Error: 데이터베이스 이름이 겹칩니다: ${db}"
+        echo "  ${CLAIMED_DBS[$db]}"
+        echo "  ${declared_in}"
+        exit 1
+    fi
+    CLAIMED_DBS[$db]="$declared_in"
+}
+
+ensure_database() {
+    local db="$1" charset="$2" collation="$3"
+    if [[ -n "$(query "SHOW DATABASES LIKE '$(sql_escape "$db")';")" ]]; then
+        info "이미 존재: ${db} (문자셋은 변경하지 않음)"
+    else
+        run_sql "CREATE DATABASE \`${db}\` CHARACTER SET ${charset} COLLATE ${collation};"
+        info "생성: ${db} (${charset}/${collation})"
+    fi
+}
+
+# schema_dir/schema_file 을 적용한다 (둘 다 절대 경로로 넘겨받는다).
+# 실패는 그 자리에서 멈추지 않고 SKIPPED_SCHEMAS 에 모아 finish() 에서 알린다 —
+# 서비스가 이 저장소 밖에 살 수 있고(예: 자기 저장소를 가진 plug-in), 그건
+# 잘못이 아니라 사실이기 때문이다.
+apply_schema() {
+    local db="$1" schema_dir="$2" schema_file="$3"
+    local schema_files=() schema_missing=()
+
+    # 스키마는 각 서비스 디렉토리가 소유한다. schema_dir 안의 *.sql 을 이름순으로 실행한다.
+    # (001-initial.sql, 002-... 처럼 번호를 붙여 순서를 고정)
+    # 모든 파일은 여러 번 실행해도 안전해야 한다. (CREATE TABLE IF NOT EXISTS 등)
+    if [[ -n "$schema_dir" ]]; then
+        if [[ ! -d "$schema_dir" ]]; then
+            schema_missing+=("스키마 디렉토리 없음: ${schema_dir}")
+        else
+            while IFS= read -r f; do
+                [[ -n "$f" ]] && schema_files+=("$f")
+            done < <(find "$schema_dir" -maxdepth 1 -name '*.sql' -type f | sort)
+
+            if [[ ${#schema_files[@]} -eq 0 ]]; then
+                info "  스키마 파일 없음: ${schema_dir}"
+            fi
+        fi
+    fi
+
+    if [[ -n "$schema_file" ]]; then
+        if [[ ! -f "$schema_file" ]]; then
+            schema_missing+=("스키마 파일 없음: ${schema_file}")
+        else
+            schema_files+=("$schema_file")
+        fi
+    fi
+
+    if [[ ${#schema_missing[@]} -gt 0 ]]; then
+        local m
+        for m in "${schema_missing[@]}"; do
+            info "  건너뜀 — ${m}"
+            SKIPPED_SCHEMAS+=("${db}: ${m}")
+        done
+        return
+    fi
+
+    local f
+    for f in ${schema_files[@]+"${schema_files[@]}"}; do
+        if $DRY_RUN; then
+            info "  [dry-run] 스키마 실행: ${f}"
+        elif mdb --database="$db" < "$f"; then
+            info "  스키마 적용: $(basename "$f")"
+        else
+            echo "Error: 스키마 실행 실패: ${f}"
+            exit 1
+        fi
+    done
+
+    if [[ ${#schema_files[@]} -gt 0 ]] && ! $DRY_RUN; then
+        local tables
+        tables="$(query "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='$(sql_escape "$db")';")"
+        info "  현재 테이블 ${tables}개"
+    fi
+}
+
 db_sections="$(sections_with_prefix database)"
 if [[ -z "$db_sections" ]]; then
     info "정의된 데이터베이스 없음"
@@ -361,79 +458,21 @@ else
         [[ -z "$section" ]] && continue
         db="${section#database:}"
         validate_identifier "$db" "데이터베이스 이름"
+        claim_database "$db" "${INI_FILE} [${section}]"
 
         charset="$(get_value "$section" charset "$DEFAULT_CHARSET")"
         collation="$(get_value "$section" collation "$DEFAULT_COLLATION")"
         validate_identifier "$charset" "charset"
         validate_identifier "$collation" "collation"
 
-        if [[ -n "$(query "SHOW DATABASES LIKE '$(sql_escape "$db")';")" ]]; then
-            info "이미 존재: ${db} (문자셋은 변경하지 않음)"
-        else
-            run_sql "CREATE DATABASE \`${db}\` CHARACTER SET ${charset} COLLATE ${collation};"
-            info "생성: ${db} (${charset}/${collation})"
-        fi
+        ensure_database "$db" "$charset" "$collation"
 
-        # 스키마는 각 서비스 디렉토리가 소유한다. schema_dir 안의 *.sql 을 이름순으로 실행한다.
-        # (001-initial.sql, 002-... 처럼 번호를 붙여 순서를 고정)
-        # 모든 파일은 여러 번 실행해도 안전해야 한다. (CREATE TABLE IF NOT EXISTS 등)
         schema_dir="$(get_value "$section" schema_dir "")"
         schema_file="$(get_value "$section" schema_file "")"
+        [[ -n "$schema_dir" ]] && schema_dir="$(resolve_rel "$schema_dir")"
+        [[ -n "$schema_file" ]] && schema_file="$(resolve_rel "$schema_file")"
 
-        schema_files=()
-        schema_missing=()
-
-        if [[ -n "$schema_dir" ]]; then
-            schema_dir="$(resolve_rel "$schema_dir")"
-            if [[ ! -d "$schema_dir" ]]; then
-                # 서비스가 이 저장소에 없을 수 있다 — ws-bridge 처럼 자기 저장소에
-                # 사는 것들이다. 그것은 잘못이 아니라 사실이므로 여기서 멈추지 않고
-                # 이 DB 의 스키마만 건너뛴다. 오타로 경로가 틀린 경우도 같은 자리에
-                # 걸리는데, 그쪽은 finish() 의 보고와 0 이 아닌 종료로 드러난다.
-                schema_missing+=("스키마 디렉토리 없음: ${schema_dir}")
-            else
-                while IFS= read -r f; do
-                    [[ -n "$f" ]] && schema_files+=("$f")
-                done < <(find "$schema_dir" -maxdepth 1 -name '*.sql' -type f | sort)
-
-                if [[ ${#schema_files[@]} -eq 0 ]]; then
-                    info "  스키마 파일 없음: ${schema_dir}"
-                fi
-            fi
-        fi
-
-        if [[ -n "$schema_file" ]]; then
-            schema_file="$(resolve_rel "$schema_file")"
-            if [[ ! -f "$schema_file" ]]; then
-                schema_missing+=("스키마 파일 없음: ${schema_file}")
-            else
-                schema_files+=("$schema_file")
-            fi
-        fi
-
-        if [[ ${#schema_missing[@]} -gt 0 ]]; then
-            for m in "${schema_missing[@]}"; do
-                info "  건너뜀 — ${m}"
-                SKIPPED_SCHEMAS+=("${db}: ${m}")
-            done
-            continue
-        fi
-
-        for f in ${schema_files[@]+"${schema_files[@]}"}; do
-            if $DRY_RUN; then
-                info "  [dry-run] 스키마 실행: ${f}"
-            elif mdb --database="$db" < "$f"; then
-                info "  스키마 적용: $(basename "$f")"
-            else
-                echo "Error: 스키마 실행 실패: ${f}"
-                exit 1
-            fi
-        done
-
-        if [[ ${#schema_files[@]} -gt 0 ]] && ! $DRY_RUN; then
-            tables="$(query "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='$(sql_escape "$db")';")"
-            info "  현재 테이블 ${tables}개"
-        fi
+        apply_schema "$db" "$schema_dir" "$schema_file"
     done <<< "$db_sections"
 fi
 
@@ -553,7 +592,116 @@ else
     done <<< "$user_sections"
 fi
 
-# ---------- 5. 재시작 ----------
+# ---------- 5. 서비스 선언 데이터베이스 (db-conf) ----------
+step "서비스 선언 데이터베이스 (db-conf)"
+
+# services/*/db-conf/*.ini 를 스캔한다 — nginx-conf·pm2-conf 와 같은 자리, 같은
+# 방식이다. 이 저장소 밖에 자기 저장소를 가진 plug-in 서비스(예:
+# apartment-mgmt-server-node)가 database.ini 를 손대지 않고도 스스로 DB 를
+# 선언하는 통로다. 스키마: docs/db-conf.md
+#
+# 여기서 만드는 계정은 항상 그 서비스가 선언한 DB **하나에만** ALL 권한을 갖는다.
+# database.ini 의 [user:...] 처럼 databases 목록을 사람이 정하는 게 아니라, 스캔이
+# 이미 범위를 그 DB 하나로 고정해 두었기 때문에 자동으로 만들어도 안전하다 —
+# 범위를 넓히는 결정(공용 계정에 DB 를 추가하는 것)은 여전히 사람이 database.ini
+# 를 고쳐야 한다.
+secret_password() {
+    local user="$1"
+    local generated="${SECRETS_DIR}/${user}.pw"
+    if [[ -f "$generated" ]]; then
+        head -1 "$generated" | tr -d '\n'
+        return
+    fi
+
+    mkdir -p "$SECRETS_DIR"
+    chmod 700 "$SECRETS_DIR"
+    local pw
+    pw="$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 32)"
+    printf '%s\n' "$pw" > "$generated"
+    chmod 600 "$generated"
+    # 스크립트를 sudo로 실행하므로 소유자를 원래 사용자로 돌려준다.
+    if [[ -n "${SUDO_USER:-}" ]]; then
+        chown -R "${SUDO_USER}:$(id -gn "$SUDO_USER")" "$SECRETS_DIR"
+    fi
+    echo "    새 비밀번호를 생성했습니다: ${generated}" >&2
+    printf '%s' "$pw"
+}
+
+ensure_service_user() {
+    local user="$1" hosts="$2" db="$3"
+    validate_identifier "$user" "사용자 이름"
+
+    local password esc_user esc_pw
+    password="$(secret_password "$user")"
+    esc_user="$(sql_escape "$user")"
+    esc_pw="$(sql_escape "$password")"
+
+    local host_list=() host esc_host exists
+    IFS=',' read -ra host_list <<< "$hosts"
+    for host in "${host_list[@]}"; do
+        host="$(echo "$host" | xargs)"
+        [[ -z "$host" ]] && continue
+        validate_host "$host"
+        esc_host="$(sql_escape "$host")"
+
+        exists="$(query "SELECT COUNT(*) FROM mysql.user WHERE user='${esc_user}' AND host='${esc_host}';")"
+        if [[ "${exists:-0}" -gt 0 ]]; then
+            run_sql "ALTER USER '${esc_user}'@'${esc_host}' IDENTIFIED BY '${esc_pw}';"
+            info "  갱신: ${user}@${host} (비밀번호 반영)"
+        else
+            run_sql "CREATE USER '${esc_user}'@'${esc_host}' IDENTIFIED BY '${esc_pw}';"
+            info "  생성: ${user}@${host}"
+        fi
+
+        run_sql "GRANT ALL ON \`${db}\`.* TO '${esc_user}'@'${esc_host}';"
+        info "  권한: ALL ON ${db}.* (${user}@${host})"
+    done
+    run_sql "FLUSH PRIVILEGES;"
+}
+
+SERVICES_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)/services"
+
+shopt -s nullglob
+db_conf_files=("$SERVICES_DIR"/*/db-conf/*.ini)
+shopt -u nullglob
+
+if [[ ${#db_conf_files[@]} -eq 0 ]]; then
+    info "services/*/db-conf/*.ini 없음"
+else
+    for f in "${db_conf_files[@]}"; do
+        service_dir="$(cd "$(dirname "$(dirname "$f")")" && pwd)"
+        ini_data="$(parse_ini "$f")"
+
+        db="$(get_value_from "$ini_data" database name "")"
+        if [[ -z "$db" ]]; then
+            echo "Error: ${f}: [database] 에 name 이 없습니다"
+            exit 1
+        fi
+        validate_identifier "$db" "데이터베이스 이름 (${f})"
+        claim_database "$db" "$f"
+
+        charset="$(get_value_from "$ini_data" database charset "$DEFAULT_CHARSET")"
+        collation="$(get_value_from "$ini_data" database collation "$DEFAULT_COLLATION")"
+        validate_identifier "$charset" "charset"
+        validate_identifier "$collation" "collation"
+
+        info "${db} (${f#"${SERVICES_DIR}/"})"
+        ensure_database "$db" "$charset" "$collation"
+
+        # schema_dir 은 이 ini 파일이 있는 서비스 디렉토리(db-conf 의 부모) 기준
+        # 상대 경로다 — pm2-conf 의 cwd 와 같은 규칙. 생략하면 앱이 기동 시 스스로
+        # 테이블을 만든다고 본다 (여기서는 DB 와 계정만 만든다).
+        schema_dir="$(get_value_from "$ini_data" database schema_dir "")"
+        [[ -n "$schema_dir" ]] && schema_dir="$(resolve_rel_from "$service_dir" "$schema_dir")"
+        apply_schema "$db" "$schema_dir" ""
+
+        user="$(get_value_from "$ini_data" database user "$db")"
+        hosts="$(get_value_from "$ini_data" database host "localhost, 127.0.0.1")"
+        ensure_service_user "$user" "$hosts" "$db"
+    done
+fi
+
+# ---------- 6. 재시작 ----------
 step "적용"
 
 if $DRY_RUN; then
