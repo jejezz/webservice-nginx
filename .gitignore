@@ -8,7 +8,7 @@
 #   database/        MariaDB 설치·설정
 #   pm2/             프로세스 오케스트레이션
 #   services/manager 관리 대시보드
-#   services/kamailio · services/janus   통화 시스템
+#   services/kamailio · services/janus · services/coturn   통화 시스템
 #   services/websocket-relay   IoT·모바일 실시간 릴레이
 #
 # 나머지 서비스(face-recognition-server, apartment-mgmt-server,
@@ -21,6 +21,7 @@ services/*
 !services/manager/
 !services/kamailio/
 !services/janus/
+!services/coturn/
 !services/websocket-relay/
 
 # services/ 바로 아래의 공유 세션 시크릿. 위 규칙에 이미 걸리지만
