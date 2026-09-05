@@ -40,6 +40,30 @@
       "effect": "janus.jcfg 의 media.rtp_port_range 가 됩니다. SIP 미디어(30000-30200)·rtpproxy(10200-19999)와 겹치면 안 됩니다."
     },
     {
+      "key": "sip_rtp_port_range",
+      "label": "SIP 미디어 포트 범위",
+      "help": "Janus 와 Kamailio(SIP) 사이 미디어입니다. LAN 안에서만 오가므로 공유기 포워딩 대상이 아닙니다.",
+      "placeholder": "30000-30200",
+      "optional": false,
+      "default": "30000-30200",
+      "type": "port_range",
+      "pattern": "^\\d{4,5}-\\d{4,5}$",
+      "patternHint": "시작-끝 (예: 30000-30200)",
+      "conflicts": [
+        {
+          "name": "WebRTC 미디어",
+          "lo": 20000,
+          "hi": 20200
+        },
+        {
+          "name": "rtpproxy",
+          "lo": 10200,
+          "hi": 19999
+        }
+      ],
+      "effect": "janus.plugin.sip.jcfg 의 media.rtp_port_range 가 됩니다. install.sh --apply 가 실제 설치 시점에 WebRTC·rtpproxy 범위와 다시 한번 겹침을 확인합니다 — 여기 conflicts 목록은 그 둘의 기본값 기준입니다."
+    },
+    {
       "key": "sip_local_ip",
       "label": "통화에 쓸 LAN 주소",
       "help": "SIP 쪽 SDP 의 c= 에 실립니다. 비워 두면 install.sh 가 이 장비에서 감지해 채웁니다.",

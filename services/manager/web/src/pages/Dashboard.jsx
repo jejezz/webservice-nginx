@@ -3,9 +3,11 @@ import { Link } from 'react-router-dom';
 import {
   Activity,
   AlertCircle,
+  BookOpen,
   CheckCircle2,
   ListChecks,
   LogOut,
+  Network,
   RefreshCw,
   Server,
   ShieldCheck,
@@ -276,6 +278,20 @@ export default function Dashboard() {
               <Link to="/setup">
                 <ListChecks className="size-3.5" />
                 <span className="hidden sm:inline">구축</span>
+              </Link>
+            </Button>
+
+            <Button variant="outline" size="sm" asChild title="포트 지도 — 공유기 포워딩 확인">
+              <Link to="/port-map">
+                <Network className="size-3.5" />
+                <span className="hidden sm:inline">포트</span>
+              </Link>
+            </Button>
+
+            <Button variant="outline" size="sm" asChild title="문서 · 변경 이력">
+              <Link to="/docs">
+                <BookOpen className="size-3.5" />
+                <span className="hidden sm:inline">문서</span>
               </Link>
             </Button>
 

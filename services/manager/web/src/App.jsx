@@ -7,6 +7,8 @@ import Login from '@/pages/Login';
 import Dashboard from '@/pages/Dashboard';
 import Setup from '@/pages/Setup';
 import AdminConsole from '@/pages/AdminConsole';
+import PortMap from '@/pages/PortMap';
+import Docs from '@/pages/Docs';
 
 function FullPageSpinner() {
   return (
@@ -133,6 +135,22 @@ export default function App() {
           <RequireSetupAuth>
             <Setup />
           </RequireSetupAuth>
+        }
+      />
+      <Route
+        path="/port-map"
+        element={
+          <RequireAuth>
+            <PortMap />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/docs"
+        element={
+          <RequireAuth>
+            <Docs />
+          </RequireAuth>
         }
       />
       <Route

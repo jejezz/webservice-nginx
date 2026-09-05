@@ -11,6 +11,9 @@ const host = require('../services/host');
 const cert = require('../services/cert');
 const setup = require('../services/setup');
 const attest = require('../services/setup-attest');
+const portMap = require('../services/port-map');
+const docs = require('../services/docs');
+const changelog = require('../services/changelog');
 const { router: adminRouter } = require('./admin');
 
 const userStore = createUserStore(config.auth);
@@ -354,6 +357,53 @@ router.delete('/setup/attest/:stepId', requireAuthOrConsole, (req, res) => {
 
   const removed = attest.remove(step.id);
   res.json({ stepId: step.id, removed });
+});
+
+// RTP·시그널링·내부 HTTP 포트 전체 지도. 공유기를 바꾸거나 포워딩을 다시
+// 확인할 때 보는 화면이다 (docs/port-map.md).
+router.get('/port-map', requireAuth, (req, res, next) => {
+  try {
+    res.json(portMap.build());
+  } catch (err) {
+    next(err);
+  }
+});
+
+// --- 문서 (docs/*.md, 각 서비스의 README.md 등 git 이 추적하는 .md 전부) ---
+//
+// 목록·내용 둘 다 docs.listPaths() 가 매번 다시 만드는 git 추적 목록을
+// 기준으로 한다 — 클라이언트가 보낸 경로를 그 목록에 있는지만 확인하고
+// 읽으므로, 목록에 없는 경로(상위 디렉토리 접근 포함)는 애초에 못 읽는다.
+router.get('/docs', requireAuth, async (req, res, next) => {
+  try {
+    res.json({ files: await docs.list() });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/docs/content', requireAuth, async (req, res, next) => {
+  try {
+    const result = await docs.getContent(String(req.query.path || ''));
+    res.json(result);
+  } catch (err) {
+    if (err instanceof docs.NotFoundError) return res.status(404).json({ error: 'not_found', message: err.message });
+    next(err);
+  }
+});
+
+// --- 변경 이력 (git log) ---
+//
+// scope 는 화면에서 고르는 값만 받는다 — docs / services/<이름>. 그 밖의
+// 값은 changelog.recent() 가 400 으로 거절한다.
+router.get('/changelog', requireAuth, async (req, res, next) => {
+  try {
+    const commits = await changelog.recent({ scope: req.query.scope, limit: req.query.limit });
+    res.json({ commits, scopes: changelog.scopes() });
+  } catch (err) {
+    if (err.code === 'INVALID_SCOPE') return res.status(400).json({ error: 'invalid_scope', message: err.message });
+    next(err);
+  }
 });
 
 router.get('/services/:name/health', requireAuth, async (req, res, next) => {
