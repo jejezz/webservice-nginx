@@ -330,6 +330,9 @@ ranges_overlap() {
 # 포트를 듣고 있는 주소. 없으면 빈 문자열.
 listen_addr() {
     local port="$1"
+    # awk 가 첫 매치에서 exit 하면 ss 가 나머지를 다 쓰기 전에 파이프가 닫혀
+    # SIGPIPE(141)를 받는다 — pipefail 아래서는 이게 스크립트 전체를 죽인다.
+    # 원하는 값은 이미 얻었으니 그 종료 코드는 버린다.
     ss -lnt 2>/dev/null | awk -v p=":${port}" '$4 ~ p"$" { print $4; exit }' || true
 }
 

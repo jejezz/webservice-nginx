@@ -37,6 +37,7 @@ nginx·MariaDB·Kamailio·rtpproxy(rtpengine)·Janus·coturn·websocket-relay �
 ## 3. 내부 HTTP 포트 (nginx가 프록시하는 것들, `services/*/nginx-conf/*.ini`)
 
 전부 `127.0.0.1` 백엔드, `28080`대 한 블록에 순서대로 배정돼 있습니다.
+plug-in 서비스(자기 저장소를 가진 것)가 늘면 이 표도 늘어납니다.
 
 | 서비스 | 포트 |
 |---|---|
@@ -44,7 +45,7 @@ nginx·MariaDB·Kamailio·rtpproxy(rtpengine)·Janus·coturn·websocket-relay �
 | stock-analyzer | 28085 |
 | kamailio-dashboard | 28086 |
 | janus-dashboard | 28087 |
-| coturn-dashboard | 28090 |
+| coturn-dashboard | 28090 (`services/coturn/settings.ini`의 `dashboard_port` — 장비마다 다를 수 있음) |
 | huygens-server (apartment-mgmt-server-node) | 28092 |
 | web-cassini (apartment-mgmt-server-node) | 28093 |
 | websocket-relay | 28099 |
@@ -110,7 +111,7 @@ sudo ./install.sh --apply
 - **rtpengine 이 도는 경우** (24.04): `services/kamailio/settings.ini`의
   `media_port_range`를 고치고 `sudo ./install.sh --apply` — `/etc/rtpengine/rtpengine.conf`의
   `port-min`/`port-max`를 자동으로 다시 씁니다.
-- **rtpproxy 가 도는 경우** (22.04, 지금 이 장비): 이 저장소는 rtpproxy 자체
+- **rtpproxy 가 도는 경우** (22.04): 이 저장소는 rtpproxy 자체
   설정을 소유하지 않습니다(`database/README.md`·`services/kamailio/install.sh`의
   "미디어 릴레이는 이 장비에 있는 것을 쓴다" 원칙과 같은 이유). 두 단계가
   필요합니다.

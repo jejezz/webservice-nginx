@@ -20,10 +20,16 @@
 | `web-cassini` | 28093 | `services/apartment-mgmt-server-node` | nginx `/cassini/`. huygens-server 와 같은 디렉터리, 다른 서비스 |
 | `kamailio-dashboard` | 28086 | `services/kamailio` | nginx `/kamailio/`. Kamailio 본체는 apt 패키지 + systemd — pm2 대상이 아니다 |
 | `janus-dashboard` | 28087 | `services/janus` | nginx `/janus/`. Janus 본체는 소스 빌드 + 자체 systemd 유닛 — pm2 대상이 아니다 |
-| `coturn-dashboard` | 28090 | `services/coturn` | nginx `/coturn/`. coturn 본체는 apt 패키지 + systemd — kamailio 와 같은 자리, pm2 대상이 아니다 |
+| `coturn-dashboard` | 28090 | `services/coturn` | nginx `/coturn/`. coturn 본체는 apt 패키지 + systemd — kamailio 와 같은 자리, pm2 대상이 아니다. 포트는 `settings.ini`의 `dashboard_port` — 장비마다 다를 수 있다 |
 | `stock-analyzer` | 28085 | `services/stock-analyzer` | nginx `/stock-analyzer`. tsx 로 TS 직접 실행 |
 | `websocket-relay` | 28099 | `services/websocket-relay` | nginx `/relay/`, 자체 대시보드 `/relay/dashboard`. tsx 로 TS 직접 실행 |
 | `nginx` | 80/443 | — | ❌ pm2 아님. systemd 가 유지 |
+
+> 이 표는 이 장비에서 실제로 도는 앱만 담습니다. 다른 현장은 plug-in
+> 서비스(자기 저장소를 가진 것)가 다를 수 있습니다 — 예: 다른 현장의
+> `ws-bridge`·`route-a/b/c`(예제)·`callfusion-v2-server`·
+> `webrtc-signal-server`. 그 현장의 실제 목록은 그쪽 저장소에서
+> `node ecosystem.config.js --check` 로 확인하세요.
 
 ## 1. 설치
 

@@ -3,8 +3,8 @@ package com.wsrelay.api.models;
 import org.json.JSONObject;
 
 /**
- * GET /relay/health — the shared WebServices health contract.
- * See WebServices/docs/health-contract.md.
+ * GET /relay/health — the shared health contract of the orchestration repo
+ * this service is checked out under. See [project root]/docs/health-contract.md.
  *
  * Worth checking before blaming the network: the relay answers "degraded"
  * (still HTTP 200) when its database is down. WebSocket signalling still works

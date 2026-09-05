@@ -1,6 +1,6 @@
 /**
  * @file health.ts
- * @brief `/health` — ../../docs/health-contract.md 규약.
+ * @brief `/health` — [프로젝트 루트]/docs/health-contract.md 규약.
  *
  * manager 대시보드가 서비스 상태를 판정하는 데 쓴다. 지켜야 할 것 셋:
  *
