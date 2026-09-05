@@ -12,6 +12,8 @@ export class ApiError extends Error {
     // 같은 code 안에서 상황을 더 나눌 때 쓴다.
     // (예: password_confirm_required 의 signup / reset)
     this.reason = data?.reason;
+    // too_many_attempts 에서만 온다 — 로그인 화면이 카운트다운을 보여줄 때 쓴다.
+    this.retryAfterSec = data?.retryAfterSec;
   }
 }
 
@@ -57,6 +59,22 @@ export const api = {
   me: () => request('/me'),
   overview: () => request('/overview'),
   serviceHealth: (name) => request(`/services/${encodeURIComponent(name)}/health`),
+
+  // RTP·시그널링·내부 HTTP 포트 전체 지도. 공유기 포워딩 확인용 (docs/port-map.md).
+  portMap: () => request('/port-map'),
+
+  // 문서(git 이 추적하는 .md 전부)와 변경 이력(git log).
+  docs: {
+    list: () => request('/docs'),
+    content: (path) => request(`/docs/content?path=${encodeURIComponent(path)}`),
+  },
+  changelog: (scope, limit) => {
+    const params = new URLSearchParams();
+    if (scope) params.set('scope', scope);
+    if (limit) params.set('limit', limit);
+    const qs = params.toString();
+    return request(`/changelog${qs ? `?${qs}` : ''}`);
+  },
 
   // 구축 마법사 — 단계 정의와 점검 실행.
   setup: {

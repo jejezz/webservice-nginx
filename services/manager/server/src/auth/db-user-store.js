@@ -3,6 +3,18 @@ const password = require('./password');
 const log = require('../logger');
 
 /**
+ * 승인 대기(approved=0) 행의 전역 상한.
+ *
+ * routes/api.js 의 IP 잠금은 **한 IP가 빠르게** 새 이메일을 만드는 것만
+ * 막는다. 이메일을 바꾸듯 IP도 여러 개로 나눠(또는 아주 천천히) 흘리면 그
+ * 잠금을 피해 간다 — 그래서 "지금 대기 중인 행이 몇 개인가" 라는, IP와
+ * 무관한 두 번째 상한을 둔다. 정상적인 사용에서 승인 대기가 이 숫자를
+ * 넘을 일은 없다(장비 하나에 관리자 후보가 그렇게 많지 않다) — 넘었다면
+ * 거의 확실히 쌓이고 있는 것이다.
+ */
+const MAX_PENDING_SIGNUPS = 100;
+
+/**
  * administrator 테이블 기반 사용자 저장소.
  *
  * 로그인 아이디는 이메일만 받는다.
@@ -21,6 +33,7 @@ const log = require('../logger');
  *   { status: 'confirm_mismatch' }    두 비밀번호가 다름 (reason: signup | reset)
  *   { status: 'invalid' }             이메일/비밀번호 불일치
  *   { status: 'unavailable' }         DB 접속 실패
+ *   { status: 'signup_disabled' }     승인 대기 행이 너무 많아 새 가입을 받지 않음 (MAX_PENDING_SIGNUPS)
  */
 class DbUserStore {
   constructor() {
@@ -69,6 +82,21 @@ class DbUserStore {
     if (!row) {
       if (!confirmed) return { status: 'confirm_required', reason: 'signup' };
       if (!confirmMatches) return { status: 'confirm_mismatch', reason: 'signup' };
+
+      // IP 잠금과는 별개인 전역 상한 — 위 MAX_PENDING_SIGNUPS 설명 참고.
+      // 확인까지 다 받은 뒤(=정말 행을 만들기 직전)에만 본다. confirm_required
+      // 단계에서 매번 세면 아직 안 만들 행까지 상한에 잡혀 무의미하다.
+      let pendingCount;
+      try {
+        pendingCount = await this.countPending();
+      } catch (err) {
+        log.error(`Pending-count check failed for ${normalized}: ${err.code || err.message}`);
+        return { status: 'unavailable' };
+      }
+      if (pendingCount >= MAX_PENDING_SIGNUPS) {
+        log.warn(`Signup rejected — ${pendingCount} pending approvals already (${normalized})`);
+        return { status: 'signup_disabled' };
+      }
 
       try {
         await db.query(
@@ -298,6 +326,12 @@ class DbUserStore {
 
   async countApproved() {
     const rows = await db.query('SELECT COUNT(*) AS n FROM administrator WHERE approved = 1');
+    return Number(rows[0]?.n || 0);
+  }
+
+  /** MAX_PENDING_SIGNUPS 상한이 보는 값 — 지금 승인 대기 중인 행 수. */
+  async countPending() {
+    const rows = await db.query('SELECT COUNT(*) AS n FROM administrator WHERE approved = 0');
     return Number(rows[0]?.n || 0);
   }
 }

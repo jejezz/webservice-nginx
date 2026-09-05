@@ -11,11 +11,37 @@ const host = require('../services/host');
 const cert = require('../services/cert');
 const setup = require('../services/setup');
 const attest = require('../services/setup-attest');
+const portMap = require('../services/port-map');
+const docs = require('../services/docs');
+const changelog = require('../services/changelog');
 const { router: adminRouter } = require('./admin');
 
 const userStore = createUserStore(config.auth);
 
 // --- 로그인 시도 제한 (IP 단위, 인메모리) ---
+//
+// 무엇을 세는가: 틀린 비밀번호(default 분기)와, 처음 보는 이메일로 새 승인
+// 요청을 실제로 만든 경우(대소문자를 안 가리는 signup) 둘 다 recordFailure()
+// 하나로 센다. 후자를 빼놓으면 administrator 테이블에 이메일만 바꿔가며
+// 무제한으로 승인 대기 행을 쌓을 수 있다 — 틀린 비밀번호가 아니라서 잠금에
+// 안 걸렸었다.
+//
+// ── 잠긴 IP는 어떻게 풀리는가 ──────────────────────────────────────────
+//
+// **가만히 두면 자동으로 풀린다.** 사람이 해제할 방법을 따로 두지 않았다.
+//
+//   - 창(window)의 시작은 그 IP의 **첫** 실패/가입 시도 시각(entry.first)이다.
+//   - 그 뒤 LOCKOUT_MS(5분) 안에 MAX_ATTEMPTS(5)번을 채우면 잠긴다.
+//   - 잠긴 뒤에도 시계는 계속 entry.first 기준으로 간다 — 잠긴 동안 더
+//     두드려도 잠금이 늘어나지 않는다. entry.first + 5분이 지나면 다음 확인에서
+//     조용히 지워지고 그 IP는 다시 5번의 기회를 받는다.
+//   - 상태는 프로세스 메모리에만 있다. `pm2 restart manager` 를 하면(예:
+//     설정을 새로 반영할 때) 모든 IP의 잠금이 그 순간 전부 풀린다 — 별도
+//     저장소를 두지 않은 것은 의도적이다: 재부팅마다 다시 잠기는 공격자보다,
+//     실수로 잠긴 관리자가 재시도할 방법이 없는 쪽이 더 나쁘다고 판단했다.
+//
+// 클라이언트에는 남은 시간을 retryAfterSec 로 그대로 알려준다 — "잠시 후"가
+// 정확히 몇 초 뒤인지 화면에서 보여줄 수 있게.
 const MAX_ATTEMPTS = 5;
 const LOCKOUT_MS = 5 * 60 * 1000;
 const attempts = new Map();
@@ -32,6 +58,14 @@ function isLockedOut(key) {
     return false;
   }
   return entry.count >= MAX_ATTEMPTS;
+}
+
+/** 지금부터 몇 초 뒤에 풀리는지. 잠긴 게 아니면 0. */
+function lockoutRemainingSec(key) {
+  const entry = attempts.get(key);
+  if (!entry) return 0;
+  const remainingMs = LOCKOUT_MS - (Date.now() - entry.first);
+  return remainingMs > 0 ? Math.ceil(remainingMs / 1000) : 0;
 }
 
 function recordFailure(key) {
@@ -119,7 +153,12 @@ const EMAIL_RE = /^[^\s@]+@[^\s@.]+(\.[^\s@.]+)+$/;
 router.post('/login', async (req, res) => {
   const key = attemptKey(req);
   if (isLockedOut(key)) {
-    return res.status(429).json({ error: 'too_many_attempts', message: '로그인 시도가 너무 많습니다. 잠시 후 다시 시도하세요.' });
+    const retryAfterSec = lockoutRemainingSec(key);
+    return res.status(429).json({
+      error: 'too_many_attempts',
+      message: `로그인 시도가 너무 많습니다. ${retryAfterSec}초 뒤 다시 시도하세요.`,
+      retryAfterSec,
+    });
   }
 
   const { username, password, passwordConfirm } = req.body || {};
@@ -148,7 +187,13 @@ router.post('/login', async (req, res) => {
     }
 
     case 'pending': {
-      // 승인 대기는 실패 횟수에 넣지 않는다. 아직 자격 증명을 틀린 게 아니다.
+      // 이미 대기 중인 계정으로 다시 로그인해 보는 것은 실패 횟수에 넣지
+      // 않는다 — 자격 증명이 틀린 게 아니다. 다만 **새 승인 요청 행이 방금
+      // 생겼을 때(firstRequest)는 다르다** — 이메일만 바꿔가며 계속 시도하면
+      // administrator 테이블에 무제한으로 행이 쌓일 수 있으므로, 그 경우만
+      // 여기서 같이 센다 (위 "로그인 시도 제한" 설명 참고).
+      if (result.firstRequest) recordFailure(key);
+
       log.info(`Login pending approval: ${email} from ${key}`);
 
       // 비밀번호가 저장됐다는 사실을 반드시 알린다. 이걸 모르면 승인이 난 뒤
@@ -164,6 +209,17 @@ router.post('/login', async (req, res) => {
 
       return res.status(403).json({ error: 'pending_approval', message });
     }
+
+    // administrator 에 승인 대기 행이 너무 많다 — db-user-store.js 의 전역
+    // 상한. 이 IP 탓이 아닐 수 있으므로(다른 IP들이 흘려 쌓았을 수 있다)
+    // recordFailure 는 부르지 않는다 — 잠그는 것은 "가입 자체를 지금 안
+    // 받는다" 는 서버 쪽 판단이지, 이 요청자의 잘못을 세는 것이 아니다.
+    case 'signup_disabled':
+      log.warn(`Signup rejected — too many pending approvals (attempted ${email} from ${key})`);
+      return res.status(503).json({
+        error: 'signup_disabled',
+        message: '지금은 새 계정 요청을 받지 않습니다. 나중에 다시 시도하거나 관리자에게 문의하세요.',
+      });
 
     // 비밀번호가 새로 저장되는 경우다. 확인 입력을 받기 전에는 쓰지 않는다.
     // 자격 증명을 틀린 게 아니므로 실패 횟수에 넣지 않는다.
@@ -221,7 +277,12 @@ router.post('/logout', (req, res) => {
 router.post('/verify-password', requireAuth, async (req, res) => {
   const key = attemptKey(req);
   if (isLockedOut(key)) {
-    return res.status(429).json({ error: 'too_many_attempts', message: '시도가 너무 많습니다. 잠시 후 다시 하세요.' });
+    const retryAfterSec = lockoutRemainingSec(key);
+    return res.status(429).json({
+      error: 'too_many_attempts',
+      message: `시도가 너무 많습니다. ${retryAfterSec}초 뒤 다시 하세요.`,
+      retryAfterSec,
+    });
   }
 
   const password = String(req.body?.password ?? '');
@@ -354,6 +415,53 @@ router.delete('/setup/attest/:stepId', requireAuthOrConsole, (req, res) => {
 
   const removed = attest.remove(step.id);
   res.json({ stepId: step.id, removed });
+});
+
+// RTP·시그널링·내부 HTTP 포트 전체 지도. 공유기를 바꾸거나 포워딩을 다시
+// 확인할 때 보는 화면이다 (docs/port-map.md).
+router.get('/port-map', requireAuth, (req, res, next) => {
+  try {
+    res.json(portMap.build());
+  } catch (err) {
+    next(err);
+  }
+});
+
+// --- 문서 (docs/*.md, 각 서비스의 README.md 등 git 이 추적하는 .md 전부) ---
+//
+// 목록·내용 둘 다 docs.listPaths() 가 매번 다시 만드는 git 추적 목록을
+// 기준으로 한다 — 클라이언트가 보낸 경로를 그 목록에 있는지만 확인하고
+// 읽으므로, 목록에 없는 경로(상위 디렉토리 접근 포함)는 애초에 못 읽는다.
+router.get('/docs', requireAuth, async (req, res, next) => {
+  try {
+    res.json({ files: await docs.list() });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/docs/content', requireAuth, async (req, res, next) => {
+  try {
+    const result = await docs.getContent(String(req.query.path || ''));
+    res.json(result);
+  } catch (err) {
+    if (err instanceof docs.NotFoundError) return res.status(404).json({ error: 'not_found', message: err.message });
+    next(err);
+  }
+});
+
+// --- 변경 이력 (git log) ---
+//
+// scope 는 화면에서 고르는 값만 받는다 — docs / services/<이름>. 그 밖의
+// 값은 changelog.recent() 가 400 으로 거절한다.
+router.get('/changelog', requireAuth, async (req, res, next) => {
+  try {
+    const commits = await changelog.recent({ scope: req.query.scope, limit: req.query.limit });
+    res.json({ commits, scopes: changelog.scopes() });
+  } catch (err) {
+    if (err.code === 'INVALID_SCOPE') return res.status(400).json({ error: 'invalid_scope', message: err.message });
+    next(err);
+  }
 });
 
 router.get('/services/:name/health', requireAuth, async (req, res, next) => {

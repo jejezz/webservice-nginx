@@ -6,6 +6,11 @@
 
 > 이 문서의 경로와 명령은 `webservices/` 루트 기준입니다.
 
+> 이 표는 `node ecosystem.config.js --check` (또는 manager 대시보드의
+> [포트 지도](../docs/port-map.md))가 실시간으로 보여주는 것을 사람이 읽기
+> 좋게 옮겨 적은 것입니다 — 서비스를 추가·제거했다면 표보다 그 명령을
+> 먼저 믿으세요.
+
 ## 관리 대상
 
 | 앱 | 포트 | 위치 | 비고 |
@@ -13,6 +18,9 @@
 | `manager` | 28084 | `services/manager` | 관리 대시보드. nginx `/manager` |
 | `ws-bridge` | 28083 | `services/ws-bridge` | nginx `/ws-bridge/`, 자체 대시보드 `/dashboard` |
 | `stock-analyzer` | 28085 | `services/stock-analyzer` | nginx `/stock-analyzer`. tsx 로 TS 직접 실행 |
+| `kamailio-dashboard` | 28086 | `services/kamailio` | nginx `/kamailio/`. Kamailio 본체는 apt 패키지 + systemd — pm2 대상이 아니다 |
+| `janus-dashboard` | 28087 | `services/janus` | nginx `/janus/`. Janus 본체는 소스 빌드 + 자체 systemd 유닛 — pm2 대상이 아니다 |
+| `coturn-dashboard` | 28092 | `services/coturn` | nginx `/coturn/`. coturn 본체는 apt 패키지 + systemd — kamailio 와 같은 자리, pm2 대상이 아니다 |
 | `route-a` `route-b` `route-c` | 28080·28081·28082 | `services/route-*` | 예제 서비스. nginx 라우트는 꺼 둠(`enabled = false`) |
 | `websocket-relay` | 28099 | `services/websocket-relay` | nginx `/relay/`, 자체 대시보드 `/relay/dashboard`. tsx 로 TS 직접 실행 |
 | `callfusion-v2` | 28091 | `services/callfusion-v2-server` | nginx 라우트 없음 — 포트 직결 |

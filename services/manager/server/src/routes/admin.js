@@ -27,6 +27,14 @@ if (!config.superAdmin.passwordHash && !config.superAdmin.password) {
 }
 
 // --- 로그인 시도 제한 (IP 단위, 인메모리) ---
+//
+// routes/api.js 의 일반 로그인과 같은 자리, 같은 규칙이다 — 계정이 하나뿐인
+// 고정 로그인이라 가입 플로딩 걱정은 없고, 여기서는 창이 10분으로 더 길다
+// (이 콘솔이 administrator 테이블 CRUD 를 통째로 쥐고 있어 더 보수적으로
+// 잡았다). 잠긴 IP가 풀리는 방식은 routes/api.js 의 설명과 완전히 같다 —
+// 사람이 해제할 방법은 없고, 그 IP의 첫 시도로부터 LOCKOUT_MS 가 지나면
+// 자동으로 풀린다. 상태는 프로세스 메모리에만 있어 manager 재시작으로도
+// 전부 풀린다.
 const MAX_ATTEMPTS = 5;
 const LOCKOUT_MS = 10 * 60 * 1000;
 const attempts = new Map();
@@ -43,6 +51,14 @@ function isLockedOut(key) {
     return false;
   }
   return entry.count >= MAX_ATTEMPTS;
+}
+
+/** 지금부터 몇 초 뒤에 풀리는지. 잠긴 게 아니면 0. */
+function lockoutRemainingSec(key) {
+  const entry = attempts.get(key);
+  if (!entry) return 0;
+  const remainingMs = LOCKOUT_MS - (Date.now() - entry.first);
+  return remainingMs > 0 ? Math.ceil(remainingMs / 1000) : 0;
 }
 
 function recordFailure(key) {
@@ -119,9 +135,11 @@ const router = express.Router();
 router.post('/login', (req, res) => {
   const key = attemptKey(req);
   if (isLockedOut(key)) {
+    const retryAfterSec = lockoutRemainingSec(key);
     return res.status(429).json({
       error: 'too_many_attempts',
-      message: '로그인 시도가 너무 많습니다. 잠시 후 다시 시도하세요.',
+      message: `로그인 시도가 너무 많습니다. ${retryAfterSec}초 뒤 다시 시도하세요.`,
+      retryAfterSec,
     });
   }
 

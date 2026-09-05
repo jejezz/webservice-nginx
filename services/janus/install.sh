@@ -52,6 +52,8 @@ API_SECRET_FILE="${SECRETS_DIR}/api-secret"
 #                    비우면 nat_1_1_mapping 없이 LAN 전용으로 설치됩니다.
 #   rtp_port_range   브라우저 ↔ Janus 의 WebRTC 미디어 포트. 공유기에서 이
 #                    범위를 UDP 로 포워딩해야 외부 통화의 소리가 납니다.
+#   sip_rtp_port_range  Janus ↔ Kamailio(SIP) 의 미디어 포트. LAN 안에서만
+#                    오가므로 포워딩 대상이 아닙니다.
 #
 # 파일이 없으면 기본값(LAN 전용 · 20000-20200)으로 설치됩니다.
 # 값이 형식에 맞지 않으면 --apply 가 아무것도 바꾸지 않고 멈춥니다.
@@ -60,6 +62,7 @@ SETTINGS_FILE="${SCRIPT_DIR}/settings.ini"
 # 갈리면 "설치본과 저장한 값이 다르다" 는 거짓 경보가 난다.
 DEFAULT_PUBLIC_IP=""
 DEFAULT_RTP_RANGE="20000-20200"
+DEFAULT_SIP_RTP_RANGE="30000-30200"
 # settings.ini 뼈대를 만드는 공용 도구 (settings-schema.json 을 읽는다).
 SETTINGS_INIT_CMD="node ../../lib/settings.js --init ."
 # 마지막으로 설치한 값. 대시보드가 '적용 대기'를 이걸로 가른다.
@@ -245,6 +248,13 @@ jcfg_rtp_range() {
     # 보면, 실제로는 겹치는데 검사가 통과하는 일이 생긴다.
     if [[ "$file" == "${SCRIPT_DIR}/janus.jcfg" ]]; then
         local configured; configured="$(settings_get rtp_port_range "")"
+        if [[ "$configured" =~ ^([0-9]+)-([0-9]+)$ ]]; then
+            echo "${BASH_REMATCH[1]} ${BASH_REMATCH[2]}"
+            return 0
+        fi
+    fi
+    if [[ "$file" == "${SCRIPT_DIR}/janus.plugin.sip.jcfg" ]]; then
+        local configured; configured="$(settings_get sip_rtp_port_range "")"
         if [[ "$configured" =~ ^([0-9]+)-([0-9]+)$ ]]; then
             echo "${BASH_REMATCH[1]} ${BASH_REMATCH[2]}"
             return 0
@@ -783,18 +793,19 @@ report() {
     info ""
     info "배포 설정 (settings.ini)"
     if [[ ! -r "$SETTINGS_FILE" ]]; then
-        info "  파일이 없어 기본값으로 봅니다 (LAN 전용 · ${DEFAULT_RTP_RANGE})."
+        info "  파일이 없어 기본값으로 봅니다 (LAN 전용 · WebRTC ${DEFAULT_RTP_RANGE} · SIP ${DEFAULT_SIP_RTP_RANGE})."
         info "  값을 넣으려면 뼈대를 만들어 채우세요:  ${SETTINGS_INIT_CMD}"
         info "  (구축 마법사 /manager/setup 의 폼도 같은 파일을 씁니다)"
     fi
     if [[ -r "$APPLIED_FILE" ]]; then
         local key saved applied fallback
-        for key in public_ip rtp_port_range sip_local_ip lan_iface; do
+        for key in public_ip rtp_port_range sip_rtp_port_range sip_local_ip lan_iface; do
             # 키가 없으면 --apply 가 쓴 것과 같은 기본값으로 친다. 빈 값으로
             # 비교하면 settings.ini 가 없는 장비에서 언제나 어긋나 보인다.
             case "$key" in
-                public_ip)      fallback="$DEFAULT_PUBLIC_IP" ;;
-                rtp_port_range) fallback="$DEFAULT_RTP_RANGE" ;;
+                public_ip)          fallback="$DEFAULT_PUBLIC_IP" ;;
+                rtp_port_range)     fallback="$DEFAULT_RTP_RANGE" ;;
+                sip_rtp_port_range) fallback="$DEFAULT_SIP_RTP_RANGE" ;;
                 # 이 둘은 settings.ini 에 없으면 감지한 값이 곧 설치될 값이다.
                 sip_local_ip)   fallback="$SIP_LOCAL_IP" ;;
                 lan_iface)      fallback="$LAN_IFACE" ;;
@@ -928,9 +939,10 @@ apply() {
     #
     # 대시보드가 이 파일을 고칠 수 있으므로 **여기서 반드시 다시 검증한다.**
     # 대시보드를 우회해 손으로 고친 경우에도 같은 관문을 지나게 하려는 것이다.
-    local public_ip rtp_range
+    local public_ip rtp_range sip_rtp_range
     public_ip="$(settings_get public_ip "")"
     rtp_range="$(settings_get rtp_port_range "$DEFAULT_RTP_RANGE")"
+    sip_rtp_range="$(settings_get sip_rtp_port_range "$DEFAULT_SIP_RTP_RANGE")"
 
     if [[ -n "$public_ip" ]]; then
         [[ "$public_ip" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] \
@@ -949,6 +961,15 @@ apply() {
     (( rlo < rhi ))        || die "settings.ini 의 rtp_port_range 는 시작이 끝보다 작아야 합니다: ${rtp_range}"
     (( rlo >= 1024 && rhi <= 65535 )) || die "settings.ini 의 rtp_port_range 는 1024~65535 안이어야 합니다: ${rtp_range}"
     info "  WebRTC 미디어 포트: ${rtp_range}"
+
+    [[ "$sip_rtp_range" =~ ^[0-9]{4,5}-[0-9]{4,5}$ ]] \
+        || die "settings.ini 의 sip_rtp_port_range 형식이 맞지 않습니다 (예: 30000-30200): ${sip_rtp_range}"
+    local slo="${sip_rtp_range%-*}" shi="${sip_rtp_range#*-}"
+    (( slo < shi ))        || die "settings.ini 의 sip_rtp_port_range 는 시작이 끝보다 작아야 합니다: ${sip_rtp_range}"
+    (( slo >= 1024 && shi <= 65535 )) || die "settings.ini 의 sip_rtp_port_range 는 1024~65535 안이어야 합니다: ${sip_rtp_range}"
+    ranges_overlap "$rlo" "$rhi" "$slo" "$shi" \
+        && die "rtp_port_range(${rtp_range}) 와 sip_rtp_port_range(${sip_rtp_range}) 가 겹칩니다"
+    info "  SIP 미디어 포트: ${sip_rtp_range}"
 
     # 값을 보여 주면서 바꾸는 법을 말하지 않으면, 읽는 사람은 그것이 고칠 수 있는
     # 값인지조차 알 수 없다. 대시보드가 아직 안 떠 있는 자리라서 더 그렇다.
@@ -1017,6 +1038,9 @@ apply() {
             # SIP 쪽 SDP 에 실릴 주소. 이것이 이 장비의 LAN 주소가 아니면
             # 시그널링은 되고 소리만 안 난다 (계획서 ③).
             sed -i "s|^\([[:space:]]*local_ip[[:space:]]*=[[:space:]]*\)\".*\"|\1\"${SIP_LOCAL_IP}\"|" "$target"
+
+            # 미디어 포트 범위 — janus.jcfg 와 같은 이유로 값을 덮어쓴다.
+            sed -i "s|^\([[:space:]]*rtp_port_range[[:space:]]*=[[:space:]]*\)\"[0-9]\{1,\}-[0-9]\{1,\}\"|\1\"${sip_rtp_range}\"|" "$target"
         fi
         info "  설치: ${target} (${mode})"
     done
@@ -1030,6 +1054,7 @@ apply() {
         echo "; install.sh --apply 가 마지막으로 설치한 값. 손으로 고치지 마세요."
         echo "public_ip = ${public_ip}"
         echo "rtp_port_range = ${rtp_range}"
+        echo "sip_rtp_port_range = ${sip_rtp_range}"
         echo "sip_local_ip = ${SIP_LOCAL_IP}"
         echo "lan_iface = ${LAN_IFACE}"
     } > "$APPLIED_FILE"

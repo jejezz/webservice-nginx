@@ -40,6 +40,7 @@ services/coturn/
 │   └── plan.md             ★ 계획서 — ICE 실패 진단과 결정 사항
 │
 ├── install.sh               ①②③ 점검 / 패키지·설정 설치 / 되돌리기   (sudo 필요한 동작만)
+├── setup-dashboard.sh        대시보드 점검·빌드 (sudo 불필요) — janus/setup-dashboard.sh 와 같은 자리
 ├── turnserver.conf           /etc/turnserver.conf 로 설치될 원본 (자리표시자 포함)
 ├── settings-schema.json      장비마다 다른 값의 정의 (커밋함)
 ├── settings.ini              그 값 — 공인 IP · realm · 포트 범위 (커밋하지 않음)
@@ -76,7 +77,7 @@ services/coturn/
 | **0** | 사전 조건 — Janus | `services/janus` 가 이미 세워져 있어야 공인 IP 를 물려받습니다 | `services/janus/install.sh` |
 | **1** | 이 장비의 값 | 기본값으로 충분하면 건너뛰어도 됨. 필요하면 `--init` 로 뼈대 | `./install.sh` |
 | **2** | 설정 · 패키지 | `sudo ./install.sh --apply` | `systemctl status coturn` |
-| **3** | 대시보드 빌드 | `cd web && npm install && npm run build` | `ls web/dist/index.html` |
+| **3** | 대시보드 빌드 | `./setup-dashboard.sh --build` | `./setup-dashboard.sh` |
 | **4** | pm2 등록 | `cd ../../pm2 && ./restart.sh --restart` | `pm2 list` 에 `online` |
 | **5** | nginx 라우트(대시보드만) | `sudo ../../nginx/install_nginx_stack.sh --skip-install` | `/coturn/dashboard` |
 | **6** | 공유기 포트 포워딩 | UDP+TCP 3478, UDP 49160-49560 | 밖에서 `stun`/`turn` 진단 도구로 확인 |
@@ -139,13 +140,19 @@ sudo ./install.sh --apply -y      # 확인 없이 진행
 ## 3. 대시보드 빌드
 
 ```bash
-cd web && npm install && npm run build
+./setup-dashboard.sh --build   # server/web 의존성 설치 + 프런트 빌드 + 점검까지
+./setup-dashboard.sh           # 점검만 (sudo 불필요, 아무것도 바꾸지 않음)
+./setup-dashboard.sh --json    # 구축 마법사·점검 규약 형식 (docs/check-contract.md)
 ```
 
 `node_modules/` 와 `web/dist/` 는 커밋하지 않으므로 이 저장소를 처음 받은
 곳에서는 반드시 한 번 돌려야 합니다. 빠뜨리면 4 단계에서 화면이 대시보드
 경로에 503 을 냅니다 (`/health` 는 정상이며 `details.dashboardBuilt` 가
-`false` 로 알려 줍니다).
+`false` 로 알려 줍니다) — `setup-dashboard.sh` 가 바로 그 항목을 짚어 줍니다.
+
+janus·kamailio 와 같은 자리의 스크립트입니다 — 다만 이 대시보드는 janus.js
+같은 외부 클라이언트 라이브러리를 받아 올 일도, 특별한 그룹 권한도 없어서
+의존성·빌드·프로세스·`/health` 만 봅니다.
 
 ## 4. pm2 등록
 
@@ -278,12 +285,12 @@ sudo ./install.sh --apply
 
 3 단계(대시보드 빌드)를 건너뛴 것입니다. `web/dist` 뿐 아니라
 `server/node_modules` 도 커밋하지 않으므로, 저장소를 처음 받은 장비에서는
-둘 다 준비해야 합니다.
+둘 다 준비해야 합니다. `./setup-dashboard.sh` 로 무엇이 빠졌는지 먼저 보고,
+`--build` 로 한 번에 채우세요.
 
 ```bash
-cd server && npm install
-cd ../web && npm install && npm run build
-cd ../../../pm2 && ./restart.sh --restart
+./setup-dashboard.sh --build
+cd ../../pm2 && ./restart.sh --restart
 ```
 
 ## T-4. 공인 IP 경고가 계속 뜸

@@ -42,6 +42,32 @@ export default function Login() {
   // 못 가져와도 로그인은 되어야 하므로 실패는 조용히 넘긴다.
   const [host, setHost] = useState(null);
 
+  // IP 잠금 카운트다운. lockedUntil 은 절대 시각(ms) — 서버가 준 retryAfterSec
+  // 을 여기서 한 번만 시각으로 바꾸고, 그 뒤로는 이 값과 지금 시각의 차이로만
+  // 화면을 갱신한다. 서버 응답 문자열을 그대로 두면 숫자가 멈춰 있으므로,
+  // 매초 다시 계산해 보여준다.
+  const [lockedUntil, setLockedUntil] = useState(null);
+  const [lockRemaining, setLockRemaining] = useState(0);
+
+  useEffect(() => {
+    if (!lockedUntil) {
+      setLockRemaining(0);
+      return undefined;
+    }
+    const tick = () => {
+      const remaining = Math.max(0, Math.ceil((lockedUntil - Date.now()) / 1000));
+      setLockRemaining(remaining);
+      // 다 됐으면 잠금 자체를 지운다 — 사람이 다시 시도할 필요 없이 버튼이
+      // 저절로 풀린다 (서버 쪽도 같은 시각에 자동으로 풀린다 — routes/api.js).
+      if (remaining <= 0) setLockedUntil(null);
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [lockedUntil]);
+
+  const locked = lockRemaining > 0;
+
   useEffect(() => {
     let cancelled = false;
     api.host()
@@ -69,6 +95,7 @@ export default function Login() {
 
   async function handleSubmit(e) {
     e.preventDefault();
+    if (locked) return; // 버튼이 이미 막혀 있지만, 엔터로 제출하는 경로도 있다.
     setError('');
     setNotice('');
     // 서버도 검사하지만, 여기서 걸러내면 왕복 한 번을 아낀다.
@@ -90,6 +117,15 @@ export default function Login() {
       }
       navigate('/dashboard', { replace: true });
     } catch (err) {
+      // IP 잠금. 카운트다운은 이 값으로만 그리므로 error/notice 는 건드리지
+      // 않는다 — 입력한 값도 지우지 않는다(틀려서가 아니라 너무 자주 보내서다).
+      if (err.code === 'too_many_attempts') {
+        if (typeof err.retryAfterSec === 'number' && err.retryAfterSec > 0) {
+          setLockedUntil(Date.now() + err.retryAfterSec * 1000);
+        }
+        return;
+      }
+
       // 비밀번호가 저장되기 직전이다. 확인 입력을 받기 위해 칸을 하나 더 연다.
       // 이때는 입력한 비밀번호를 지우지 않는다 — 다시 치게 하면 확인의 의미가 없다.
       if (err.code === 'password_confirm_required') {
@@ -194,7 +230,7 @@ export default function Login() {
                   required
                   value={username}
                   onChange={handleUsernameChange}
-                  disabled={submitting}
+                  disabled={submitting || locked}
                 />
               </div>
 
@@ -208,7 +244,7 @@ export default function Login() {
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  disabled={submitting}
+                  disabled={submitting || locked}
                 />
               </div>
 
@@ -224,28 +260,40 @@ export default function Login() {
                     required
                     value={passwordConfirm}
                     onChange={(e) => setPasswordConfirm(e.target.value)}
-                    disabled={submitting}
+                    disabled={submitting || locked}
                   />
                 </div>
               )}
 
-              {error && (
-                <Alert variant="destructive">
-                  <AlertCircle />
-                  <AlertDescription>{error}</AlertDescription>
-                </Alert>
-              )}
-
-              {notice && (
-                <Alert>
+              {locked ? (
+                <Alert variant="warning">
                   <Clock />
-                  <AlertDescription>{notice}</AlertDescription>
+                  <AlertDescription>
+                    시도가 너무 많습니다. <span className="font-mono font-semibold">{lockRemaining}초</span> 뒤 다시
+                    시도할 수 있습니다.
+                  </AlertDescription>
                 </Alert>
+              ) : (
+                <>
+                  {error && (
+                    <Alert variant="destructive">
+                      <AlertCircle />
+                      <AlertDescription>{error}</AlertDescription>
+                    </Alert>
+                  )}
+
+                  {notice && (
+                    <Alert>
+                      <Clock />
+                      <AlertDescription>{notice}</AlertDescription>
+                    </Alert>
+                  )}
+                </>
               )}
 
-              <Button type="submit" className="w-full" disabled={submitting}>
+              <Button type="submit" className="w-full" disabled={submitting || locked}>
                 {submitting && <Loader2 className="animate-spin" />}
-                로그인
+                {locked ? `${lockRemaining}초 뒤 다시 시도` : '로그인'}
               </Button>
             </form>
           </CardContent>
