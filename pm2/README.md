@@ -22,7 +22,6 @@
 | `janus-dashboard` | 28087 | `services/janus` | nginx `/janus/`. Janus 본체는 소스 빌드 + 자체 systemd 유닛 — pm2 대상이 아니다 |
 | `coturn-dashboard` | 28090 | `services/coturn` | nginx `/coturn/`. coturn 본체는 apt 패키지 + systemd — kamailio 와 같은 자리, pm2 대상이 아니다 |
 | `stock-analyzer` | 28085 | `services/stock-analyzer` | nginx `/stock-analyzer`. tsx 로 TS 직접 실행 |
-| `route-a` `route-b` `route-c` | 28080·28081·28082 | `services/route-*` | 예제 서비스. nginx 라우트는 꺼 둠(`enabled = false`) |
 | `websocket-relay` | 28099 | `services/websocket-relay` | nginx `/relay/`, 자체 대시보드 `/relay/dashboard`. tsx 로 TS 직접 실행 |
 | `nginx` | 80/443 | — | ❌ pm2 아님. systemd 가 유지 |
 

@@ -148,7 +148,6 @@ node pm2/ecosystem.config.js --check
 
 | 서비스 | pm2-conf 에서 주의할 점 |
 |---|---|
-| `route-a` `route-b` `route-c` | `cwd` 없이 `script = index.js` 만. 가장 단순 |
 | `ws-bridge` | `DASHBOARD_PATH = /dashboard` |
 | `manager` | `cwd = server`, `script = src/index.js` |
 | `stock-analyzer` | `cwd = server`, `interpreter = server/node_modules/.bin/tsx`, `max_memory_restart = 512M`. 지금 로그를 절대 경로로 적어 둔 이유(cwd 가 `server` 라 `./logs` 가 흩어짐)는 로그 기본값이 `pm2/logs/` 로 통일되면서 사라집니다 |

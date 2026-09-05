@@ -79,7 +79,6 @@ manager 는 하위 호환을 위해 `healthy` / `up` / `pass` / `ready` / `green
 
 | 서비스 | 포트 | 결과 |
 |---|---|---|
-| `route-a` `route-b` `route-c` | 28080·28081·28082 | ✅ 규약대로 |
 | `ws-bridge` | 28083 | ✅ 규약대로. `details` 에 세션·연결 수, 프로토콜 |
 | `manager` | 28084 | ✅ 규약대로 |
 | `websocket-relay` | 28099 | ✅ 규약대로. `details` 에 방·연결 수, DB·푸시 상태 |

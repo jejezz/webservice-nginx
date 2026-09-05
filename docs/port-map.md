@@ -40,7 +40,6 @@ nginx·MariaDB·Kamailio·rtpproxy(rtpengine)·Janus·coturn·websocket-relay �
 
 | 서비스 | 포트 |
 |---|---|
-| route-a / route-b / route-c | 28080 / 28081 / 28082 |
 | manager | 28084 |
 | stock-analyzer | 28085 |
 | kamailio-dashboard | 28086 |
@@ -50,7 +49,7 @@ nginx·MariaDB·Kamailio·rtpproxy(rtpengine)·Janus·coturn·websocket-relay �
 | web-cassini (apartment-mgmt-server-node) | 28093 |
 | websocket-relay | 28099 |
 
-새 서비스를 추가할 때 이 블록에서 비어 있는 번호(28083·28088·28089·28091·28094-28098)를 쓰면 됩니다 — [service-rollout.md](service-rollout.md)의 순서를 그대로 따르세요.
+새 서비스를 추가할 때 이 블록에서 비어 있는 번호(28080-28083·28088·28089·28091·28094-28098)를 쓰면 됩니다 — [service-rollout.md](service-rollout.md)의 순서를 그대로 따르세요.
 
 ## 4. 공유기 포트 포워딩 체크리스트
 

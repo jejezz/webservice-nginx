@@ -128,7 +128,7 @@ WARN    my-service    28090   pm2-conf PORT=28090 vs nginx-conf ports=28091
 
 ```
 Error: duplicate location '/my-service/'
-  services/route-a/nginx-conf/service.ini
+  services/janus/nginx-conf/service.ini
   services/my-service/nginx-conf/service.ini
 ```
 

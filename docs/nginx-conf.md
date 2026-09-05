@@ -41,7 +41,7 @@ health_path = /health
 | `enabled` | `true` | `false` 면 라우트를 만들지 않습니다 (서비스를 잠시 내릴 때) |
 
 `enabled = false` 는 **선언을 지우지 않고 라우트만 끄는** 수단입니다.
-지금 `nginx.ini` 에서 `;` 로 주석 처리해 둔 `route-a/b/c` 가 여기에 해당합니다.
+서비스를 잠시 내리되 선언은 남겨 두고 싶을 때 씁니다.
 
 ## `[route:*]`
 
