@@ -330,7 +330,7 @@ ranges_overlap() {
 # 포트를 듣고 있는 주소. 없으면 빈 문자열.
 listen_addr() {
     local port="$1"
-    ss -lnt 2>/dev/null | awk -v p=":${port}" '$4 ~ p"$" { print $4; exit }'
+    ss -lnt 2>/dev/null | awk -v p=":${port}" '$4 ~ p"$" { print $4; exit }' || true
 }
 
 # 템플릿이 어느 .sample 에서 갈라져 나왔는지. 머리 주석의 derived-from-sample.
