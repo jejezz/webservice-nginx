@@ -11,6 +11,9 @@ const path = require('path');
 module.exports = {
   SERVICE_NAME: 'coturn-dashboard',
 
+  // pm2-conf/dashboard.ini 의 PORT 가 항상 이 값을 덮어쓰므로 아래 숫자는
+  // pm2 없이 직접 띄울 때만 쓰이는 최후의 기본값이다 — ../../settings.ini 의
+  // dashboard_port 와 맞춰 둔다(자동으로 읽어 오지는 않는다).
   PORT: parseInt(process.env.PORT, 10) || 28090,
   // Nginx 가 127.0.0.1 로 프록시하므로 루프백에만 묶는다.
   HOST: process.env.HOST || '127.0.0.1',

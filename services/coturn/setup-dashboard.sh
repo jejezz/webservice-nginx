@@ -16,7 +16,24 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_NAME="coturn-dashboard"
-DASHBOARD_PORT=28090
+
+# 장비마다 다른 값은 settings.ini 에 있다 (settings-schema.json 참고).
+# install.sh 의 settings_get 과 같은 관용구 — 이 스크립트는 install.sh 를
+# 거치지 않으므로(대시보드는 install.sh 의 범위 밖) 따로 읽는다.
+SETTINGS_FILE="${SCRIPT_DIR}/settings.ini"
+settings_get() {
+    local key="$1" fallback="${2:-}" v=""
+    if [[ -r "$SETTINGS_FILE" ]]; then
+        v="$(sed -n "s/^[[:space:]]*${key}[[:space:]]*=[[:space:]]*\\(.*\\)$/\\1/p" "$SETTINGS_FILE" | tail -1)"
+        v="${v%%[;#]*}"
+    fi
+    v="${v//[[:space:]]/}"
+    echo "${v:-$fallback}"
+}
+# 실제로 이 포트에서 뜨려면 nginx-conf/dashboard.ini 의 ports·pm2-conf/
+# dashboard.ini 의 PORT 도 같은 값이어야 한다 — 여기서는 점검할 값만 읽는다.
+DASHBOARD_PORT="$(settings_get dashboard_port 28092)"
+
 # 점검 출력은 공용 규약을 따른다 (docs/check-contract.md).
 source "${SCRIPT_DIR}/../../lib/check-report.sh"
 

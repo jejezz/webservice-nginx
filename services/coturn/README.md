@@ -110,6 +110,7 @@ node ../../lib/settings.js --init .     # services/coturn 에서 (sudo 불필요
 | `realm` | `site/settings.ini` 의 `host`, 그것도 없으면 `turn.local` | `turnserver.conf` 의 `realm=` |
 | `relay_port_range` | `49160-49560` | `turnserver.conf` 의 `min-port`·`max-port` |
 | `listening_port` | `3478` | `turnserver.conf` 의 `listening-port=` |
+| `dashboard_port` | `28092` | `setup-dashboard.sh` 의 점검이 읽는 값. **`install.sh --apply` 가 반영하지 않습니다** — 실제로 그 포트에서 뜨려면 `nginx-conf/dashboard.ini` 의 `ports` 와 `pm2-conf/dashboard.ini` 의 `PORT` 도 손으로 같은 값으로 맞춰야 합니다 |
 
 `static_auth_secret` 은 여기 없습니다 — 사람이 입력하는 값이 아니라
 `install.sh --apply` 가 자동으로 만듭니다 (아래 2 단계).

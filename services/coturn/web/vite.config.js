@@ -20,6 +20,7 @@ export default defineConfig({
   server: {
     port: 5192,
     proxy: {
+      // ../settings.ini 의 dashboard_port 와 맞춰 둔다 (dev 서버 전용 값).
       '/coturn/dashboard/api': 'http://127.0.0.1:28090',
     },
   },
