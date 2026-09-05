@@ -325,6 +325,8 @@ node pm2/ecosystem.config.js --check-json
 | `services/kamailio/install.sh` | `kamailio.config` | ✅ |
 | `services/kamailio/check-accounts.sh` | `sip.accounts` | ✅ 확인 전용 |
 | `services/kamailio/check-push.sh` | `push.incoming` | ✅ 확인 전용 |
+| `services/coturn/install.sh` | `coturn.config` | ✅ |
+| `services/coturn/setup-dashboard.sh` | `coturn.dashboard` | ✅ |
 | `database/check-database.sh` | `database.schema` | ✅ 확인 전용 |
 | `nginx/install_nginx_stack.sh` | `nginx.routes` | ✅ (생성기가 낸다) |
 | `pm2/ecosystem.config.js` | `pm2.apps` | ✅ **`--check-json`** (위 예외) |
