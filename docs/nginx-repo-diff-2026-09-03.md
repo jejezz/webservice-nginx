@@ -39,6 +39,11 @@ websocket-relay 수정)은 없다.
 
 ## 2. 대시보드 로그인: 비밀번호 오타가 "세션 만료" 로 둔갑해 조용히 로그인 화면으로 튕긴다
 
+> ✅ **처리됨** (`webservices` 커밋 `13b862b` 비밀번호 오타를 세션 만료가
+> 아니라 403 으로 돌려준다). `reauth.ts`·`web/src/lib/api.js` 모두
+> `webservices-nginx` 와 바이트 단위로 같다 — 이 절은 조사 당시 기록으로
+> 남겨 둔다.
+
 - **위치**: `services/websocket-relay/src/auth/reauth.ts` (`verifyPassword`)
 - **webservices-nginx 커밋**: 없음(파일명 기준 단독 커밋 확인 안 됨, `websocket-relay` 편입 시점에 포함된 것으로 보임) — `git log -p` 로 직접 확인 필요
 
