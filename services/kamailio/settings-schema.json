@@ -72,6 +72,17 @@
       "pattern": "^\\d{1,3}(\\.\\d{1,3}){3}$",
       "patternHint": "IPv4 (예: 125.242.8.15)",
       "effect": "rtpengine.conf 의 interface 가 '바인딩주소!광고주소' 가 됩니다. 비우면 바인딩 주소만 씁니다 (LAN 전용)."
+    },
+    {
+      "key": "media_relay",
+      "label": "미디어 릴레이 강제 (보통 비워 둠)",
+      "help": "비워 두면 이 장비에 실제로 깔린 것을 자동으로 씁니다 (rtpengine 22.04에는 rtpproxy, 24.04에는 rtpengine — bootstrap.sh --install 이 이 판에 맞는 것을 고릅니다). 둘 다 깔려 있는 등 자동 판단이 애매할 때만 채우세요.",
+      "placeholder": "rtpengine",
+      "optional": true,
+      "type": "text",
+      "pattern": "^(rtpengine|rtpproxy)?$",
+      "patternHint": "rtpengine 또는 rtpproxy (비우면 자동 감지)",
+      "effect": "kamailio-local.cfg 의 WITH_RTPENGINE define 여부가 됩니다. 이 장비에 실제로 깔린 것과 다른 값을 강제하면 Kamailio 는 기동하지만 통화 때 미디어가 붙지 않습니다 — install.sh 의 점검이 어긋남을 잡습니다."
     }
   ]
 }

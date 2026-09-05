@@ -328,9 +328,16 @@ NAT 뒤로 판정**합니다. 그래서 사실상 모든 통화의 RTP 가 릴�
 #!define WITH_RTPENGINE     # 있으면 rtpengine, 지우면 rtpproxy
 ```
 
-> ⚠️ 이 define 과 실제로 깔린 데몬이 어긋나면 **Kamailio 는 정상적으로 기동하고**
-> 통화 때만 미디어가 붙지 않습니다. `./install.sh` 의 "미디어 릴레이" 절이 둘을
-> 맞춰 봅니다.
+**이 define 은 손으로 고치지 않습니다.** `kamailio-local.cfg`(저장소에
+커밋된 원본)는 이 자리를 `__RTPENGINE_TOGGLE__` 자리표시자로 두고, `sudo
+./install.sh --apply` 가 이 장비에 실제로 깔린 것(`relay_kind`)을 보고
+주석 여부를 채웁니다 — 22.04 든 24.04 든 **같은 원본 파일**을 그대로 씁니다.
+자동 판단이 애매할 때만(예: 둘 다 깔아 둔 시험 장비) `settings.ini` 의
+`media_relay` 로 강제합니다.
+
+> ⚠️ `media_relay` 로 강제한 값과 실제로 깔린 데몬이 어긋나면 **Kamailio 는
+> 정상적으로 기동하고** 통화 때만 미디어가 붙지 않습니다. `./install.sh` 의
+> "미디어 릴레이" 절이 둘을 맞춰 봅니다.
 
 `kamailio-websocket.cfg` 도 같은 `WITH_NAT` 을 켭니다 (5 단계를 했다면 설치돼
 있습니다). 그래서 양쪽 다 `#!ifndef` 로 감쌌습니다 — 그러지 않으면 둘 다 깔린

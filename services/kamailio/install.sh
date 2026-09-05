@@ -110,6 +110,10 @@ MEDIA_PORT_RANGE="$(settings_get media_port_range '10200-19999')"
 # 브라우저가 Janus 로 붙으므로 비워 둔다 (LAN 전용).
 MEDIA_PUBLIC_IP="$(settings_get media_public_ip '')"
 
+# 비워 두면 이 장비에 실제로 깔린 것(relay_kind, 아래)을 자동으로 따라간다.
+# 둘 다 깔려 있는 등 자동 판단이 애매할 때만 강제로 채운다.
+MEDIA_RELAY_OVERRIDE="$(settings_get media_relay '')"
+
 # WS 오버라이드가 WITH_NAT 을 감싸지 않은 옛 판인가.
 #
 # 그 파일은 setup-websocket.sh 가 소유하므로 이 스크립트가 고치지 않는다.
@@ -136,6 +140,17 @@ relay_unit() {
         systemctl list-unit-files "${u}.service" &>/dev/null && { echo "$u"; return; }
     done
     echo ""
+}
+
+# 실제로 kamailio-local.cfg 에 쓸 값. MEDIA_RELAY_OVERRIDE 를 강제했으면
+# 그 값, 아니면 이 장비에 깔린 것(relay_kind). 둘 다 없으면 빈 문자열 —
+# write_local_cfg 이전에 bootstrap.sh --install 이 먼저 있어야 한다.
+resolved_relay() {
+    if [[ -n "$MEDIA_RELAY_OVERRIDE" ]]; then
+        echo "$MEDIA_RELAY_OVERRIDE"
+    else
+        relay_kind
+    fi
 }
 
 # shellcheck source=../../database/lib_mariadb.sh
@@ -264,6 +279,12 @@ validate_settings() {
         SETTINGS_PROBLEMS+=("media_public_ip 가 IPv4 로 보이지 않습니다: ${MEDIA_PUBLIC_IP}")
     fi
 
+    if [[ -n "$MEDIA_RELAY_OVERRIDE" && "$MEDIA_RELAY_OVERRIDE" != "rtpengine" && "$MEDIA_RELAY_OVERRIDE" != "rtpproxy" ]]; then
+        SETTINGS_PROBLEMS+=("media_relay 는 rtpengine 이나 rtpproxy 여야 합니다(비우면 자동 감지): ${MEDIA_RELAY_OVERRIDE}")
+    elif [[ -z "$(resolved_relay)" ]]; then
+        SETTINGS_PENDING+=("이 장비에 rtpengine 도 rtpproxy 도 깔려 있지 않습니다 — sudo ./bootstrap.sh --install")
+    fi
+
     [[ ${#SETTINGS_PROBLEMS[@]} -eq 0 && ${#SETTINGS_PENDING[@]} -eq 0 ]]
 }
 
@@ -278,13 +299,15 @@ report_settings_pending() {
     }
 
     local key saved applied
-    for key in sip_domain sip_listen_addr sip_push_url media_port_range media_public_ip; do
+    for key in sip_domain sip_listen_addr sip_push_url media_port_range media_public_ip media_relay; do
         # **원본 파일이 아니라 실제로 쓰이는 값**과 비교한다. sip_domain 처럼
         # 사이트에서 오는 값은 이 서비스의 settings.ini 가 비어 있는 것이
-        # 정상이라, 파일만 보면 "안 채웠다" 로 잘못 읽는다.
+        # 정상이라, 파일만 보면 "안 채웠다" 로 잘못 읽는다. media_relay 도
+        # 비워 두는 것이 정상이라(자동 감지) resolved_relay() 의 결과와 비교한다.
         case "$key" in
             sip_domain)       saved="$SIP_DOMAIN" ;;
             media_port_range) saved="$MEDIA_PORT_RANGE" ;;
+            media_relay)      saved="$(resolved_relay)" ;;
             *)                saved="$(settings_get "$key" '')" ;;
         esac
         applied="$(sed -n "s/^[[:space:]]*${key}[[:space:]]*=[[:space:]]*\(.*\)$/\1/p" "$APPLIED_FILE" | tail -1)"
@@ -388,6 +411,9 @@ report() {
         -n 's%^alias=.*%alias=«%' \
         -n 's%^listen=\(udp\|tcp\):.*%listen=\1:«%' \
         -n 's%^#!define SIP_PUSH_URL .*%#!define SIP_PUSH_URL «%' \
+        -n 's%^\(__RTPENGINE_TOGGLE__\|#\)\{0,1\}#!ifndef WITH_RTPENGINE%«%' \
+        -n 's%^\(__RTPENGINE_TOGGLE__\|#\)\{0,1\}#!define WITH_RTPENGINE%«%' \
+        -n 's%^\(__RTPENGINE_TOGGLE__\|#\)\{0,1\}#!endif%«%' \
         "$LOCAL_CFG" "$TEMPLATE" \
         || problems=$((problems + 1))
 
@@ -399,25 +425,23 @@ report() {
 
     info ""
     info "미디어 릴레이"
-    # kamailio-local.cfg 의 define 과 실제로 깔린 데몬이 어긋나면, Kamailio 는
-    # 기동하지만 통화 때 미디어가 붙지 않는다. 그 어긋남을 여기서 잡는다.
+    # kamailio-local.cfg 의 WITH_RTPENGINE 은 이제 install.sh --apply 가
+    # resolved_relay() 를 보고 채운다(손으로 고치는 자리가 아니다). 여기서는
+    # 그 결과가 이 장비에 실제로 깔린 것과 맞는지만 본다 — media_relay 를
+    # 강제했는데 그 데몬이 없는 경우가 유일한 실패 자리다.
     local kind unit ustate declared
     kind="$(relay_kind)"
     unit="$(relay_unit)"
-    declared=rtpproxy
-    if grep -q '^[[:space:]]*#!define[[:space:]][[:space:]]*WITH_RTPENGINE' "$TEMPLATE" 2>/dev/null; then
-        declared=rtpengine
-    fi
-    if [[ -z "$kind" ]]; then
+    declared="$(resolved_relay)"
+    if [[ -z "$declared" ]]; then
         warn "릴레이 데몬이 없습니다 — 통화 때 미디어가 붙지 않습니다"
         warn "  sudo ./bootstrap.sh --install  (이 판에 있는 것을 골라 설치합니다)"
         problems=$((problems + 1))
     elif [[ "$kind" != "$declared" ]]; then
-        warn "설정은 ${declared} 를 쓰는데 이 장비에 깔린 것은 ${kind} 입니다"
-        warn "  kamailio-local.cfg 의 WITH_RTPENGINE — 있으면 rtpengine, 없으면 rtpproxy"
+        warn "settings.ini 의 media_relay 가 ${declared} 를 강제하는데 이 장비에 깔린 것은 ${kind:-없음} 입니다"
         problems=$((problems + 1))
     else
-        ok "${kind} — 설정과 같습니다 (kamailio.cfg 의 WITH_RTPENGINE 분기)"
+        ok "${kind} — 다음 --apply 에 이 값으로 kamailio-local.cfg 를 씁니다"
         if [[ -n "$unit" ]]; then
             ustate="$(systemctl is-active "$unit" 2>/dev/null || echo inactive)"
             if [[ "$ustate" == active ]]; then
@@ -630,11 +654,23 @@ write_local_cfg() {
     local password="$1"
     local dburl="mysql://${DB_USER}:${password}@${DB_HOST}/${DB_NAME}"
 
+    # rtpengine 이면 주석을 풀고(빈 접두어), rtpproxy 면 한 글자 더 주석 처리한다
+    # (##!ifndef 처럼) — kamailio-local.cfg 의 __RTPENGINE_TOGGLE__ 세 줄이 대상.
+    local relay rtpengine_prefix
+    relay="$(resolved_relay)"
+    [[ -n "$relay" ]] || die "이 장비에 rtpengine 도 rtpproxy 도 깔려 있지 않습니다. 먼저: sudo ./bootstrap.sh --install"
+    if [[ "$relay" == "rtpengine" ]]; then
+        rtpengine_prefix=""
+    else
+        rtpengine_prefix="#"
+    fi
+
     backup "$LOCAL_CFG"
     sed -e "s|__DBURL__|${dburl}|" \
         -e "s|__SIP_DOMAIN__|${SIP_DOMAIN}|" \
         -e "s|__SIP_LISTEN_ADDR__|${SIP_LISTEN_ADDR}|" \
         -e "s|__SIP_PUSH_URL__|${SIP_PUSH_URL}|" \
+        -e "s|^__RTPENGINE_TOGGLE__|${rtpengine_prefix}|" \
         "$TEMPLATE" > "$LOCAL_CFG"
 
     # 치환이 남김없이 됐는지 확인한다.
@@ -792,6 +828,7 @@ apply() {
             echo "sip_push_url = ${SIP_PUSH_URL}"
             echo "media_port_range = ${MEDIA_PORT_RANGE}"
             echo "media_public_ip = ${MEDIA_PUBLIC_IP}"
+            echo "media_relay = $(resolved_relay)"
         } > "$APPLIED_FILE"
         chmod 644 "$APPLIED_FILE"
         info "  적용 기록: ${APPLIED_FILE}"
