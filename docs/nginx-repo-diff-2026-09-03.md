@@ -1,5 +1,12 @@
 # `webservices` ↔ `webservices-nginx` 차이 (2026-09-03 조사)
 
+> ✅ **2026-09-05 기준 전부 처리 완료.** 아래 여섯 항목 모두 `webservices`
+> 쪽에 동등한 커밋이 이미 들어가 있고, `services/websocket-relay` 전체를
+> 다시 `diff -rq` 로 비교해도 남는 차이는 레포 이름을 일반화한 주석
+> 문구(`src/health.ts`, `example/android/okhttp/models/RelayHealth.java`)
+> 뿐이다 — 코드 차이는 없다. 각 항목에 실제로 반영된 `webservices` 커밋을
+> 달아 뒀다. 이 문서는 조사 당시 기록으로 남겨 둔다.
+
 두 저장소는 근본적으로 같은 프로젝트이고 대부분 이미 합쳐졌다. `diff -rq` 로
 전체를 비교한 결과, **코드 차이는 `services/websocket-relay` 와
 `site/settings-schema.json` 뿐**이었다 — kamailio·janus·manager·android 쪽은
@@ -10,10 +17,15 @@
 websocket-relay 수정)은 없다.
 
 고치는 작업은 하지 않았다 — 아래는 무엇을, 왜, 어떻게 옮길지의 기록이다.
+(→ 위 처리 완료 표시 참고 — 실제로는 이후 모두 반영됐다.)
 
 ---
 
 ## 1. (보안) 모바일 단말이 동/호를 바꿔도 재승인 없이 통과한다
+
+> ✅ **처리됨** (`webservices` 커밋 `caa193f` 단말 등록에서 동/호가 바뀌면
+> 갱신이 아니라 재승인으로 다룬다). `enrollment.ts` 가 `webservices-nginx`
+> 와 바이트 단위로 같다.
 
 - **위치**: `services/websocket-relay/src/libs/enrollment.ts` (`requestEnrollment`)
 - **webservices-nginx 커밋**: `4a34a41` 단말 등록에서 동/호가 바뀌면 갱신이 아니라 재승인으로 다룬다
@@ -67,6 +79,10 @@ websocket-relay 수정)은 없다.
 
 ## 3. 대시보드 다이얼로그: 입력 중 초점이 튀어 타이핑이 끊긴다
 
+> ✅ **처리됨** (`webservices` 커밋 `176cf90` 다이얼로그 초점 이동이
+> `onOpenChange` 의존성 때문에 타이핑을 끊었다). `dialog.jsx` 가
+> `webservices-nginx` 와 바이트 단위로 같다.
+
 - **위치**: `services/websocket-relay/web/src/components/ui/dialog.jsx`
 - **웹 컴포넌트 버그** — SIP 프록시 기능과 무관하게 모든 다이얼로그(단지 ID
   변경 등)에 영향
@@ -89,6 +105,10 @@ effect 안에 "열리면 첫 입력칸으로 초점 이동"이 들어 있어서,
 ---
 
 ## 4. 단지 ID 설정 전에 등록된 월패드 행이 나중에 중복 생성될 수 있다
+
+> ✅ **처리됨** (`webservices` 커밋 `c47e354` 월패드 upsert 가 단지
+> 미설정 시절의 주인 없는 행을 인수하게 한다). `homenetRecord.ts` 가
+> `webservices-nginx` 와 바이트 단위로 같다.
 
 - **위치**: `services/websocket-relay/src/libs/homenetRecord.ts`
 - **webservices-nginx 커밋**: `cebe5b9` 월패드 upsert 가 단지 미설정 시절의 주인 없는 행을 인수하게 한다
@@ -113,6 +133,10 @@ upsert 를 그대로 돌린다.
 
 ## 5. pm2 개발 실행 선언이 실제로 동작한 적 없는 값으로 남아 있다
 
+> ✅ **처리됨** (`webservices` 커밋 `e555a56` websocket-relay pm2 선언을
+> 실물(dist+node)에 맞춘다). `pm2-conf/app.ini` 가 `webservices-nginx` 와
+> 바이트 단위로 같다.
+
 - **위치**: `services/websocket-relay/pm2-conf/app.ini`
 - **webservices-nginx 커밋**: `cbb855c` websocket-relay pm2 선언을 실물(dist+node)에 맞춘다
 
@@ -135,6 +159,10 @@ ESM 으로 실행되어 `__dirname` 을 쓰는 `config.ts`/`siteSettings.ts`/
 ---
 
 ## 6. (신규 기능) SIP 프록시(Kamailio) 주소를 앱에 알려 주는 경로 전체가 없다
+
+> ✅ **처리됨** (`webservices` 커밋 `d864e77` 등록 응답에 단지별 SIP
+> 프록시(Kamailio) 주소를 싣는다). 아래 파일 목록 전부 `webservices-nginx`
+> 와 바이트 단위로 같다.
 
 - **webservices-nginx 커밋**: `9db3b47` 등록 응답에 단지별 SIP 프록시(Kamailio) 주소를 싣는다
 - **관련 파일** (전부 `webservices` 쪽에 없음):
