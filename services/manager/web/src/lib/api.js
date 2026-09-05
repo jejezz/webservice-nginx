@@ -12,6 +12,8 @@ export class ApiError extends Error {
     // 같은 code 안에서 상황을 더 나눌 때 쓴다.
     // (예: password_confirm_required 의 signup / reset)
     this.reason = data?.reason;
+    // too_many_attempts 에서만 온다 — 로그인 화면이 카운트다운을 보여줄 때 쓴다.
+    this.retryAfterSec = data?.retryAfterSec;
   }
 }
 
